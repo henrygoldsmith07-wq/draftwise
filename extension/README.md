@@ -1,21 +1,36 @@
 # Draftwise browser extension
 
-This is a dependency-free Chrome / Edge Manifest V3 extension. It detects `textarea`, text inputs, and `contenteditable` fields, skips password fields, debounces analysis, and mounts its UI inside a closed Shadow DOM so host-page CSS does not leak in.
+The extension is a dependency-light Chrome/Edge Manifest V3 build. It provides local writing checks inside textareas, text inputs, and contenteditable fields, with optional BYOK AI.
 
-## Install locally
+## Build and install
+
+From the repository root:
+
+```bash
+npm install
+npm run extension:build
+```
+
+Then:
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable Developer mode.
-3. Choose **Load unpacked**.
-4. Select this `extension/` folder.
-5. Open the extension’s **Details → Extension options** to add an optional OpenAI-compatible endpoint, model, and API key.
+3. Choose **Load unpacked** and select this `extension/` folder.
+4. Open the extension’s options page.
+5. Grant access only to the sites where you want Draftwise to run.
 
-The local analyzer works without a key. AI is off by default. API keys are stored in extension storage only and are never included in the repository.
+The generated `shared-analysis.js` and `shared-provider.js` bundles are checked in so the folder can be loaded directly. Rebuild them after changing `packages/grammar`, `packages/analysis`, or `packages/ai`.
+
+## Security boundary
+
+- Local rules run in `content.js` through `shared-analysis.js`.
+- The content script sends text, goals, style, and a request ID to the service worker only when AI is enabled.
+- `background.js` reads the provider key from extension storage and calls the provider through `shared-provider.js`. The key is never sent back to the page.
+- The manifest avoids permanent `<all_urls>` permission. HTTP(S) host access is optional and user-granted.
+- Provider strings are inserted with `textContent`; the extension does not render provider output as HTML.
 
 ## Safety behavior
 
-- Password, hidden, disabled, and read-only fields are skipped.
-- Text is analyzed after a 520 ms debounce.
-- Only the changed neighborhood is sent when AI is enabled.
-- Previous AI requests are aborted when the field changes.
-- Site exclusions and “disable on this site” are stored locally.
+Draftwise skips passwords, hidden fields, payment details, one-time codes, authentication/credential fields, disabled fields, read-only fields, excluded sites, and fields individually disabled by the user. Requests are debounced, stale per-field requests are ignored, and accepted replacements verify that the original text still matches before editing.
+
+AI requests send the current field’s changed/context text to the configured provider. The provider’s own retention and training policies apply. Do not use the extension for secrets or highly sensitive content.

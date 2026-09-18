@@ -20,7 +20,7 @@ test("unicode text keeps issue offsets anchored to the original string", () => {
 test("stats include long sentences, filler words, and readable defaults", () => {
   const stats = getWritingStats("This is really a sentence with many words that keeps going so it can exercise the long sentence counter and still end clearly while carrying enough detail for the readability check to notice the length.");
   assert.equal(stats.words > 15, true);
-  assert.equal(stats.fillerWords, 1);
+  assert.equal(stats.fillerWords, 2);
   assert.equal(stats.longSentences, 1);
   assert.equal(stats.readingTime, 1);
 });

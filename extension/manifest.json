@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Local-first writing checks and optional BYOK suggestions inside text fields.",
   "minimum_chrome_version": "110",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "action": {
     "default_title": "Draftwise settings"
@@ -16,12 +16,5 @@
     "page": "options.html",
     "open_in_tab": true
   },
-  "content_scripts": [
-    {
-      "matches": ["https://*/*", "http://*/*"],
-      "exclude_matches": ["*://chrome.google.com/*", "*://chromewebstore.google.com/*"],
-      "js": ["shared-analysis.js", "content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  "host_permissions": []
 }

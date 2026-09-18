@@ -21,6 +21,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run type-check
       - run: npm test
-      - run: npm run test:extension
       - run: npm run lint
+      - run: npm run extension:build
+      - run: git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
       - run: npm run build
+      - run: git diff --exit-code

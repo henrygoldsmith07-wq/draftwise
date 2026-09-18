@@ -13,11 +13,11 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 ## What is included
 
 - Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, writing goals, dark mode, keyboard shortcuts, and local persistence.
-- Local checks for spelling, dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
+- Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
-- Incremental AI analysis: changed-range detection, context expansion, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
-- Preview-first rewrites with local fallback, protected URLs/numbers, and stale-selection checks.
-- Dependency-light Manifest V3 extension. Local rules run in the page; optional AI runs in the service worker so the content script never receives the API key.
+- Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
+- Preview-first rewrites with local fallback, protected URLs, emails, dates, currencies, identifiers, filenames, quoted text, and stale-selection checks. AI alternatives remain previews until chosen.
+- Dependency-light Manifest V3 extension. Dynamic content-script registration runs only on explicitly granted sites; provider-origin access is separately granted to the service worker, and the content script never receives the API key.
 
 ## Run locally
 
@@ -37,8 +37,11 @@ npm run type-check
 npm test
 npm run test:extension
 npm run lint
+npm run extension:build
+git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
 npm run build
 npm run benchmark
+npm run evaluate
 ```
 
 `npm run build` also regenerates `extension/shared-analysis.js` and `extension/shared-provider.js` from the shared TypeScript packages.
@@ -51,7 +54,7 @@ npm run benchmark
 4. Select the repository’s `extension/` folder.
 5. Open Extension options, enable AI only if needed, and grant access only to sites where you want Draftwise to run.
 
-The extension skips passwords, hidden fields, payment fields, one-time codes, authentication fields, disabled fields, read-only fields, and excluded sites. Its UI is isolated in a Shadow DOM and uses DOM text nodes rather than interpolated HTML.
+The extension skips passwords, hidden fields, payment fields, one-time codes, explicit credential fields, disabled fields, read-only fields, and excluded sites. Its UI is isolated in a Shadow DOM and uses DOM text nodes rather than interpolated HTML. Settings separates site grants from provider-origin grants and supports disable/re-enable/revoke actions.
 
 ## Repository map
 
@@ -66,6 +69,7 @@ packages/ai/          Provider adapter, validation, chunk orchestration, rewrite
 extension/            Loadable Manifest V3 browser extension and generated bundles
 docs/                 Architecture, provider contract, privacy, threat model, testing
 tests/                Node regression tests for rules, ranges, providers, persistence, and extension safety
+evaluation/           Small rule-quality corpus and precision/recall report
 ```
 
 Read [docs/architecture.md](docs/architecture.md), [docs/privacy-model.md](docs/privacy-model.md), and [docs/threat-model.md](docs/threat-model.md) before changing the provider or extension boundary.

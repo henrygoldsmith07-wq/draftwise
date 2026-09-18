@@ -30,6 +30,12 @@ export interface AnalysisState {
   error: string | null;
 }
 
+export interface IncrementalAnalysisRanges {
+  previous: { start: number; end: number };
+  next: { start: number; end: number };
+  delta: number;
+}
+
 const DEFAULT_MAX_CHARS = 8_000;
 const DEFAULT_CONTEXT_WINDOW = 320;
 
@@ -74,6 +80,45 @@ export function expandRangeToContext(
   const start = Math.max(0, moveToBoundary(text, Math.max(0, range.start - contextWindow), "left"));
   const end = Math.min(text.length, moveToBoundary(text, Math.min(text.length, range.end + contextWindow), "right"));
   return { ...range, start, end };
+}
+
+function expandToSafeBoundary(text: string, start: number, end: number, contextWindow: number) {
+  const roughStart = Math.max(0, start - contextWindow);
+  const roughEnd = Math.min(text.length, end + contextWindow);
+  const leftMatches = [...text.slice(0, roughStart).matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
+  const left = leftMatches[leftMatches.length - 1];
+  const safeStart = left && left.index !== undefined ? left.index + left[0].length : roughStart;
+  const rightMatch = text.slice(roughEnd).match(/[.!?…](?:\s|$)|\n\s*/u);
+  const safeEnd = rightMatch?.index !== undefined
+    ? Math.min(text.length, roughEnd + rightMatch.index + rightMatch[0].length)
+    : roughEnd;
+  return { start: Math.min(safeStart, start), end: Math.max(safeEnd, end) };
+}
+
+export function getIncrementalAnalysisRanges(
+  previousText: string,
+  nextText: string,
+  changedRange: ChangedRange,
+  contextWindow = DEFAULT_CONTEXT_WINDOW,
+): IncrementalAnalysisRanges {
+  const previous = expandToSafeBoundary(previousText, changedRange.start, changedRange.previousEnd, contextWindow);
+  const next = expandToSafeBoundary(nextText, changedRange.start, changedRange.end, contextWindow);
+  return { previous, next, delta: nextText.length - previousText.length };
+}
+
+export function retainUnaffectedIssues(
+  previousIssues: WritingIssue[],
+  ranges: IncrementalAnalysisRanges,
+  nextText: string,
+) {
+  return previousIssues.flatMap((issue) => {
+    if (issue.start < ranges.previous.end && issue.end > ranges.previous.start) return [];
+    const shift = issue.start >= ranges.previous.end ? ranges.delta : 0;
+    const start = issue.start + shift;
+    const end = issue.end + shift;
+    if (start < 0 || end > nextText.length || nextText.slice(start, end) !== issue.original) return [];
+    return [{ ...issue, start, end }];
+  });
 }
 
 export function createAnalysisChunks(text: string, options: ChunkOptions = {}): AnalysisChunk[] {
@@ -130,7 +175,86 @@ export function mapChunkIssue(issue: WritingIssue, chunk: AnalysisChunk, sourceT
 function issueRank(issue: Pick<WritingIssue, "source" | "severity" | "confidence">) {
   const severity = issue.severity === "high" ? 3 : issue.severity === "medium" ? 2 : 1;
   const source = issue.source === "local" ? 0.1 : 0;
-  return severity + issue.confidence + source;
+  const confidence = Number.isFinite(issue.confidence) ? issue.confidence : 0.5;
+  return severity + confidence + source;
+}
+
+interface RankedIssueEntry {
+  issue: WritingIssue;
+  rank: number;
+  active: boolean;
+  removed: boolean;
+  sequence: number;
+}
+
+interface IntervalTreeNode {
+  entry: RankedIssueEntry;
+  priority: number;
+  maxEnd: number;
+  left: IntervalTreeNode | null;
+  right: IntervalTreeNode | null;
+}
+
+function intervalKeyComesBefore(left: RankedIssueEntry, right: RankedIssueEntry) {
+  return left.issue.start < right.issue.start
+    || (left.issue.start === right.issue.start && (left.issue.end < right.issue.end
+      || (left.issue.end === right.issue.end && left.sequence < right.sequence)));
+}
+
+function intervalPriority(sequence: number) {
+  let value = (sequence + 1) | 0;
+  value ^= value << 13;
+  value ^= value >>> 17;
+  value ^= value << 5;
+  return value >>> 0;
+}
+
+function intervalMaxEnd(node: IntervalTreeNode | null) {
+  return node?.maxEnd ?? Number.NEGATIVE_INFINITY;
+}
+
+function refreshIntervalNode(node: IntervalTreeNode) {
+  node.maxEnd = Math.max(node.entry.issue.end, intervalMaxEnd(node.left), intervalMaxEnd(node.right));
+}
+
+function rotateIntervalRight(node: IntervalTreeNode) {
+  const next = node.left;
+  if (!next) return node;
+  node.left = next.right;
+  next.right = node;
+  refreshIntervalNode(node);
+  refreshIntervalNode(next);
+  return next;
+}
+
+function rotateIntervalLeft(node: IntervalTreeNode) {
+  const next = node.right;
+  if (!next) return node;
+  node.right = next.left;
+  next.left = node;
+  refreshIntervalNode(node);
+  refreshIntervalNode(next);
+  return next;
+}
+
+function insertIntervalNode(root: IntervalTreeNode | null, node: IntervalTreeNode): IntervalTreeNode {
+  if (!root) return node;
+  if (intervalKeyComesBefore(node.entry, root.entry)) {
+    root.left = insertIntervalNode(root.left, node);
+    if (root.left.priority < root.priority) return rotateIntervalRight(root);
+  } else {
+    root.right = insertIntervalNode(root.right, node);
+    if (root.right.priority < root.priority) return rotateIntervalLeft(root);
+  }
+  refreshIntervalNode(root);
+  return root;
+}
+
+function collectOverlappingIntervals(node: IntervalTreeNode | null, start: number, end: number, output: RankedIssueEntry[]) {
+  if (!node || node.maxEnd <= start) return;
+  if (node.left) collectOverlappingIntervals(node.left, start, end, output);
+  if (node.entry.issue.start < end && node.entry.issue.end > start && node.entry.active && !node.entry.removed) output.push(node.entry);
+  if (node.entry.issue.start < end) collectOverlappingIntervals(node.right, start, end, output);
 }
 
 export function mergeAnalysisIssues(issues: WritingIssue[]): WritingIssue[] {
@@ -140,29 +264,44 @@ export function mergeAnalysisIssues(issues: WritingIssue[]): WritingIssue[] {
     .map((item) => ({ ...item, confidence: Math.max(0, Math.min(1, item.confidence ?? 0.5)) }))
     .sort((a, b) => a.start - b.start || b.end - a.end || issueRank(b) - issueRank(a));
 
-  const deduped: WritingIssue[] = [];
-  const keys = new Set<string>();
-  for (const candidate of candidates) {
-    const key = `${candidate.start}:${candidate.end}:${candidate.original.toLocaleLowerCase()}:${candidate.replacement.toLocaleLowerCase()}`;
-    const existingIndex = deduped.findIndex((item) =>
-      item.start === candidate.start &&
-      item.end === candidate.end &&
-      item.original.toLocaleLowerCase() === candidate.original.toLocaleLowerCase(),
-    );
-    if (existingIndex >= 0) {
-      if (issueRank(candidate) > issueRank(deduped[existingIndex])) deduped[existingIndex] = candidate;
-      continue;
+  const entries: RankedIssueEntry[] = [];
+  const exact = new Map<string, RankedIssueEntry>();
+  let intervalTree: IntervalTreeNode | null = null;
+  const isLive = (entry: RankedIssueEntry) => entry.active && !entry.removed;
+  const deactivate = (entry: RankedIssueEntry, remove: boolean) => {
+    entry.active = false;
+    entry.removed ||= remove;
+    const key = `${entry.issue.start}:${entry.issue.end}:${entry.issue.original.toLocaleLowerCase()}`;
+    if (exact.get(key) === entry && remove) exact.delete(key);
+  };
+
+  for (const [sequence, candidate] of candidates.entries()) {
+    const overlapping: RankedIssueEntry[] = [];
+    collectOverlappingIntervals(intervalTree, candidate.start, candidate.end, overlapping);
+    const key = `${candidate.start}:${candidate.end}:${candidate.original.toLocaleLowerCase()}`;
+    const existingExact = exact.get(key);
+    if (existingExact && isLive(existingExact)) {
+      if (issueRank(candidate) > existingExact.rank) {
+        deactivate(existingExact, true);
+      } else {
+        continue;
+      }
     }
-    if (keys.has(key)) continue;
-    const overlapIndex = deduped.findIndex((item) => candidate.start < item.end && candidate.end > item.start);
-    if (overlapIndex >= 0) {
-      if (issueRank(candidate) > issueRank(deduped[overlapIndex])) deduped[overlapIndex] = candidate;
-      continue;
+    const liveOverlapping = overlapping.filter(isLive);
+    const bestOverlap = liveOverlapping.reduce<RankedIssueEntry | null>((best, entry) => !best || entry.rank > best.rank ? entry : best, null);
+    if (bestOverlap) {
+      if (issueRank(candidate) <= bestOverlap.rank) continue;
+      for (const entry of liveOverlapping) deactivate(entry, true);
     }
-    keys.add(key);
-    deduped.push(candidate);
+    const entry: RankedIssueEntry = { issue: candidate, rank: issueRank(candidate), active: true, removed: false, sequence };
+    entries.push(entry);
+    exact.set(key, entry);
+    intervalTree = insertIntervalNode(intervalTree, { entry, priority: intervalPriority(sequence), maxEnd: candidate.end, left: null, right: null });
   }
-  return deduped.sort((a, b) => a.start - b.start || a.end - b.end);
+  return entries
+    .filter((entry) => !entry.removed)
+    .map((entry) => entry.issue)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 export class LruCache<T> {

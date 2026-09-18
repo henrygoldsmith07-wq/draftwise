@@ -5,8 +5,51 @@ import {
   parseAnalysisIssues,
   parseCustomHeaders,
   ProviderError,
+  rewriteWithProvider,
   validateProviderUrl,
 } from "../packages/ai/src/index.ts";
+import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
+
+const settings = {
+  provider: "openai-compatible",
+  baseUrl: "https://example.com/v1",
+  model: "test-model",
+  apiKey: "test-key",
+  temperature: 0.2,
+  maxTokens: 900,
+  customHeaders: "",
+};
+
+const goals = { audience: "general", intent: "inform", tone: "neutral" };
+
+async function runChunkFailureCase(mode) {
+  const originalFetch = globalThis.fetch;
+  const text = Array.from({ length: 6 }, (_, index) => `Section ${index}. ${"context ".repeat(72)} repeatd${index}.`).join("\n\n");
+  const expectedChunks = createAnalysisChunks(text, { maxChars: 500, contextWindow: 0 });
+  assert.ok(expectedChunks.length >= 3);
+  const calls = [];
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    const prompt = payload.messages[1].content;
+    const chunkId = prompt.match(/Text for (chunk-[^:]+):/u)?.[1];
+    const chunkIndex = expectedChunks.findIndex((chunk) => chunk.id === chunkId);
+    const chunkText = prompt.split(/Text for chunk-[^:]+:\n/u)[1] || "";
+    const marker = chunkText.match(/repeatd\d+/u)?.[0];
+    calls.push({ chunkIndex, marker, failed: false });
+    const shouldFail = mode === "all" || (mode === "first" && chunkIndex === 0) || (mode === "middle" && chunkIndex === 1) || (mode === "final" && chunkIndex === expectedChunks.length - 1) || (mode === "multiple" && chunkIndex % 2 === 1);
+    calls[calls.length - 1].failed = shouldFail;
+    if (shouldFail) throw new TypeError("simulated provider failure");
+    const start = marker ? chunkText.indexOf(marker) : -1;
+    const issues = marker && start >= 0 ? [{ start, end: start + marker.length, original: marker, replacement: marker.replace("repeatd", "repeated"), category: "spelling", severity: "high", confidence: 0.99, title: "Spelling", explanation: "Use the standard spelling." }] : [];
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues, tone: ["direct"], scores: {} }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await analyzeWithProvider(text, goals, settings, { maxChunkChars: 500, contextWindow: 0 });
+    return { result, calls, text };
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
 
 test("provider URL validation requires HTTPS except for localhost", () => {
   assert.equal(validateProviderUrl("https://example.com/v1").protocol, "https:");
@@ -45,6 +88,94 @@ test("long-document provider calls keep the full analysed text", async () => {
     assert.ok(calls.length > 1);
     assert.equal(result.analysedText.length, text.length);
     assert.equal(result.stats.words, text.trim().split(/\s+/u).length);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("partial chunk failures preserve the original chunk pairing", async () => {
+  for (const mode of ["middle", "first", "final", "multiple"]) {
+    const { result, calls } = await runChunkFailureCase(mode);
+    const successfulMarkers = calls.filter((call) => !call.failed && call.marker).map((call) => call.marker);
+    for (const marker of successfulMarkers) assert.ok(result.issues.some((issue) => issue.source === "ai" && issue.original === marker), `${mode} lost ${marker}`);
+  }
+});
+
+test("all chunk failures surface an error instead of silently returning mis-mapped AI issues", async () => {
+  await assert.rejects(() => runChunkFailureCase("all"), (error) => error instanceof ProviderError && error.code === "cors");
+});
+
+test("malformed content arrays and huge responses stay safe while local analysis survives", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: [{ unexpected: true }] } }] }), { status: 200 });
+  try {
+    const result = await analyzeWithProvider("This is repeatd.", goals, settings);
+    assert.ok(result.issues.some((issue) => issue.source === "local" && issue.original === "repeatd"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("unsupported response formats retry without replacing local results", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return new Response("response_format is unsupported", { status: 400 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
+  };
+  try {
+    const result = await analyzeWithProvider("This is repeatd.", goals, settings);
+    assert.equal(calls, 2);
+    assert.ok(result.issues.some((issue) => issue.source === "local" && issue.original === "repeatd"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rate limits and invalid provider URLs expose stable error codes", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("slow down", { status: 429 });
+  try {
+    await assert.rejects(() => analyzeWithProvider("A short sentence.", goals, settings), (error) => error instanceof ProviderError && error.code === "rate-limited");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await assert.rejects(() => analyzeWithProvider("A short sentence.", goals, { ...settings, baseUrl: "https://user:pass@example.com/v1" }), (error) => error instanceof ProviderError && error.code === "invalid-url");
+});
+
+test("provider timeout and invalid model are explicit failures", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+  try {
+    await assert.rejects(() => analyzeWithProvider("A short sentence.", goals, settings, { timeoutMs: 1_000 }), (error) => error instanceof ProviderError && error.code === "timeout");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await assert.rejects(() => analyzeWithProvider("A short sentence.", goals, { ...settings, model: "" }), (error) => error instanceof ProviderError && error.code === "invalid-model");
+});
+
+test("rewrite validation protects structured values and supports explicit exceptions", async () => {
+  const originalFetch = globalThis.fetch;
+  const request = { text: "Email a@b.com on 2026-09-18 for £20, see ticket ABC-123 in report.pdf and keep \"this quote\".", instruction: "Make it concise.", goals, allowProtectedChanges: false };
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ replacement: "Email someone and make it concise.", explanation: "Shorter." }) } }] }), { status: 200 });
+  try {
+    await assert.rejects(() => rewriteWithProvider(request, settings), (error) => error instanceof ProviderError && error.code === "invalid-json");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ replacement: "Email someone and make it concise.", alternatives: ["Another version."], explanation: "Shorter." }) } }] }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider({ ...request, allowProtectedChanges: true }, settings);
+    assert.equal(result.alternatives.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ replacement: request.text, alternatives: ["Email someone and change the date."] }) } }] }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider(request, settings);
+    assert.equal(result.replacement, request.text);
+    assert.deepEqual(result.alternatives, []);
   } finally {
     globalThis.fetch = originalFetch;
   }

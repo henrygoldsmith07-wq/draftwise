@@ -1,0 +1,12 @@
+[
+  {"id":"correct-general","kind":"correct","text":"The system stores notes locally and keeps the writer in control.","expected":[]},
+  {"id":"correct-academic","kind":"academic","text":"This study presents evidence from a carefully documented sample and explains the method clearly.","expected":[]},
+  {"id":"correct-professional","kind":"professional","text":"The team will review the project on Friday and share the next steps with the client.","expected":[]},
+  {"id":"correct-casual","kind":"casual","text":"You can send the draft when you're ready, and we can review it together.","expected":[]},
+  {"id":"correct-technical","kind":"technical","text":"The TypeScript service caches the API response and returns a JSON object to the browser.","expected":[]},
+  {"id":"typos-and-punctuation","kind":"incorrect","text":"This is repeatd and recieve the draft!!","expected":[{"ruleId":"spelling-common-typo","category":"spelling"},{"ruleId":"spelling-common-typo","category":"spelling"},{"ruleId":"punctuation-repeated","category":"punctuation"}]},
+  {"id":"agreement-and-determiner","kind":"incorrect","text":"She are ready and the the result is clear.","expected":[{"ruleId":"grammar-subject-verb-agreement","category":"grammar"},{"ruleId":"grammar-duplicate-determiner","category":"grammar"}]},
+  {"id":"wordiness","kind":"professional","text":"We made a decision in order to move forward at this point in time.","expected":[{"ruleId":"wordiness-made-a-decision","category":"conciseness"},{"ruleId":"wordiness-in-order-to","category":"conciseness"},{"ruleId":"wordiness-at-this-point-in-time","category":"conciseness"}]},
+  {"id":"vague-style","kind":"casual","text":"This thing is really interesting and very useful.","expected":[{"ruleId":"clarity-vague-word","category":"clarity"},{"ruleId":"conciseness-filler","category":"conciseness"},{"ruleId":"conciseness-filler","category":"conciseness"}]},
+  {"id":"article","kind":"incorrect","text":"It is a example of an useful tool.","expected":[{"ruleId":"grammar-article-agreement","category":"grammar"},{"ruleId":"grammar-article-agreement","category":"grammar"}]}
+]

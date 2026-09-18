@@ -69,6 +69,7 @@ interface EditorWorkspaceProps {
   onCopyRewrite: () => void;
   onRetryRewrite: () => void;
   onCancelRewrite: () => void;
+  onSelectRewriteAlternative: (index: number) => void;
   onToggleSuggestions: () => void;
   onToggleFocusMode: () => void;
   onNewDocument: () => void;
@@ -150,7 +151,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         ) : null}
 
         {props.rewritePreview ? (
-          <RewritePreview preview={props.rewritePreview} onReplace={() => props.onReplaceRewrite(false)} onInsert={() => props.onReplaceRewrite(true)} onCopy={props.onCopyRewrite} onRetry={props.onRetryRewrite} onCancel={props.onCancelRewrite} />
+          <RewritePreview preview={props.rewritePreview} onReplace={() => props.onReplaceRewrite(false)} onInsert={() => props.onReplaceRewrite(true)} onCopy={props.onCopyRewrite} onRetry={props.onRetryRewrite} onCancel={props.onCancelRewrite} onSelectAlternative={props.onSelectRewriteAlternative} />
         ) : null}
 
         <div className="editor-card">

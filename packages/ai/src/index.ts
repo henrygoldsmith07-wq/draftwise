@@ -47,6 +47,7 @@ const CATEGORY_ALIASES: Record<string, IssueCategory> = {
 };
 
 const VALID_SEVERITIES = new Set<IssueSeverity>(["low", "medium", "high"]);
+const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 interface ProviderIssue {
   start: number;
   end: number;
@@ -75,7 +76,7 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
   if (!isRecord(parsed)) return null;
   const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
   const issues = rawIssues.flatMap((raw): ProviderIssue[] => {
-    if (!isRecord(raw) || typeof raw.start !== "number" || typeof raw.end !== "number" || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string") return [];
+    if (!isRecord(raw) || typeof raw.start !== "number" || !Number.isFinite(raw.start) || typeof raw.end !== "number" || !Number.isFinite(raw.end) || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string") return [];
     return [{
       start: raw.start,
       end: raw.end,
@@ -90,7 +91,7 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
     }];
   });
   const rawScores = isRecord(parsed.scores) ? parsed.scores : {};
-  const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number")) as ProviderPayload["scores"];
+  const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number" && Number.isFinite(score))) as ProviderPayload["scores"];
   return { issues, tone: Array.isArray(parsed.tone) ? parsed.tone.filter((tone): tone is string => typeof tone === "string") : [], scores };
 }
 
@@ -116,7 +117,7 @@ export function parseCustomHeaders(value: string): Record<string, string> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
       Object.entries(parsed)
-        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length)$/iu.test(key))
+        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|set-cookie|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
         .map(([key, item]) => [key, String(item).slice(0, 500)]),
     );
   } catch {
@@ -132,6 +133,9 @@ export function validateProviderUrl(baseUrl: string) {
     throw new ProviderError("invalid-url", "Enter a valid provider URL, including https://.");
   }
   const localHost = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  if (parsed.username || parsed.password || parsed.hash) {
+    throw new ProviderError("invalid-url", "Provider URLs cannot contain credentials or fragments.");
+  }
   if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && localHost)) {
     throw new ProviderError("insecure-url", "Use HTTPS for provider URLs. HTTP is allowed only for localhost development.");
   }
@@ -165,10 +169,18 @@ function parseJsonContent(value: unknown): unknown {
 }
 
 function contentFromPayload(payload: unknown) {
-  const value = payload as { choices?: Array<{ message?: { content?: unknown } }> };
-  const content = value?.choices?.[0]?.message?.content;
-  if (Array.isArray(content)) return content.map((part) => typeof part === "string" ? part : (part as { text?: string }).text ?? "").join("");
-  return content ?? null;
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) return null;
+  const first = payload.choices[0];
+  if (!isRecord(first) || !isRecord(first.message)) return null;
+  const content = first.message.content;
+  if (Array.isArray(content)) {
+    return content.flatMap((part) => {
+      if (typeof part === "string") return [part];
+      if (isRecord(part) && typeof part.text === "string") return [part.text];
+      return [];
+    }).join("");
+  }
+  return typeof content === "string" ? content : null;
 }
 
 function providerErrorForStatus(status: number) {
@@ -182,12 +194,14 @@ async function requestProvider(
   settings: ProviderSettings,
   messages: Array<{ role: "system" | "user"; content: string }>,
   signal?: AbortSignal,
+  timeoutMs = 25_000,
 ) {
   if (!settings.apiKey.trim()) throw new ProviderError("missing-key", "Add an API key in Settings to enable AI suggestions.");
-  if (!settings.model.trim()) throw new ProviderError("invalid-model", "Add a model ID in Settings before enabling AI.");
+  const model = settings.model.trim();
+  if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) throw new ProviderError("invalid-model", "Add a valid model ID in Settings before enabling AI.");
   const endpoint = endpointFor(settings.baseUrl);
   const timeoutController = new AbortController();
-  const timeout = setTimeout(() => timeoutController.abort(), 25_000);
+  const timeout = setTimeout(() => timeoutController.abort(), Math.max(1_000, timeoutMs));
   const cancel = () => timeoutController.abort();
   signal?.addEventListener("abort", cancel, { once: true });
 
@@ -201,7 +215,7 @@ async function requestProvider(
         ...parseCustomHeaders(settings.customHeaders),
       },
       body: JSON.stringify({
-        model: settings.model.trim(),
+        model,
         temperature: Math.max(0, Math.min(1, settings.temperature)),
         max_tokens: Math.max(100, Math.min(4000, settings.maxTokens)),
         ...(includeResponseFormat ? { response_format: { type: "json_object" } } : {}),
@@ -213,9 +227,18 @@ async function requestProvider(
       if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(responseText)) return call(false);
       throw providerErrorForStatus(response.status);
     }
+    const declaredLength = Number(response.headers.get("content-length") || 0);
+    if (declaredLength > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
+    let responseText: string;
+    try {
+      responseText = await response.text();
+    } catch {
+      throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
+    }
+    if (responseText.length > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
     let payload: unknown;
     try {
-      payload = await response.json();
+      payload = JSON.parse(responseText);
     } catch {
       throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
     }
@@ -228,7 +251,7 @@ async function requestProvider(
     if (error instanceof ProviderError) throw error;
     if (signal?.aborted) throw error;
     if (error instanceof DOMException && error.name === "AbortError") throw new ProviderError("timeout", "The provider took too long to respond.");
-    if (error instanceof TypeError) throw new ProviderError("network", "The provider could not be reached. Check the URL and browser network permissions.");
+    if (error instanceof TypeError) throw new ProviderError("cors", "The provider could not be reached. This may be a CORS or network permission issue.");
     throw new ProviderError("unknown", "The provider request failed. Local analysis is still available.");
   } finally {
     clearTimeout(timeout);
@@ -297,7 +320,7 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
   const aiIssues = parseAnalysisIssues(value, sourceText);
   const issues = mergeAnalysisIssues([...local.issues, ...aiIssues]);
   const stats = getWritingStats(sourceText);
-  const scores = scoreWriting(stats, issues, options.goals);
+  const scores = scoreWriting(stats, issues, options.goals, sourceText);
   return {
     analysedText: sourceText,
     issues,
@@ -314,6 +337,8 @@ export interface ProviderAnalysisOptions {
   changedRange?: ChangedRange | null;
   maxChunkChars?: number;
   contextWindow?: number;
+  timeoutMs?: number;
+  localAnalysis?: AnalysisResult;
 }
 
 export async function analyzeWithProvider(
@@ -323,7 +348,7 @@ export async function analyzeWithProvider(
   options: ProviderAnalysisOptions = {},
 ) {
   const preferences = options.preferences;
-  const local = analyzeLocally(text, preferences, goals);
+  const local = options.localAnalysis ?? analyzeLocally(text, preferences, goals);
   const changed = options.changedRange && text.length > options.changedRange.start
     ? expandRangeToContext(text, options.changedRange, options.contextWindow ?? 320)
     : null;
@@ -334,17 +359,19 @@ export async function analyzeWithProvider(
     endOffset: changed?.end,
   });
   if (!chunks.length) return { ...local, analysedText: text, source: "local" as const } satisfies AnalysisResult;
-  const settled = await Promise.allSettled(chunks.map((chunk) => requestProvider(settings, [
-    { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
-    { role: "user", content: analysisPrompt(chunk, goals, preferences) },
-  ], options.signal)));
-  const responses = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-  if (!responses.length) {
+  const settled = await Promise.allSettled(chunks.map(async (chunk) => ({
+    chunk,
+    response: await requestProvider(settings, [
+      { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
+      { role: "user", content: analysisPrompt(chunk, goals, preferences) },
+    ], options.signal, options.timeoutMs),
+  })));
+  const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  if (!successful.length) {
     const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (firstFailure) throw firstFailure.reason;
   }
-  const aiIssues = responses.flatMap((response, index) => {
-    const chunk = chunks[index];
+  const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
       .map((issue) => mapChunkIssue(issue, chunk, text))
       .filter((issue): issue is WritingIssue => Boolean(issue));
@@ -355,7 +382,7 @@ export async function analyzeWithProvider(
     ...local,
     analysedText: text,
     issues,
-    scores: scoreWriting(stats, issues, goals),
+    scores: scoreWriting(stats, issues, goals, text),
     stats,
     source: aiIssues.length ? "local+ai" : "local",
     changedRange: options.changedRange ?? undefined,
@@ -376,13 +403,37 @@ function localRewrite(text: string, instruction: string): string {
 }
 
 function protectedTokens(text: string) {
-  return [...text.matchAll(/https?:\/\/\S+|\b\d[\d,.%]*\b/gu)].map((match) => match[0]);
+  const patterns = [
+    /https?:\/\/[^\s)]+/giu,
+    /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
+    /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4})\b/giu,
+    /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu,
+    /\b\d[\d,.]*%/gu,
+    /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b/giu,
+    /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu,
+    /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu,
+    /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu,
+    /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
+    /\b\d[\d,.]*\b/gu,
+  ];
+  return [...new Set(patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0])))];
 }
 
-function validateRewrite(original: string, replacement: string) {
+function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
+  if (request.allowProtectedChanges) return true;
+  return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
+}
+
+function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
   if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
   if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-  for (const token of protectedTokens(original)) if (!replacement.includes(token)) throw new ProviderError("invalid-json", "The rewrite changed a URL or number. Nothing was changed.");
+  if (!allowProtectedChanges) {
+    for (const token of protectedTokens(original)) {
+      const originalCount = original.split(token).length - 1;
+      const replacementCount = replacement.split(token).length - 1;
+      if (replacementCount < originalCount) throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
+    }
+  }
   return replacement.trim();
 }
 
@@ -391,13 +442,27 @@ export async function rewriteWithProvider(
   settings: ProviderSettings,
   signal?: AbortSignal,
 ): Promise<RewriteResult> {
-  if (!settings.apiKey.trim()) return { replacement: localRewrite(request.text, request.instruction), explanation: "Local rewrite: AI is off, so your text stayed on this device.", source: "local" };
+  if (!settings.apiKey.trim()) return { replacement: localRewrite(request.text, request.instruction), alternatives: [], explanation: "Local rewrite: AI is off, so your text stayed on this device.", source: "local" };
   const response = await requestProvider(settings, [
-    { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","explanation":"..."}. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, and quoted text. Do not add HTML or markdown.` },
+    { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","alternatives":["..."],"explanation":"..."}. Include up to two genuinely different alternatives when useful. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, dates, identifiers, filenames, and quoted text. Do not add HTML or markdown.` },
     { role: "user", content: `Instruction: ${request.instruction}\n\nText to rewrite:\n${request.text}` },
   ], signal);
   const parsed = parseJsonContent(response);
   if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
   const explanation = typeof parsed.explanation === "string" ? parsed.explanation : "";
-  return { replacement: validateRewrite(request.text, parsed.replacement), explanation: explanation.slice(0, 500), source: "ai" };
+  const allowProtectedChanges = explicitlyAllowsProtectedChanges(request);
+  const replacement = validateRewrite(request.text, parsed.replacement, allowProtectedChanges);
+  const alternatives = Array.isArray(parsed.alternatives)
+    ? parsed.alternatives
+      .filter((alternative): alternative is string => typeof alternative === "string" && Boolean(alternative.trim()) && alternative.trim() !== replacement)
+      .slice(0, 2)
+      .flatMap((alternative) => {
+        try {
+          return [validateRewrite(request.text, alternative, allowProtectedChanges)];
+        } catch {
+          return [];
+        }
+      })
+    : [];
+  return { replacement, alternatives, explanation: explanation.slice(0, 500), source: "ai" };
 }

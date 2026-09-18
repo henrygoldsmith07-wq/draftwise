@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { analyzeWithProvider, ProviderError } from "@/packages/ai/src";
 import { detectChangedRange, LruCache, createAnalysisCacheKey } from "@/packages/analysis/src";
-import { analyzeLocally } from "@/packages/grammar/src";
+import { analyzeLocally, analyzeLocallyIncremental } from "@/packages/grammar/src";
 import type { AnalysisResult, ProviderSettings, StylePreferences, WritingGoals } from "@/packages/types/src";
 
 const emptyResult = (text: string, goals: WritingGoals, style: StylePreferences): AnalysisResult => {
@@ -24,36 +24,48 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled }: UseAnal
   const [status, setStatus] = useState<"local" | "analysing" | "ready" | "error">("local");
   const [error, setError] = useState<string | null>(null);
   const previousText = useRef("");
+  const previousAnalysis = useRef<AnalysisResult | null>(null);
   const runId = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const cache = useRef(new LruCache<AnalysisResult>(24));
 
   useEffect(() => {
     const currentRun = ++runId.current;
-    const changedRange = detectChangedRange(previousText.current, text);
+    const beforeText = previousText.current;
+    const beforeAnalysis = previousAnalysis.current;
+    const changedRange = detectChangedRange(beforeText, text);
     previousText.current = text;
-    const local = emptyResult(text, goals, style);
-    setAnalysis({ ...local, changedRange: changedRange ?? undefined });
-    setError(null);
-    setStatus("local");
+    const localBase = beforeAnalysis && changedRange
+      ? analyzeLocallyIncremental(beforeText, text, beforeAnalysis.issues, changedRange, style, goals)
+      : emptyResult(text, goals, style);
+    const local = { ...localBase, analysedText: text, source: "local" as const, changedRange: changedRange ?? undefined };
+    previousAnalysis.current = local;
+    startTransition(() => {
+      setAnalysis(local);
+      setError(null);
+      setStatus("local");
+    });
     abort.current?.abort();
 
     if (!aiEnabled || !settings.apiKey.trim() || !settings.baseUrl.trim() || !settings.model.trim() || !text.trim()) return;
     const cacheKey = createAnalysisCacheKey(text, JSON.stringify({ settings: { baseUrl: settings.baseUrl, model: settings.model }, goals, style }), changedRange);
     const cached = cache.current.get(cacheKey);
     if (cached) {
-      setAnalysis(cached);
-      setStatus("ready");
+      startTransition(() => {
+        setAnalysis(cached);
+        setStatus("ready");
+      });
       return;
     }
     const controller = new AbortController();
     abort.current = controller;
     const timer = window.setTimeout(() => {
       setStatus("analysing");
-      void analyzeWithProvider(text, goals, settings, { signal: controller.signal, preferences: style, changedRange })
+      void analyzeWithProvider(text, goals, settings, { signal: controller.signal, preferences: style, changedRange, localAnalysis: local })
         .then((remote) => {
           if (controller.signal.aborted || currentRun !== runId.current) return;
           cache.current.set(cacheKey, remote);
+          previousAnalysis.current = remote;
           setAnalysis(remote);
           setStatus("ready");
         })

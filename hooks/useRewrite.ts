@@ -48,5 +48,12 @@ export function useRewrite() {
     setPreview(null);
   }, []);
 
-  return { preview, run, cancel };
+  const selectAlternative = useCallback((index: number) => {
+    setPreview((current) => {
+      const alternative = current?.alternatives?.[index];
+      return current && alternative ? { ...current, replacement: alternative } : current;
+    });
+  }, []);
+
+  return { preview, run, cancel, selectAlternative };
 }

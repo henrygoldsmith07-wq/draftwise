@@ -2,7 +2,8 @@
   "use strict";
 
   const grammar = globalThis.DraftwiseGrammar;
-  if (!grammar || typeof grammar.analyzeLocally !== "function") return;
+  const classifier = globalThis.DraftwiseFieldClassifier;
+  if (!grammar || typeof grammar.analyzeLocally !== "function" || !classifier) return;
 
   const settings = {
     excludedSites: [],
@@ -10,11 +11,10 @@
     disabledFields: [],
     aiEnabled: false,
     goals: { audience: "general", intent: "inform", tone: "professional" },
-    style: { dialect: "en-GB", personalDictionary: [], ignoredWords: [], ignoredRuleIds: [], preferredTerminology: {}, oxfordComma: true, allowContractions: true, passiveVoiceSensitivity: "normal", preferredSentenceLength: "balanced", blockedWords: [] },
+    style: { dialect: "en-GB", personalDictionary: [], names: [], ignoredWords: [], ignoredRuleIds: [], preferredTerminology: {}, oxfordComma: true, allowContractions: true, passiveVoiceSensitivity: "normal", preferredSentenceLength: "balanced", blockedWords: [] },
   };
   let activeField = null;
   let activeIssues = [];
-  let previousText = "";
   let scanTimer = 0;
   let requestId = 0;
   let root = null;
@@ -26,32 +26,19 @@
   const siteIsDisabled = () => settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)) || settings.disabledSites.includes(host());
   const fieldSignature = (element) => `${host()}|${element.name || element.id || element.getAttribute("aria-label") || element.tagName}`;
   const fieldIsDisabled = (element) => settings.disabledFields.includes(fieldSignature(element));
-  const fieldMetadata = (element) => [
-    element.type,
-    element.name,
-    element.id,
-    element.getAttribute("autocomplete"),
-    element.getAttribute("aria-label"),
-    element.getAttribute("placeholder"),
-    element.closest("form")?.getAttribute("autocomplete"),
-  ].filter(Boolean).join(" ").toLowerCase();
-  const isSensitive = (element) => {
-    if (!element || element.disabled || element.readOnly || element.hidden || element.getAttribute("aria-hidden") === "true") return true;
-    const type = (element.type || "").toLowerCase();
-    if (["password", "hidden", "submit", "button", "file", "checkbox", "radio"].includes(type)) return true;
-    const autocomplete = (element.getAttribute("autocomplete") || "").toLowerCase();
-    if (["current-password", "new-password", "one-time-code", "cc-number", "cc-csc", "cc-exp", "security-code"].includes(autocomplete)) return true;
-    return /password|passcode|otp|one[- ]time|secret|token|api[-_ ]?key|auth|login|credential|credit[- ]?card|card[- ]?number|cvv|cvc|security[- ]?code|social[- ]?security|ssn|private[- ]?key|pin/iu.test(fieldMetadata(element));
-  };
+  const isSensitive = (element) => classifier.isSensitiveField(element);
   const isEditable = (element) => Boolean(element && !isSensitive(element) && !fieldIsDisabled(element) && (element.matches("textarea, input, [contenteditable=true]")));
   const textOf = (element) => element.isContentEditable ? element.innerText : element.value;
   const issueColor = { spelling: "#e25d70", grammar: "#ef9f55", punctuation: "#8b78e6", repetition: "#d46191", conciseness: "#d8944a", clarity: "#4a9a9d", consistency: "#6a8f68" };
 
-  function localAnalysis(text) {
+  function localAnalysis(text, previous, previousResult) {
     const key = `${text}|${JSON.stringify(settings.style)}`;
     const cached = cache.get(key);
     if (cached) return cached;
-    const result = grammar.analyzeLocally(text, settings.style, settings.goals);
+    const changed = previous !== text && grammar.detectChangedRange ? grammar.detectChangedRange(previous, text) : null;
+    const result = previousResult && changed && typeof grammar.analyzeLocallyIncremental === "function"
+      ? grammar.analyzeLocallyIncremental(previous, text, previousResult.issues || [], changed, settings.style, settings.goals)
+      : grammar.analyzeLocally(text, settings.style, settings.goals);
     cache.set(key, result);
     while (cache.size > 24) cache.delete(cache.keys().next().value);
     return result;
@@ -121,13 +108,15 @@
 
   async function scan(element) {
     if (!isEditable(element) || siteIsDisabled()) return;
-    const text = textOf(element); const previous = element.__draftwiseText || previousText; element.__draftwiseText = text; previousText = text; activeField = element;
-    activeIssues = localAnalysis(text).issues || []; render(); place();
+    const text = textOf(element); const previous = element.__draftwiseText || ""; const previousResult = element.__draftwiseLocalResult || null; element.__draftwiseText = text; activeField = element;
+    const local = localAnalysis(text, previous, previousResult); element.__draftwiseLocalResult = local;
+    activeIssues = local.issues || []; render(); place();
     if (!settings.aiEnabled || !text.trim()) return;
     const currentRequest = ++requestId;
-    const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, previousText: previous, goals: settings.goals, style: settings.style }).catch(() => null);
+    const changedRange = previous !== text && typeof grammar.detectChangedRange === "function" ? grammar.detectChangedRange(previous, text) : null;
+    const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => null);
     if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
-    if (Array.isArray(response.issues)) activeIssues = response.issues;
+    if (Array.isArray(response.issues)) { activeIssues = response.issues; element.__draftwiseLocalResult = { ...local, issues: response.issues }; }
     render(); place();
   }
 

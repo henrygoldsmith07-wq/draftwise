@@ -1,9 +1,11 @@
 (() => {
 const DraftwiseGrammarModule = (() => {
+const { mergeAnalysisIssues } = DraftwiseAnalysisModule;
 
 const DEFAULT_STYLE_PREFERENCES = {
     dialect: "en-GB",
     personalDictionary: [],
+    names: [],
     ignoredWords: [],
     ignoredRuleIds: [],
     preferredTerminology: {},
@@ -41,6 +43,29 @@ const TYPO_FIXES = {
     tommorrow: "tomorrow",
     writen: "written",
 };
+// A compact ranked lexicon keeps the local checker useful in the web app and extension
+// without shipping a multi-megabyte dictionary. Unknown words are only flagged when a
+// high-frequency candidate is within a small edit distance, which avoids name/term noise.
+const SPELLING_FREQUENCY = `
+the be to of and a in that have I it is for not on with he as you do at this but his by from they we say her she or an will my one all would there their what so up out if about who get which go me when make made can like time no just him know take people into year your good some could them see other than then now look only come its over think also back after use two how our work first well way even new want because these give day most us
+thing man world life hand part child eye woman place week case point government company number group problem fact home water room mother area money story month lot right study book job word business issue side kind head house service friend power hour game line end member law car city community name president team minute idea kid body information nothing ago lead social understand whether watch together follow parent stop face anything create late speak read level allow add start change offer remember love help move live believe hold bring happen write provide sit stand lose pay meet include continue set learn turn start show hear play run might should mean keep let begin seem help talk receive
+research evidence analysis method methodology result results finding findings data theory sample study academic article paper source citation references conclusion argument explain explanation question answer describe description compare contrast therefore however while although because process system model example report review draft edit writing writer reader sentence paragraph heading title grammar spelling punctuation clarity concise concise clarity simple direct formal professional general technical audience intent tone quality accurate correct safe private local device browser extension application software code package function variable service provider endpoint request response network timeout error test tests benchmark build release project repository version dependency documentation security privacy permission origin host domain field input form textarea content
+api key token access authentication authorization credential password secret private username login account pin otp cvv cvc card payment currency percent percentage date email url link filename identifier id uuid ticket reference model version openai anthropic google gemini claude llama
+useful helpful careful thoughtful clear strong confident friendly neutral casual formal active passive readable readability engagement consistency terminology preference preferred dictionary ignore ignored names contractions apostrophe hyphen unicode technical vocabulary frequency candidate distance rank
+analyse analysed analysing centre colour favour organise organised organisation recognise travelled behaviour licence
+analyze analyzed analyzing center color favor organize organized organization recognize traveled behavior license
+javascript typescript python java rust go html css json xml sql api sdk npm node react nextjs browser chrome firefox cloudflare worker workers github git commit branch pull request continuous integration deploy deployment server client frontend backend database storage cache worker queue
+quick brown fox jumps lazy dog hello thanks please welcome ready carefully interesting draftwise assistant improve improvement suggestion suggestions accept dismiss rewrite rewrites alternative alternatives document documents text words word you're we're they're don't can't won't isn't it's that's couldn't wouldn't shouldn't
+`.trim().split(/\s+/u);
+const SPELLING_WORDS = new Set(SPELLING_FREQUENCY);
+const SPELLING_INDEX = new Map();
+SPELLING_FREQUENCY.forEach((word) => {
+    const normalized = word.toLocaleLowerCase();
+    const bucket = SPELLING_INDEX.get(normalized.length) ?? [];
+    bucket.push(normalized);
+    SPELLING_INDEX.set(normalized.length, bucket);
+});
+const SPELLING_CACHE = new Map();
 const DIALECT_VARIANTS = {
     analyze: { "en-GB": "analyse", "en-US": "analyze" },
     analyzed: { "en-GB": "analysed", "en-US": "analyzed" },
@@ -66,7 +91,6 @@ const FILLER_WORDS = new Set([
     "perhaps",
     "simply",
     "somewhat",
-    "clearly",
     "obviously",
 ]);
 const WORDINESS = [
@@ -78,6 +102,7 @@ const WORDINESS = [
     ["for the purpose of", "to"],
     ["in close proximity to", "near"],
     ["make a decision", "decide"],
+    ["made a decision", "decided"],
     ["come to a conclusion", "conclude"],
 ];
 const CLICHES = [
@@ -87,7 +112,7 @@ const CLICHES = [
     ["moving forward", "next"],
     ["game changer", "major improvement"],
 ];
-const VAGUE_WORDS = new Set(["thing", "things", "stuff", "somehow", "various", "aspects", "interesting"]);
+const VAGUE_WORDS = new Set(["thing", "things", "stuff", "somehow", "various", "aspects"]);
 const INTENSIFIERS = new Set(["very", "extremely", "incredibly", "totally", "absolutely", "highly"]);
 const VERB_HINTS = new Set([
     "be", "is", "are", "was", "were", "have", "has", "had", "do", "does", "did", "make", "write", "keep",
@@ -103,6 +128,7 @@ function mergePreferences(options = {}) {
         ...DEFAULT_STYLE_PREFERENCES,
         ...options,
         personalDictionary: options.personalDictionary ?? DEFAULT_STYLE_PREFERENCES.personalDictionary,
+        names: options.names ?? DEFAULT_STYLE_PREFERENCES.names,
         ignoredWords: options.ignoredWords ?? DEFAULT_STYLE_PREFERENCES.ignoredWords,
         ignoredRuleIds: options.ignoredRuleIds ?? DEFAULT_STYLE_PREFERENCES.ignoredRuleIds,
         preferredTerminology: options.preferredTerminology ?? DEFAULT_STYLE_PREFERENCES.preferredTerminology,
@@ -118,6 +144,75 @@ function preserveCase(original, replacement) {
         return replacement[0].toUpperCase() + replacement.slice(1);
     return replacement;
 }
+function boundedEditDistance(left, right, limit = 2) {
+    if (Math.abs(left.length - right.length) > limit)
+        return limit + 1;
+    let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let row = 1; row <= left.length; row += 1) {
+        const current = [row];
+        let rowMinimum = current[0];
+        for (let column = 1; column <= right.length; column += 1) {
+            const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+            const value = Math.min(current[column - 1] + 1, previous[column] + 1, previous[column - 1] + cost);
+            current[column] = value;
+            rowMinimum = Math.min(rowMinimum, value);
+        }
+        if (rowMinimum > limit)
+            return limit + 1;
+        previous = current;
+    }
+    return previous[right.length];
+}
+function spellingKey(word, preferences) {
+    return `${preferences.dialect}:${word.toLocaleLowerCase()}`;
+}
+function isKnownSpelling(word, preferences) {
+    const lower = word.toLocaleLowerCase();
+    if (SPELLING_WORDS.has(lower) || TYPO_FIXES[lower] || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase() === lower) || preferences.names?.some((value) => value.toLocaleLowerCase() === lower))
+        return true;
+    const stems = [
+        lower.endsWith("ies") ? lower.slice(0, -3) + "y" : "",
+        lower.endsWith("es") ? lower.slice(0, -1) : "",
+        lower.endsWith("s") ? lower.slice(0, -1) : "",
+        lower.endsWith("ed") ? lower.slice(0, -2) : "",
+        lower.endsWith("ing") ? lower.slice(0, -3) : "",
+    ];
+    if (stems.some((stem) => stem.length >= 3 && SPELLING_WORDS.has(stem)))
+        return true;
+    const parts = lower.split(/[’'-]/u).filter(Boolean);
+    if (parts.length > 1 && parts.every((part) => SPELLING_WORDS.has(part) || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase() === part)))
+        return true;
+    return false;
+}
+function suggestSpelling(word, preferences = {}) {
+    const merged = mergePreferences(preferences);
+    const lower = word.toLocaleLowerCase();
+    const key = spellingKey(word, merged);
+    if (isKnownSpelling(word, merged) || /[^\p{ASCII}]/u.test(word) || /^[A-Z][\p{L}'’-]+$/u.test(word) || /^[A-Z]{2,}[\w-]*$/u.test(word)) {
+        return null;
+    }
+    if (SPELLING_CACHE.has(key))
+        return SPELLING_CACHE.get(key) ?? null;
+    const maxDistance = lower.length >= 8 ? 2 : 1;
+    let best = null;
+    for (let length = Math.max(1, lower.length - maxDistance); length <= lower.length + maxDistance; length += 1) {
+        for (const candidate of SPELLING_INDEX.get(length) ?? []) {
+            if (candidate === lower || candidate[0] !== lower[0])
+                continue;
+            const distance = boundedEditDistance(lower, candidate, maxDistance);
+            if (distance > maxDistance)
+                continue;
+            const rank = SPELLING_FREQUENCY.indexOf(candidate);
+            if (!best || distance < best.distance || (distance === best.distance && rank < best.rank))
+                best = { word: candidate, distance, rank };
+        }
+    }
+    const result = best?.word ?? null;
+    SPELLING_CACHE.set(key, result);
+    if (SPELLING_CACHE.size > 512)
+        SPELLING_CACHE.delete(SPELLING_CACHE.keys().next().value);
+    return result;
+}
 function tokensIn(text, offset = 0) {
     return [...text.matchAll(WORD_PATTERN)].map((match) => ({
         value: match[0],
@@ -126,8 +221,10 @@ function tokensIn(text, offset = 0) {
         end: offset + (match.index ?? 0) + match[0].length,
     }));
 }
-function sentenceSpans(text) {
+function sentenceSpans(text, allTokens) {
     const spans = [];
+    const tokens = allTokens ?? tokensIn(text);
+    let tokenIndex = 0;
     const pattern = /[^.!?…\n]+(?:[.!?…]+|$)/gu;
     for (const match of text.matchAll(pattern)) {
         const raw = match[0];
@@ -139,13 +236,46 @@ function sentenceSpans(text) {
         if (!value)
             continue;
         const end = start + value.length;
-        spans.push({ text: value, start, end, tokens: tokensIn(value, start) });
+        while (tokenIndex < tokens.length && tokens[tokenIndex].end <= start)
+            tokenIndex += 1;
+        const sentenceTokens = [];
+        while (tokenIndex < tokens.length && tokens[tokenIndex].start < end) {
+            sentenceTokens.push(tokens[tokenIndex]);
+            tokenIndex += 1;
+        }
+        spans.push({ text: value, start, end, tokens: sentenceTokens });
     }
     return spans;
 }
+function parseDocument(text) {
+    const tokens = tokensIn(text);
+    const sentences = sentenceSpans(text, tokens);
+    const paragraphs = [];
+    let cursor = 0;
+    let tokenCursor = 0;
+    for (const paragraph of text.split(/\n\s*\n/gu)) {
+        const start = text.indexOf(paragraph, cursor);
+        cursor = Math.max(cursor, start + paragraph.length);
+        if (!paragraph.trim() || start < 0)
+            continue;
+        const end = start + paragraph.length;
+        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= start)
+            tokenCursor += 1;
+        const paragraphTokens = [];
+        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= end) {
+            paragraphTokens.push(tokens[tokenCursor]);
+            tokenCursor += 1;
+        }
+        paragraphs.push({ text: paragraph, start, end, tokens: paragraphTokens });
+    }
+    const frequencies = new Map();
+    for (const token of tokens)
+        frequencies.set(token.lower, (frequencies.get(token.lower) ?? 0) + 1);
+    return { text, tokens, sentences, paragraphs, frequencies };
+}
 function shouldIgnore(ruleId, original, preferences) {
     const lower = original.trim().toLocaleLowerCase();
-    return preferences.ignoredRuleIds.includes(ruleId) || preferences.ignoredWords.some((word) => word.toLocaleLowerCase() === lower) || preferences.personalDictionary.some((word) => word.toLocaleLowerCase() === lower);
+    return preferences.ignoredRuleIds.includes(ruleId) || preferences.ignoredWords.some((word) => word.toLocaleLowerCase() === lower) || preferences.personalDictionary.some((word) => word.toLocaleLowerCase() === lower) || preferences.names?.some((word) => word.toLocaleLowerCase() === lower);
 }
 function makeIssue(ruleId, start, end, original, replacement, category, severity, title, explanation, confidence, preferences) {
     if (!original || end <= start || shouldIgnore(ruleId, original, preferences))
@@ -169,20 +299,21 @@ function pushIssue(target, value) {
     if (value)
         target.push(value);
 }
-function findSpelling(text, preferences) {
+function findSpelling(text, preferences, document = parseDocument(text)) {
     const issues = [];
-    for (const token of tokensIn(text)) {
+    for (const token of document.tokens) {
         const typo = TYPO_FIXES[token.lower];
         const dialect = Object.entries(DIALECT_VARIANTS).find(([, variants]) => token.lower === variants[preferences.dialect].toLocaleLowerCase() || token.lower === variants[preferences.dialect === "en-GB" ? "en-US" : "en-GB"].toLocaleLowerCase());
         const dialectReplacement = dialect && token.lower !== dialect[1][preferences.dialect].toLocaleLowerCase()
             ? dialect[1][preferences.dialect]
             : undefined;
-        const replacement = dialectReplacement ?? typo;
+        const lexicalReplacement = !dialectReplacement && !typo ? suggestSpelling(token.value, preferences) : undefined;
+        const replacement = dialectReplacement ?? typo ?? lexicalReplacement;
         if (!replacement || replacement.toLocaleLowerCase() === token.lower)
             continue;
-        pushIssue(issues, makeIssue(dialectReplacement ? "dialect-spelling" : "spelling-common-typo", token.start, token.end, token.value, preserveCase(token.value, replacement), "spelling", dialectReplacement ? "low" : "high", dialectReplacement ? `Use ${preferences.dialect === "en-GB" ? "British" : "US"} spelling` : `Spelling: ${preserveCase(token.value, replacement)}`, dialectReplacement
+        pushIssue(issues, makeIssue(dialectReplacement ? "dialect-spelling" : typo ? "spelling-common-typo" : "spelling-lexicon", token.start, token.end, token.value, preserveCase(token.value, replacement), "spelling", dialectReplacement ? "low" : typo ? "high" : "medium", dialectReplacement ? `Use ${preferences.dialect === "en-GB" ? "British" : "US"} spelling` : `Spelling: ${preserveCase(token.value, replacement)}`, dialectReplacement
             ? `Your style profile uses ${preferences.dialect === "en-GB" ? "British" : "US"} English. Keep the dialect consistent across the document.`
-            : `“${token.value}” is a common spelling slip. The suggested replacement is “${preserveCase(token.value, replacement)}”.`, dialectReplacement ? 0.86 : 0.99, preferences));
+            : `“${token.value}” is a common spelling slip. The suggested replacement is “${preserveCase(token.value, replacement)}”.`, dialectReplacement ? 0.86 : typo ? 0.99 : 0.88, preferences));
     }
     return issues;
 }
@@ -200,6 +331,47 @@ function findConfusedWords(text, preferences) {
             const wordStart = start;
             pushIssue(issues, makeIssue(ruleId, wordStart, wordStart + original.length, original, preserveCase(original, replacement), "grammar", "medium", "Check the commonly confused word", explanation, 0.78, preferences));
         }
+    }
+    return issues;
+}
+function findPrecisionGrammarIssues(text, preferences, document = parseDocument(text)) {
+    const issues = [];
+    for (const match of text.matchAll(/\b(the|a|an|this|that|my|your)\s+\1\b/giu)) {
+        const start = match.index ?? 0;
+        const duplicate = match[1] ?? "";
+        const duplicateStart = start + match[0].lastIndexOf(duplicate);
+        pushIssue(issues, makeIssue("grammar-duplicate-determiner", duplicateStart, duplicateStart + duplicate.length, duplicate, "", "grammar", "high", "Repeated determiner", "Remove the duplicated determiner so the sentence reads cleanly.", 0.995, preferences));
+    }
+    for (const match of text.matchAll(/\b(a|an)\s+([\p{L}][\p{L}'’-]*)/giu)) {
+        const article = (match[1] ?? "").toLocaleLowerCase();
+        const word = (match[2] ?? "").toLocaleLowerCase();
+        const vowelSoundException = /^(?:uni|use|user|eu|one|once|ou)/u.test(word);
+        const shouldUseAn = /^[aeiou]/u.test(word) && !vowelSoundException;
+        const expected = shouldUseAn ? "an" : "a";
+        if (article === expected)
+            continue;
+        const start = (match.index ?? 0) + (match[0].toLocaleLowerCase().indexOf(article));
+        pushIssue(issues, makeIssue("grammar-article-agreement", start, start + article.length, match[1] ?? article, preserveCase(match[1] ?? article, expected), "grammar", "medium", "Check the article", `Use “${expected}” before “${match[2]}” in this context.`, 0.9, preferences));
+    }
+    const agreementPatterns = [
+        [/\b(he|she|it)\s+(are|were|have|do)\b/giu, { are: "is", were: "was", have: "has", do: "does" }],
+        [/\b(they|we|you)\s+(is|was|has|does)\b/giu, { is: "are", was: "were", has: "have", does: "do" }],
+    ];
+    for (const [pattern, replacements] of agreementPatterns) {
+        for (const match of text.matchAll(pattern)) {
+            const verb = match[2] ?? "";
+            const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+            pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, replacements[verb.toLocaleLowerCase()] ?? verb), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.94, preferences));
+        }
+    }
+    const trimmed = text.trim();
+    const lastSentence = document.sentences[document.sentences.length - 1];
+    const lastToken = document.tokens[document.tokens.length - 1];
+    if (trimmed && lastSentence && lastToken && lastSentence.tokens.length >= 4 && /[\p{L}\p{N})\]]$/u.test(trimmed) && /\s/u.test(lastSentence.text)) {
+        const lastLower = lastToken.lower.split(/[’']/u)[0];
+        const hasVerb = VERB_HINTS.has(lastLower) || lastSentence.tokens.some((token) => /(?:ed|ing|s)$/u.test(token.lower));
+        if (hasVerb)
+            pushIssue(issues, makeIssue("punctuation-missing-terminal", lastToken.start, lastToken.end, lastToken.value, `${lastToken.value}.`, "punctuation", "low", "Add terminal punctuation", "A complete sentence usually ends with punctuation.", 0.82, preferences));
     }
     return issues;
 }
@@ -239,9 +411,9 @@ function findCapitalization(text, preferences) {
     }
     return issues;
 }
-function findRepeatedWordsAndPhrases(text, preferences) {
+function findRepeatedWordsAndPhrases(text, preferences, document = parseDocument(text)) {
     const issues = [];
-    const tokens = tokensIn(text);
+    const tokens = document.tokens;
     for (let index = 1; index < tokens.length; index += 1) {
         const previous = tokens[index - 1];
         const current = tokens[index];
@@ -259,7 +431,7 @@ function findRepeatedWordsAndPhrases(text, preferences) {
         pushIssue(issues, makeIssue("repetition-repeated-phrase", phrase[0].start, next[1].end, text.slice(phrase[0].start, next[1].end), text.slice(phrase[0].start, phrase[1].end), "repetition", "medium", "Repeated phrase", "This short phrase is repeated back-to-back. Keep it once unless the repetition is deliberate.", 0.98, preferences));
     }
     const openings = new Map();
-    for (const sentence of sentenceSpans(text)) {
+    for (const sentence of document.sentences) {
         const opening = sentence.tokens.slice(0, 2).map((token) => token.lower).join(" ");
         if (!opening || opening.length < 4)
             continue;
@@ -274,7 +446,7 @@ function findRepeatedWordsAndPhrases(text, preferences) {
     }
     return issues;
 }
-function findStyleIssues(text, preferences) {
+function findStyleIssues(text, preferences, document = parseDocument(text)) {
     const issues = [];
     for (const [phrase, replacement] of WORDINESS) {
         const pattern = new RegExp(`\\b${phrase.replace(/ /g, "\\s+")}\\b`, "gi");
@@ -290,7 +462,7 @@ function findStyleIssues(text, preferences) {
             pushIssue(issues, makeIssue(`style-cliche-${phrase.replace(/ /g, "-")}`, start, start + match[0].length, match[0], replacement, "word choice", "low", "Possible cliché", "This familiar phrase may be less precise than a concrete alternative.", 0.72, preferences));
         }
     }
-    for (const token of tokensIn(text)) {
+    for (const token of document.tokens) {
         if (FILLER_WORDS.has(token.lower))
             pushIssue(issues, makeIssue("conciseness-filler", token.start, token.end, token.value, "", "conciseness", "low", "Possible filler word", "Remove it if the sentence keeps its meaning without it.", 0.8, preferences));
         if (VAGUE_WORDS.has(token.lower))
@@ -309,7 +481,7 @@ function findStyleIssues(text, preferences) {
     }
     if (!preferences.allowContractions) {
         const contractions = { "can't": "cannot", "won't": "will not", "don't": "do not", "it's": "it is", "we're": "we are", "you've": "you have" };
-        for (const token of tokensIn(text)) {
+        for (const token of document.tokens) {
             const replacement = contractions[token.lower];
             if (replacement)
                 pushIssue(issues, makeIssue("style-contractions", token.start, token.end, token.value, preserveCase(token.value, replacement), "formality", "low", "Avoid contractions", "Your style profile prefers a more formal register.", 0.9, preferences));
@@ -317,27 +489,26 @@ function findStyleIssues(text, preferences) {
     }
     return issues;
 }
-function findStructureIssues(text, preferences) {
+function findStructureIssues(text, preferences, document = parseDocument(text)) {
     const issues = [];
-    const sentences = sentenceSpans(text);
+    const sentences = document.sentences;
     const sentenceLimit = preferences.preferredSentenceLength === "short" ? 22 : preferences.preferredSentenceLength === "long" ? 45 : 32;
     for (const sentence of sentences) {
         if (sentence.tokens.length > sentenceLimit) {
             pushIssue(issues, makeIssue("structure-long-sentence", sentence.start, sentence.end, sentence.text, "", "sentence structure", "low", "Long sentence", `This sentence has ${sentence.tokens.length} words. Consider splitting it if the ideas compete for attention.`, 0.84, preferences));
         }
-        const hasVerb = sentence.tokens.some((token) => VERB_HINTS.has(token.lower) || /(?:ed|ing|s)$/u.test(token.lower));
+        const hasVerb = sentence.tokens.some((token) => {
+            const base = token.lower.split(/[’']/u)[0];
+            return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base) || /(?:ed|ing|s)$/u.test(token.lower);
+        });
         if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !/[!?]$/u.test(sentence.text)) {
             pushIssue(issues, makeIssue("structure-fragment", sentence.start, sentence.end, sentence.text, "", "sentence structure", "low", "Possible sentence fragment", "This short sentence may be missing a verb. Keep it if the fragment is intentional.", 0.65, preferences));
         }
     }
-    const paragraphs = text.split(/\n\s*\n/gu);
-    let cursor = 0;
-    for (const paragraph of paragraphs) {
-        const start = text.indexOf(paragraph, cursor);
-        cursor = Math.max(cursor, start + paragraph.length);
-        const count = tokensIn(paragraph).length;
+    for (const paragraph of document.paragraphs) {
+        const count = paragraph.tokens.length;
         if (count > 150)
-            pushIssue(issues, makeIssue("structure-long-paragraph", start, start + paragraph.length, paragraph, "", "readability", "low", "Long paragraph", "A shorter paragraph can give the reader a useful pause.", 0.78, preferences));
+            pushIssue(issues, makeIssue("structure-long-paragraph", paragraph.start, paragraph.end, paragraph.text, "", "readability", "low", "Long paragraph", "A shorter paragraph can give the reader a useful pause.", 0.78, preferences));
     }
     const passiveSensitivity = preferences.passiveVoiceSensitivity;
     if (passiveSensitivity !== "off") {
@@ -363,12 +534,12 @@ function frequency(values, limit = 8) {
         .slice(0, limit)
         .map(([value, count]) => ({ value, count }));
 }
-function getWritingStats(text) {
-    const tokens = tokensIn(text);
-    const sentences = sentenceSpans(text);
-    const paragraphs = text.trim() ? text.split(/\n\s*\n/gu).filter((paragraph) => paragraph.trim()).length : 0;
+function getWritingStats(text, document = parseDocument(text)) {
+    const tokens = document.tokens;
+    const sentences = document.sentences;
+    const paragraphs = document.paragraphs.length;
     const sentenceLengths = sentences.map((sentence) => sentence.tokens.length);
-    const paragraphLengths = text.split(/\n\s*\n/gu).filter((paragraph) => paragraph.trim()).map((paragraph) => tokensIn(paragraph).length);
+    const paragraphLengths = document.paragraphs.map((paragraph) => paragraph.tokens.length);
     const words = tokens.length;
     const syllables = tokens.reduce((total, token) => total + countSyllables(token.value), 0);
     const readability = words && sentences.length
@@ -403,8 +574,8 @@ function getWritingStats(text) {
         commonWords,
     };
 }
-function inferTone(text) {
-    const words = tokensIn(text).map((token) => token.lower);
+function inferTone(text, document = parseDocument(text)) {
+    const words = document.tokens.map((token) => token.lower);
     const confident = words.filter((word) => ["clear", "strong", "will", "can", "decisive", "proven"].includes(word)).length;
     const cautious = words.filter((word) => ["might", "maybe", "perhaps", "could", "possibly", "uncertain"].includes(word)).length;
     const direct = words.filter((word) => ["we", "you", "your", "our"].includes(word)).length;
@@ -422,67 +593,153 @@ function inferTone(text) {
 function scoreContribution(score, summary, signals) {
     return { score, summary, signals: signals.slice(0, 4) };
 }
-function scoreWriting(stats, issues, goals) {
+function weightedIssuePenalty(issues, categories, scale) {
+    const categorySet = new Set(categories);
+    return issues.reduce((total, issue) => {
+        if (!categorySet.has(issue.category))
+            return total;
+        const severity = issue.severity === "high" ? 1.8 : issue.severity === "medium" ? 1.1 : 0.45;
+        const confidence = Number.isFinite(issue.confidence) ? Math.max(0, Math.min(1, issue.confidence)) : 0.5;
+        return total + severity * confidence * scale;
+    }, 0);
+}
+function goalAlignmentEstimate(text, stats, goals) {
+    if (!goals || !stats.words)
+        return goals ? 60 : 0;
+    const lower = text.toLocaleLowerCase();
+    const markerScore = (markers) => markers.reduce((count, marker) => count + (lower.includes(marker) ? 1 : 0), 0);
+    const audienceMarkers = {
+        academic: ["research", "evidence", "study", "analysis", "method", "findings", "citation"],
+        professional: ["project", "client", "team", "recommend", "next step", "deliver", "decision"],
+        technical: ["system", "data", "api", "function", "configuration", "implementation", "test", "code"],
+        casual: ["you", "we", "feel", "really", "thanks", "can't", "won't"],
+        general: ["because", "example", "help", "important", "should", "can"],
+    };
+    const intentMarkers = {
+        inform: ["is", "are", "fact", "according", "includes"],
+        explain: ["because", "means", "example", "how", "why", "therefore"],
+        persuade: ["should", "recommend", "benefit", "need", "best", "must"],
+        describe: ["looks", "contains", "shows", "appears", "located", "includes"],
+        story: ["then", "suddenly", "before", "after", "felt", "said", "walked"],
+    };
+    const toneMarkers = {
+        neutral: ["may", "can", "typically", "usually"],
+        confident: ["will", "can", "proven", "clear", "recommend"],
+        friendly: ["you", "we", "help", "thanks", "please"],
+        professional: ["recommend", "project", "review", "next step", "available"],
+        formal: ["therefore", "however", "shall", "regarding", "accordingly"],
+        casual: ["really", "just", "we", "you", "can't", "won't"],
+    };
+    const audience = Math.min(24, markerScore(audienceMarkers[goals.audience]) * 4);
+    const intent = Math.min(24, markerScore(intentMarkers[goals.intent]) * 4);
+    const tone = Math.min(24, markerScore(toneMarkers[goals.tone]) * 4);
+    const formalityPenalty = goals.tone === "formal" && stats.fillerWords ? Math.min(12, stats.fillerWords * 2) : 0;
+    return clamp(46 + audience + intent + tone - formalityPenalty);
+}
+function engagementEstimate(text, stats) {
+    if (!stats.words)
+        return 0;
+    const words = tokensIn(text).map((token) => token.lower);
+    const directWords = words.filter((word) => ["you", "your", "we", "our", "us"].includes(word)).length;
+    const directness = Math.min(15, (directWords / Math.max(1, stats.words)) * 100);
+    const sentenceVariety = Math.min(10, new Set(stats.sentenceLengths).size * 1.5);
+    const questions = (text.match(/[?]/gu) ?? []).length;
+    const activeSignal = Math.max(0, 8 - stats.passiveVoicePercentage * 0.08);
+    const repetitionPenalty = Math.min(12, stats.repeatedWords.length * 1.5);
+    return clamp(54 + directness + Math.min(15, stats.vocabularyDiversity * 24) + sentenceVariety + Math.min(8, questions * 2) + activeSignal - repetitionPenalty);
+}
+function scoreWriting(stats, issues, goals, text = "") {
     const high = issues.filter((item) => item.severity === "high").length;
     const medium = issues.filter((item) => item.severity === "medium").length;
-    const low = issues.filter((item) => item.severity === "low").length;
-    const correctness = clamp(100 - high * 10 - medium * 4 - low * 1.2);
-    const clarity = clamp(96 - stats.longSentences * 4 - stats.passiveVoice * 3 - issues.filter((item) => item.category === "clarity").length * 3);
-    const conciseness = clamp(96 - stats.fillerWords * 3 - issues.filter((item) => item.category === "conciseness").length * 2 - Math.max(0, stats.words - 260) / 12);
-    const readability = clamp(stats.readability || (stats.words ? 65 : 0));
-    const engagement = clamp(70 + (inferTone(stats.longestSentence).includes("confident") ? 12 : 0) + Math.min(12, stats.vocabularyDiversity * 20));
-    const consistency = clamp(100 - issues.filter((item) => item.category === "consistency" || item.category === "spelling").length * 4 - stats.repeatedWords.length * 2);
-    const goalAlignment = goals ? clamp(84 - (goals.tone === "formal" && stats.fillerWords > 0 ? 8 : 0) - (goals.audience === "academic" && stats.passiveVoice > 3 ? 3 : 0)) : 84;
+    const hasText = stats.words > 0;
+    const correctness = hasText ? clamp(100 - weightedIssuePenalty(issues, ["spelling", "grammar", "punctuation", "capitalization"], 7.5)) : 0;
+    const clarity = hasText ? clamp(96 - weightedIssuePenalty(issues, ["clarity", "sentence structure", "passive voice"], 4.2) - Math.max(0, stats.averageSentenceLength - 24) * 1.3 - stats.passiveVoicePercentage * 0.12) : 0;
+    const conciseness = hasText ? clamp(98 - weightedIssuePenalty(issues, ["conciseness", "repetition", "word choice"], 3.2) - (stats.fillerWords / Math.max(1, stats.words)) * 180) : 0;
+    const readabilityBase = Number.isFinite(stats.readability) ? stats.readability : (hasText ? 65 : 0);
+    const readability = hasText ? clamp(readabilityBase) : 0;
+    const engagement = engagementEstimate(text, stats);
+    const consistency = hasText ? clamp(100 - weightedIssuePenalty(issues, ["consistency", "spelling", "capitalization"], 4.5) - Math.min(20, stats.repeatedWords.length * 1.4)) : 0;
+    const goalAlignment = goalAlignmentEstimate(text, stats, goals);
+    const directWords = tokensIn(text).filter((token) => ["you", "your", "we", "our", "us"].includes(token.lower)).length;
     const breakdown = {
-        correctness: scoreContribution(correctness, "Based on actionable grammar, spelling, and punctuation findings.", [`${high} high-confidence high-impact issue${high === 1 ? "" : "s"}`, `${medium} medium-severity issue${medium === 1 ? "" : "s"}`]),
-        clarity: scoreContribution(clarity, "Reflects sentence structure, clarity suggestions, passive voice, and long sentences.", [`${stats.longSentences} long sentence${stats.longSentences === 1 ? "" : "s"}`, `${stats.passiveVoicePercentage}% passive-voice estimate`]),
-        conciseness: scoreContribution(conciseness, "Reflects filler words, wordiness, and document length signals.", [`${stats.fillerWords} filler-word finding${stats.fillerWords === 1 ? "" : "s"}`, `${stats.words} words`]),
+        correctness: scoreContribution(correctness, "Based on confidence-weighted grammar, spelling, punctuation, and capitalization findings.", [`${high} high-confidence high-impact issue${high === 1 ? "" : "s"}`, `${medium} medium-severity issue${medium === 1 ? "" : "s"}`]),
+        clarity: scoreContribution(clarity, "Reflects sentence structure, vague wording, passive voice, and sentence length.", [`${stats.longSentences} long sentence${stats.longSentences === 1 ? "" : "s"}`, `${stats.passiveVoicePercentage}% passive-voice estimate`]),
+        conciseness: scoreContribution(conciseness, "Reflects filler words, wordiness, redundant phrases, and repetition; document length alone is not penalised.", [`${stats.fillerWords} filler-word finding${stats.fillerWords === 1 ? "" : "s"}`, `${stats.repeatedPhrases.length} repeated phrase pattern${stats.repeatedPhrases.length === 1 ? "" : "s"}`]),
         readability: scoreContribution(readability, "A transparent Flesch-style estimate, not an objective measure of quality.", [`Average sentence length: ${stats.averageSentenceLength || 0} words`, `Vocabulary diversity: ${Math.round(stats.vocabularyDiversity * 100)}%`]),
-        engagement: scoreContribution(engagement, "A lightweight signal based on directness and vocabulary variety.", [inferTone(stats.longestSentence).join(", ") || "neutral tone signal"]),
-        consistency: scoreContribution(consistency, "Reflects repeated terms, dialect consistency, and terminology findings.", [`${stats.repeatedWords.length} repeated vocabulary pattern${stats.repeatedWords.length === 1 ? "" : "s"}`]),
-        goalAlignment: scoreContribution(goalAlignment, "A best-effort guide using the selected audience and tone; it is not a verdict.", [goals ? `${goals.audience} audience` : "No goal selected", goals ? `${goals.tone} tone` : "Neutral baseline"]),
+        engagement: scoreContribution(engagement, "An estimate from whole-document directness, sentence variety, vocabulary variety, questions, and active-voice signals.", [`${Math.round((directWords / Math.max(1, stats.words)) * 100)}% direct-address words`, `${new Set(stats.sentenceLengths).size} sentence-length patterns`]),
+        consistency: scoreContribution(consistency, "Reflects dialect, preferred terminology, capitalization, spelling variants, and repeated vocabulary patterns.", [`${stats.repeatedWords.length} repeated vocabulary pattern${stats.repeatedWords.length === 1 ? "" : "s"}`, `${issues.filter((item) => item.category === "consistency").length} terminology finding${issues.filter((item) => item.category === "consistency").length === 1 ? "" : "s"}`]),
+        goalAlignment: scoreContribution(goalAlignment, "A best-effort estimate using audience, intent, and tone signals; it is not an objective judgement.", [goals ? `${goals.audience} audience` : "No goal selected", goals ? `${goals.intent} intent` : "No intent selected", goals ? `${goals.tone} tone` : "Neutral baseline"]),
     };
-    const overall = clamp(correctness * 0.28 + clarity * 0.16 + conciseness * 0.14 + readability * 0.14 + engagement * 0.1 + consistency * 0.1 + goalAlignment * 0.08);
+    const overall = hasText ? clamp(correctness * 0.29 + clarity * 0.17 + conciseness * 0.14 + readability * 0.12 + engagement * 0.1 + consistency * 0.1 + goalAlignment * 0.08) : 0;
     return { correctness, clarity, conciseness, readability, engagement, consistency, goalAlignment, overall, grammar: correctness, breakdown };
 }
 function mergeWritingIssues(issues) {
-    const sorted = [...issues]
-        .filter((item) => item.start >= 0 && item.end > item.start && item.original.length > 0)
-        .sort((a, b) => a.start - b.start || b.end - a.end || b.confidence - a.confidence);
-    const result = [];
-    for (const candidate of sorted) {
-        const same = result.findIndex((item) => item.start === candidate.start && item.end === candidate.end && item.original.toLocaleLowerCase() === candidate.original.toLocaleLowerCase());
-        if (same >= 0) {
-            if (candidate.source === "ai" && result[same].source === "local" && candidate.confidence > result[same].confidence)
-                result[same] = candidate;
-            continue;
-        }
-        const overlap = result.findIndex((item) => candidate.start < item.end && candidate.end > item.start);
-        if (overlap >= 0) {
-            const existing = result[overlap];
-            const candidateRank = (candidate.severity === "high" ? 3 : candidate.severity === "medium" ? 2 : 1) + candidate.confidence;
-            const existingRank = (existing.severity === "high" ? 3 : existing.severity === "medium" ? 2 : 1) + existing.confidence;
-            if (candidateRank > existingRank)
-                result[overlap] = candidate;
-            continue;
-        }
-        result.push(candidate);
-    }
-    return result.sort((a, b) => a.start - b.start || a.end - b.end);
+    return mergeAnalysisIssues(issues);
 }
 function analyzeLocally(text, options = {}, goals) {
     const preferences = mergePreferences(options);
+    const document = parseDocument(text);
     const issues = mergeWritingIssues([
-        ...findSpelling(text, preferences),
+        ...findSpelling(text, preferences, document),
         ...findConfusedWords(text, preferences),
+        ...findPrecisionGrammarIssues(text, preferences, document),
         ...findPunctuation(text, preferences),
         ...findCapitalization(text, preferences),
-        ...findRepeatedWordsAndPhrases(text, preferences),
-        ...findStyleIssues(text, preferences),
-        ...findStructureIssues(text, preferences),
+        ...findRepeatedWordsAndPhrases(text, preferences, document),
+        ...findStyleIssues(text, preferences, document),
+        ...findStructureIssues(text, preferences, document),
     ]);
-    const stats = getWritingStats(text);
-    return { issues, tone: inferTone(text), stats, scores: scoreWriting(stats, issues, goals) };
+    const stats = getWritingStats(text, document);
+    return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text) };
+}
+function expandLocalContext(text, start, end, contextWindow = 320) {
+    const roughStart = Math.max(0, start - contextWindow);
+    const roughEnd = Math.min(text.length, end + contextWindow);
+    const leftMatches = [...text.slice(0, roughStart).matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
+    const left = leftMatches[leftMatches.length - 1];
+    const safeStart = left && left.index !== undefined ? left.index + left[0].length : roughStart;
+    const right = text.slice(roughEnd).match(/[.!?…](?:\s|$)|\n\s*/u);
+    const safeEnd = right?.index !== undefined ? roughEnd + right.index + right[0].length : roughEnd;
+    return { start: Math.min(safeStart, start), end: Math.max(Math.min(text.length, safeEnd), end) };
+}
+function detectChangedRange(previousText, nextText) {
+    if (previousText === nextText)
+        return null;
+    let start = 0;
+    while (start < previousText.length && start < nextText.length && previousText.charCodeAt(start) === nextText.charCodeAt(start))
+        start += 1;
+    let previousEnd = previousText.length;
+    let end = nextText.length;
+    while (previousEnd > start && end > start && previousText.charCodeAt(previousEnd - 1) === nextText.charCodeAt(end - 1)) {
+        previousEnd -= 1;
+        end -= 1;
+    }
+    return { start, end, previousEnd };
+}
+function analyzeLocallyIncremental(previousText, nextText, previousIssues, changedRange, options = {}, goals) {
+    if (!changedRange || previousText === nextText)
+        return analyzeLocally(nextText, options, goals);
+    const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
+    const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
+    const delta = nextText.length - previousText.length;
+    const retained = previousIssues.flatMap((issue) => {
+        if (issue.start < previousRegion.end && issue.end > previousRegion.start)
+            return [];
+        const shift = issue.start >= previousRegion.end ? delta : 0;
+        const start = issue.start + shift;
+        const end = issue.end + shift;
+        return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original ? [{ ...issue, start, end }] : [];
+    });
+    const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
+    const recalculated = region.issues.map((issue) => ({
+        ...issue,
+        id: `${issue.ruleId}-${issue.start + nextRegion.start}-${issue.end + nextRegion.start}`,
+        start: issue.start + nextRegion.start,
+        end: issue.end + nextRegion.start,
+    }));
+    const issues = mergeWritingIssues([...retained, ...recalculated]);
+    const stats = getWritingStats(nextText);
+    return { issues, tone: inferTone(nextText), stats, scores: scoreWriting(stats, issues, goals, nextText) };
 }
 const categoryColors = {
     spelling: "#e25d70",
@@ -502,7 +759,7 @@ const categoryColors = {
     capitalization: "#bf7a42",
 };
 
-return { analyzeLocally, getWritingStats };
+return { analyzeLocally, analyzeLocallyIncremental, detectChangedRange, getWritingStats };
 })();
 const DraftwiseAnalysisModule = (() => {
 
@@ -539,6 +796,35 @@ function expandRangeToContext(text, range, contextWindow = DEFAULT_CONTEXT_WINDO
     const start = Math.max(0, moveToBoundary(text, Math.max(0, range.start - contextWindow), "left"));
     const end = Math.min(text.length, moveToBoundary(text, Math.min(text.length, range.end + contextWindow), "right"));
     return { ...range, start, end };
+}
+function expandToSafeBoundary(text, start, end, contextWindow) {
+    const roughStart = Math.max(0, start - contextWindow);
+    const roughEnd = Math.min(text.length, end + contextWindow);
+    const leftMatches = [...text.slice(0, roughStart).matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
+    const left = leftMatches[leftMatches.length - 1];
+    const safeStart = left && left.index !== undefined ? left.index + left[0].length : roughStart;
+    const rightMatch = text.slice(roughEnd).match(/[.!?…](?:\s|$)|\n\s*/u);
+    const safeEnd = rightMatch?.index !== undefined
+        ? Math.min(text.length, roughEnd + rightMatch.index + rightMatch[0].length)
+        : roughEnd;
+    return { start: Math.min(safeStart, start), end: Math.max(safeEnd, end) };
+}
+function getIncrementalAnalysisRanges(previousText, nextText, changedRange, contextWindow = DEFAULT_CONTEXT_WINDOW) {
+    const previous = expandToSafeBoundary(previousText, changedRange.start, changedRange.previousEnd, contextWindow);
+    const next = expandToSafeBoundary(nextText, changedRange.start, changedRange.end, contextWindow);
+    return { previous, next, delta: nextText.length - previousText.length };
+}
+function retainUnaffectedIssues(previousIssues, ranges, nextText) {
+    return previousIssues.flatMap((issue) => {
+        if (issue.start < ranges.previous.end && issue.end > ranges.previous.start)
+            return [];
+        const shift = issue.start >= ranges.previous.end ? ranges.delta : 0;
+        const start = issue.start + shift;
+        const end = issue.end + shift;
+        if (start < 0 || end > nextText.length || nextText.slice(start, end) !== issue.original)
+            return [];
+        return [{ ...issue, start, end }];
+    });
 }
 function createAnalysisChunks(text, options = {}) {
     if (!text)
@@ -591,7 +877,72 @@ function mapChunkIssue(issue, chunk, sourceText) {
 function issueRank(issue) {
     const severity = issue.severity === "high" ? 3 : issue.severity === "medium" ? 2 : 1;
     const source = issue.source === "local" ? 0.1 : 0;
-    return severity + issue.confidence + source;
+    const confidence = Number.isFinite(issue.confidence) ? issue.confidence : 0.5;
+    return severity + confidence + source;
+}
+function intervalKeyComesBefore(left, right) {
+    return left.issue.start < right.issue.start
+        || (left.issue.start === right.issue.start && (left.issue.end < right.issue.end
+            || (left.issue.end === right.issue.end && left.sequence < right.sequence)));
+}
+function intervalPriority(sequence) {
+    let value = (sequence + 1) | 0;
+    value ^= value << 13;
+    value ^= value >>> 17;
+    value ^= value << 5;
+    return value >>> 0;
+}
+function intervalMaxEnd(node) {
+    return node?.maxEnd ?? Number.NEGATIVE_INFINITY;
+}
+function refreshIntervalNode(node) {
+    node.maxEnd = Math.max(node.entry.issue.end, intervalMaxEnd(node.left), intervalMaxEnd(node.right));
+}
+function rotateIntervalRight(node) {
+    const next = node.left;
+    if (!next)
+        return node;
+    node.left = next.right;
+    next.right = node;
+    refreshIntervalNode(node);
+    refreshIntervalNode(next);
+    return next;
+}
+function rotateIntervalLeft(node) {
+    const next = node.right;
+    if (!next)
+        return node;
+    node.right = next.left;
+    next.left = node;
+    refreshIntervalNode(node);
+    refreshIntervalNode(next);
+    return next;
+}
+function insertIntervalNode(root, node) {
+    if (!root)
+        return node;
+    if (intervalKeyComesBefore(node.entry, root.entry)) {
+        root.left = insertIntervalNode(root.left, node);
+        if (root.left.priority < root.priority)
+            return rotateIntervalRight(root);
+    }
+    else {
+        root.right = insertIntervalNode(root.right, node);
+        if (root.right.priority < root.priority)
+            return rotateIntervalLeft(root);
+    }
+    refreshIntervalNode(root);
+    return root;
+}
+function collectOverlappingIntervals(node, start, end, output) {
+    if (!node || node.maxEnd <= start)
+        return;
+    if (node.left)
+        collectOverlappingIntervals(node.left, start, end, output);
+    if (node.entry.issue.start < end && node.entry.issue.end > start && node.entry.active && !node.entry.removed)
+        output.push(node.entry);
+    if (node.entry.issue.start < end)
+        collectOverlappingIntervals(node.right, start, end, output);
 }
 function mergeAnalysisIssues(issues) {
     const candidates = issues
@@ -599,30 +950,47 @@ function mergeAnalysisIssues(issues) {
         .filter((item) => item.start >= 0 && item.end > item.start && item.original.length > 0)
         .map((item) => ({ ...item, confidence: Math.max(0, Math.min(1, item.confidence ?? 0.5)) }))
         .sort((a, b) => a.start - b.start || b.end - a.end || issueRank(b) - issueRank(a));
-    const deduped = [];
-    const keys = new Set();
-    for (const candidate of candidates) {
-        const key = `${candidate.start}:${candidate.end}:${candidate.original.toLocaleLowerCase()}:${candidate.replacement.toLocaleLowerCase()}`;
-        const existingIndex = deduped.findIndex((item) => item.start === candidate.start &&
-            item.end === candidate.end &&
-            item.original.toLocaleLowerCase() === candidate.original.toLocaleLowerCase());
-        if (existingIndex >= 0) {
-            if (issueRank(candidate) > issueRank(deduped[existingIndex]))
-                deduped[existingIndex] = candidate;
-            continue;
+    const entries = [];
+    const exact = new Map();
+    let intervalTree = null;
+    const isLive = (entry) => entry.active && !entry.removed;
+    const deactivate = (entry, remove) => {
+        entry.active = false;
+        entry.removed ||= remove;
+        const key = `${entry.issue.start}:${entry.issue.end}:${entry.issue.original.toLocaleLowerCase()}`;
+        if (exact.get(key) === entry && remove)
+            exact.delete(key);
+    };
+    for (const [sequence, candidate] of candidates.entries()) {
+        const overlapping = [];
+        collectOverlappingIntervals(intervalTree, candidate.start, candidate.end, overlapping);
+        const key = `${candidate.start}:${candidate.end}:${candidate.original.toLocaleLowerCase()}`;
+        const existingExact = exact.get(key);
+        if (existingExact && isLive(existingExact)) {
+            if (issueRank(candidate) > existingExact.rank) {
+                deactivate(existingExact, true);
+            }
+            else {
+                continue;
+            }
         }
-        if (keys.has(key))
-            continue;
-        const overlapIndex = deduped.findIndex((item) => candidate.start < item.end && candidate.end > item.start);
-        if (overlapIndex >= 0) {
-            if (issueRank(candidate) > issueRank(deduped[overlapIndex]))
-                deduped[overlapIndex] = candidate;
-            continue;
+        const liveOverlapping = overlapping.filter(isLive);
+        const bestOverlap = liveOverlapping.reduce((best, entry) => !best || entry.rank > best.rank ? entry : best, null);
+        if (bestOverlap) {
+            if (issueRank(candidate) <= bestOverlap.rank)
+                continue;
+            for (const entry of liveOverlapping)
+                deactivate(entry, true);
         }
-        keys.add(key);
-        deduped.push(candidate);
+        const entry = { issue: candidate, rank: issueRank(candidate), active: true, removed: false, sequence };
+        entries.push(entry);
+        exact.set(key, entry);
+        intervalTree = insertIntervalNode(intervalTree, { entry, priority: intervalPriority(sequence), maxEnd: candidate.end, left: null, right: null });
     }
-    return deduped.sort((a, b) => a.start - b.start || a.end - b.end);
+    return entries
+        .filter((entry) => !entry.removed)
+        .map((entry) => entry.issue)
+        .sort((a, b) => a.start - b.start || a.end - b.end);
 }
 class LruCache {
     values = new Map();
@@ -686,6 +1054,7 @@ const CATEGORY_ALIASES = {
     consistency: "consistency",
 };
 const VALID_SEVERITIES = new Set(["low", "medium", "high"]);
+const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 function isRecord(value) {
     return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -695,7 +1064,7 @@ function parseProviderPayload(value) {
         return null;
     const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
     const issues = rawIssues.flatMap((raw) => {
-        if (!isRecord(raw) || typeof raw.start !== "number" || typeof raw.end !== "number" || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string")
+        if (!isRecord(raw) || typeof raw.start !== "number" || !Number.isFinite(raw.start) || typeof raw.end !== "number" || !Number.isFinite(raw.end) || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string")
             return [];
         return [{
                 start: raw.start,
@@ -711,7 +1080,7 @@ function parseProviderPayload(value) {
             }];
     });
     const rawScores = isRecord(parsed.scores) ? parsed.scores : {};
-    const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number"));
+    const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number" && Number.isFinite(score)));
     return { issues, tone: Array.isArray(parsed.tone) ? parsed.tone.filter((tone) => typeof tone === "string") : [], scores };
 }
 class ProviderError extends Error {
@@ -733,7 +1102,7 @@ function parseCustomHeaders(value) {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
             return {};
         return Object.fromEntries(Object.entries(parsed)
-            .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length)$/iu.test(key))
+            .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|set-cookie|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
             .map(([key, item]) => [key, String(item).slice(0, 500)]));
     }
     catch {
@@ -749,6 +1118,9 @@ function validateProviderUrl(baseUrl) {
         throw new ProviderError("invalid-url", "Enter a valid provider URL, including https://.");
     }
     const localHost = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+    if (parsed.username || parsed.password || parsed.hash) {
+        throw new ProviderError("invalid-url", "Provider URLs cannot contain credentials or fragments.");
+    }
     if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && localHost)) {
         throw new ProviderError("insecure-url", "Use HTTPS for provider URLs. HTTP is allowed only for localhost development.");
     }
@@ -782,11 +1154,22 @@ function parseJsonContent(value) {
     }
 }
 function contentFromPayload(payload) {
-    const value = payload;
-    const content = value?.choices?.[0]?.message?.content;
-    if (Array.isArray(content))
-        return content.map((part) => typeof part === "string" ? part : part.text ?? "").join("");
-    return content ?? null;
+    if (!isRecord(payload) || !Array.isArray(payload.choices))
+        return null;
+    const first = payload.choices[0];
+    if (!isRecord(first) || !isRecord(first.message))
+        return null;
+    const content = first.message.content;
+    if (Array.isArray(content)) {
+        return content.flatMap((part) => {
+            if (typeof part === "string")
+                return [part];
+            if (isRecord(part) && typeof part.text === "string")
+                return [part.text];
+            return [];
+        }).join("");
+    }
+    return typeof content === "string" ? content : null;
 }
 function providerErrorForStatus(status) {
     if (status === 401 || status === 403)
@@ -797,14 +1180,15 @@ function providerErrorForStatus(status) {
         return new ProviderError("rate-limited", "The provider is rate-limiting requests. Try again in a moment.", status);
     return new ProviderError("unknown", `The provider returned an error (${status}).`, status);
 }
-async function requestProvider(settings, messages, signal) {
+async function requestProvider(settings, messages, signal, timeoutMs = 25_000) {
     if (!settings.apiKey.trim())
         throw new ProviderError("missing-key", "Add an API key in Settings to enable AI suggestions.");
-    if (!settings.model.trim())
-        throw new ProviderError("invalid-model", "Add a model ID in Settings before enabling AI.");
+    const model = settings.model.trim();
+    if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model))
+        throw new ProviderError("invalid-model", "Add a valid model ID in Settings before enabling AI.");
     const endpoint = endpointFor(settings.baseUrl);
     const timeoutController = new AbortController();
-    const timeout = setTimeout(() => timeoutController.abort(), 25_000);
+    const timeout = setTimeout(() => timeoutController.abort(), Math.max(1_000, timeoutMs));
     const cancel = () => timeoutController.abort();
     signal?.addEventListener("abort", cancel, { once: true });
     const call = async (includeResponseFormat) => {
@@ -817,7 +1201,7 @@ async function requestProvider(settings, messages, signal) {
                 ...parseCustomHeaders(settings.customHeaders),
             },
             body: JSON.stringify({
-                model: settings.model.trim(),
+                model,
                 temperature: Math.max(0, Math.min(1, settings.temperature)),
                 max_tokens: Math.max(100, Math.min(4000, settings.maxTokens)),
                 ...(includeResponseFormat ? { response_format: { type: "json_object" } } : {}),
@@ -830,9 +1214,21 @@ async function requestProvider(settings, messages, signal) {
                 return call(false);
             throw providerErrorForStatus(response.status);
         }
+        const declaredLength = Number(response.headers.get("content-length") || 0);
+        if (declaredLength > MAX_PROVIDER_RESPONSE_CHARS)
+            throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
+        let responseText;
+        try {
+            responseText = await response.text();
+        }
+        catch {
+            throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
+        }
+        if (responseText.length > MAX_PROVIDER_RESPONSE_CHARS)
+            throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
         let payload;
         try {
-            payload = await response.json();
+            payload = JSON.parse(responseText);
         }
         catch {
             throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
@@ -850,7 +1246,7 @@ async function requestProvider(settings, messages, signal) {
         if (error instanceof DOMException && error.name === "AbortError")
             throw new ProviderError("timeout", "The provider took too long to respond.");
         if (error instanceof TypeError)
-            throw new ProviderError("network", "The provider could not be reached. Check the URL and browser network permissions.");
+            throw new ProviderError("cors", "The provider could not be reached. This may be a CORS or network permission issue.");
         throw new ProviderError("unknown", "The provider request failed. Local analysis is still available.");
     }
     finally {
@@ -919,7 +1315,7 @@ function parseAnalysisResponse(value, sourceText, options = {}) {
     const aiIssues = parseAnalysisIssues(value, sourceText);
     const issues = mergeAnalysisIssues([...local.issues, ...aiIssues]);
     const stats = getWritingStats(sourceText);
-    const scores = scoreWriting(stats, issues, options.goals);
+    const scores = scoreWriting(stats, issues, options.goals, sourceText);
     return {
         analysedText: sourceText,
         issues,
@@ -931,7 +1327,7 @@ function parseAnalysisResponse(value, sourceText, options = {}) {
 }
 async function analyzeWithProvider(text, goals, settings, options = {}) {
     const preferences = options.preferences;
-    const local = analyzeLocally(text, preferences, goals);
+    const local = options.localAnalysis ?? analyzeLocally(text, preferences, goals);
     const changed = options.changedRange && text.length > options.changedRange.start
         ? expandRangeToContext(text, options.changedRange, options.contextWindow ?? 320)
         : null;
@@ -943,18 +1339,20 @@ async function analyzeWithProvider(text, goals, settings, options = {}) {
     });
     if (!chunks.length)
         return { ...local, analysedText: text, source: "local" };
-    const settled = await Promise.allSettled(chunks.map((chunk) => requestProvider(settings, [
-        { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
-        { role: "user", content: analysisPrompt(chunk, goals, preferences) },
-    ], options.signal)));
-    const responses = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-    if (!responses.length) {
+    const settled = await Promise.allSettled(chunks.map(async (chunk) => ({
+        chunk,
+        response: await requestProvider(settings, [
+            { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
+            { role: "user", content: analysisPrompt(chunk, goals, preferences) },
+        ], options.signal, options.timeoutMs),
+    })));
+    const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (!successful.length) {
         const firstFailure = settled.find((result) => result.status === "rejected");
         if (firstFailure)
             throw firstFailure.reason;
     }
-    const aiIssues = responses.flatMap((response, index) => {
-        const chunk = chunks[index];
+    const aiIssues = successful.flatMap(({ chunk, response }) => {
         return parseAnalysisIssues(response, chunk.text, chunk.id)
             .map((issue) => mapChunkIssue(issue, chunk, text))
             .filter((issue) => Boolean(issue));
@@ -965,7 +1363,7 @@ async function analyzeWithProvider(text, goals, settings, options = {}) {
         ...local,
         analysedText: text,
         issues,
-        scores: scoreWriting(stats, issues, goals),
+        scores: scoreWriting(stats, issues, goals, text),
         stats,
         source: aiIssues.length ? "local+ai" : "local",
         changedRange: options.changedRange ?? undefined,
@@ -988,30 +1386,68 @@ function localRewrite(text, instruction) {
     return result || text;
 }
 function protectedTokens(text) {
-    return [...text.matchAll(/https?:\/\/\S+|\b\d[\d,.%]*\b/gu)].map((match) => match[0]);
+    const patterns = [
+        /https?:\/\/[^\s)]+/giu,
+        /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
+        /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4})\b/giu,
+        /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu,
+        /\b\d[\d,.]*%/gu,
+        /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b/giu,
+        /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu,
+        /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu,
+        /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu,
+        /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
+        /\b\d[\d,.]*\b/gu,
+    ];
+    return [...new Set(patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0])))];
 }
-function validateRewrite(original, replacement) {
+function explicitlyAllowsProtectedChanges(request) {
+    if (request.allowProtectedChanges)
+        return true;
+    return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
+}
+function validateRewrite(original, replacement, allowProtectedChanges = false) {
     if (!replacement.trim())
         throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
     if (/<[^>]+>/u.test(replacement))
         throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-    for (const token of protectedTokens(original))
-        if (!replacement.includes(token))
-            throw new ProviderError("invalid-json", "The rewrite changed a URL or number. Nothing was changed.");
+    if (!allowProtectedChanges) {
+        for (const token of protectedTokens(original)) {
+            const originalCount = original.split(token).length - 1;
+            const replacementCount = replacement.split(token).length - 1;
+            if (replacementCount < originalCount)
+                throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
+        }
+    }
     return replacement.trim();
 }
 async function rewriteWithProvider(request, settings, signal) {
     if (!settings.apiKey.trim())
-        return { replacement: localRewrite(request.text, request.instruction), explanation: "Local rewrite: AI is off, so your text stayed on this device.", source: "local" };
+        return { replacement: localRewrite(request.text, request.instruction), alternatives: [], explanation: "Local rewrite: AI is off, so your text stayed on this device.", source: "local" };
     const response = await requestProvider(settings, [
-        { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","explanation":"..."}. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, and quoted text. Do not add HTML or markdown.` },
+        { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","alternatives":["..."],"explanation":"..."}. Include up to two genuinely different alternatives when useful. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, dates, identifiers, filenames, and quoted text. Do not add HTML or markdown.` },
         { role: "user", content: `Instruction: ${request.instruction}\n\nText to rewrite:\n${request.text}` },
     ], signal);
     const parsed = parseJsonContent(response);
     if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim())
         throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
     const explanation = typeof parsed.explanation === "string" ? parsed.explanation : "";
-    return { replacement: validateRewrite(request.text, parsed.replacement), explanation: explanation.slice(0, 500), source: "ai" };
+    const allowProtectedChanges = explicitlyAllowsProtectedChanges(request);
+    const replacement = validateRewrite(request.text, parsed.replacement, allowProtectedChanges);
+    const alternatives = Array.isArray(parsed.alternatives)
+        ? parsed.alternatives
+            .filter((alternative) => typeof alternative === "string" && Boolean(alternative.trim()) && alternative.trim() !== replacement)
+            .slice(0, 2)
+            .flatMap((alternative) => {
+            try {
+                return [validateRewrite(request.text, alternative, allowProtectedChanges)];
+            }
+            catch {
+                return [];
+            }
+        })
+        : [];
+    return { replacement, alternatives, explanation: explanation.slice(0, 500), source: "ai" };
 }
 
 return { analyzeWithProvider, ProviderError };

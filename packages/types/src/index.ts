@@ -111,6 +111,7 @@ export interface WritingGoals {
 export interface StylePreferences {
   dialect: Dialect;
   personalDictionary: string[];
+  names?: string[];
   ignoredWords: string[];
   ignoredRuleIds: string[];
   preferredTerminology: Record<string, string>;
@@ -150,10 +151,12 @@ export interface RewriteRequest {
   instruction: string;
   goals: WritingGoals;
   preferences?: StylePreferences;
+  allowProtectedChanges?: boolean;
 }
 
 export interface RewriteResult {
   replacement: string;
+  alternatives?: string[];
   explanation: string;
   source: "local" | "ai";
 }
@@ -178,6 +181,7 @@ export const DEFAULT_GOALS: WritingGoals = {
 export const DEFAULT_STYLE_PREFERENCES: StylePreferences = {
   dialect: "en-GB",
   personalDictionary: [],
+  names: [],
   ignoredWords: [],
   ignoredRuleIds: [],
   preferredTerminology: {},

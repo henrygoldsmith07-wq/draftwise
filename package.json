@@ -16,6 +16,7 @@
     "test:extension": "node --test tests/extension.test.mjs",
     "extension:build": "node scripts/build-extension.mjs",
     "benchmark": "node --experimental-strip-types scripts/benchmark.mjs",
+    "evaluate": "node --experimental-strip-types scripts/evaluate-rules.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

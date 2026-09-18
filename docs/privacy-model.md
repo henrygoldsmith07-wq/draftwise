@@ -9,6 +9,8 @@
 | API key | Web `localStorage` or extension `chrome.storage.local` | Only as an HTTPS Authorization header to the configured endpoint |
 | Goals/style | Browser storage and runtime | Included as prompt context when AI is enabled |
 | Site exclusions | Browser storage | Never |
+| Granted site origins | Extension `chrome.permissions` and local settings | Never |
+| Granted provider origin | Extension `chrome.permissions` | Never |
 
 The repository has no account flow, analytics, telemetry, remote draft database, or default backend proxy. The configured provider can still log requests according to its own policy.
 
@@ -16,7 +18,8 @@ The repository has no account flow, analytics, telemetry, remote draft database,
 
 - AI is disabled by default.
 - The web app has one `aiEnabled` toggle and exposes the provider boundary in Settings.
-- The extension uses optional site permissions and a local exclusion list.
+- The extension uses dynamic content scripts with optional, user-granted site permissions and a local exclusion list.
+- Provider-origin access is granted and revoked separately from site access; changing the provider URL does not silently grant network access.
 - “Forget key” removes the configured key and disables AI.
 - “Clear local data” removes the versioned workspace and migrated legacy keys.
 - Local checks remain available when the provider is offline, rate-limited, invalid, or disabled.

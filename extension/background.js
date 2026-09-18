@@ -1,61 +1,139 @@
-importScripts("shared-provider.js");
+importScripts("shared-provider.js", "permissions.js");
 
 const activeRequests = new Map();
+const excludeMatches = ["*://chrome.google.com/*", "*://chromewebstore.google.com/*", "*://chromewebstore.googleusercontent.com/*"];
+const defaults = {
+  excludedSites: [],
+  disabledSites: [],
+  disabledFields: [],
+  siteAccess: [],
+  aiEnabled: false,
+  provider: {
+    provider: "openai-compatible",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    apiKey: "",
+    temperature: 0.2,
+    maxTokens: 900,
+    customHeaders: "",
+  },
+};
 
-function changedRange(previous, next) {
-  if (previous === next) return null;
-  let start = 0;
-  while (start < previous.length && start < next.length && previous[start] === next[start]) start += 1;
-  let previousEnd = previous.length;
-  let end = next.length;
-  while (previousEnd > start && end > start && previous[previousEnd - 1] === next[end - 1]) { previousEnd -= 1; end -= 1; }
-  return { start, end, previousEnd };
-}
-
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "aiEnabled", "provider", "apiKey", "baseUrl", "model"], (stored) => {
-    const provider = stored.provider || {
-      provider: "openai-compatible",
-      baseUrl: stored.baseUrl || "https://api.openai.com/v1",
-      model: stored.model || "gpt-4o-mini",
-      apiKey: stored.apiKey || "",
-      temperature: 0.2,
-      maxTokens: 900,
-      customHeaders: "",
-    };
-    chrome.storage.local.set({
-      excludedSites: Array.isArray(stored.excludedSites) ? stored.excludedSites : [],
-      disabledSites: Array.isArray(stored.disabledSites) ? stored.disabledSites : [],
-      disabledFields: Array.isArray(stored.disabledFields) ? stored.disabledFields : [],
-      aiEnabled: typeof stored.aiEnabled === "boolean" ? stored.aiEnabled : false,
-      provider,
+function chromeCall(method, args = []) {
+  return new Promise((resolve, reject) => {
+    method(...args, (result) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(result);
     });
   });
+}
+
+const storageGet = (keys) => chromeCall(chrome.storage.local.get.bind(chrome.storage.local), [keys]);
+const storageSet = (value) => chromeCall(chrome.storage.local.set.bind(chrome.storage.local), [value]);
+const permissionsContains = (value) => chromeCall(chrome.permissions.contains.bind(chrome.permissions), [value]);
+
+async function unregisterSite(hostname) {
+  const id = globalThis.DraftwisePermissions.siteScriptId(hostname);
+  await chromeCall(chrome.scripting.unregisterContentScripts.bind(chrome.scripting), [{ ids: [id] }]).catch(() => undefined);
+}
+
+async function registerSite(hostname) {
+  const normalised = globalThis.DraftwisePermissions.normaliseHostname(hostname);
+  const origins = globalThis.DraftwisePermissions.sitePatterns(normalised);
+  if (!await permissionsContains({ origins })) throw new Error(`Grant site access before enabling Draftwise on ${normalised}.`);
+  await unregisterSite(normalised);
+  await chromeCall(chrome.scripting.registerContentScripts.bind(chrome.scripting), [{
+    id: globalThis.DraftwisePermissions.siteScriptId(normalised),
+    matches: origins,
+    excludeMatches,
+    js: ["shared-analysis.js", "field-classification.js", "content.js"],
+    runAt: "document_idle",
+    persistAcrossSessions: true,
+  }]);
+  return normalised;
+}
+
+async function syncRegisteredSites() {
+  const stored = await storageGet(["siteAccess", "disabledSites"]);
+  const disabled = new Set(Array.isArray(stored.disabledSites) ? stored.disabledSites : []);
+  const sites = Array.isArray(stored.siteAccess) ? stored.siteAccess : [];
+  for (const site of sites) {
+    try {
+      if (disabled.has(site)) await unregisterSite(site);
+      else await registerSite(site);
+    } catch {
+      // A user may have revoked a permission outside Draftwise. The settings page
+      // reflects that state; a missing permission never causes a broad fallback.
+      await unregisterSite(site);
+    }
+  }
+}
+
+async function initialise() {
+  const stored = await storageGet(Object.keys(defaults));
+  await storageSet({
+    excludedSites: Array.isArray(stored.excludedSites) ? stored.excludedSites : defaults.excludedSites,
+    disabledSites: Array.isArray(stored.disabledSites) ? stored.disabledSites : defaults.disabledSites,
+    disabledFields: Array.isArray(stored.disabledFields) ? stored.disabledFields : defaults.disabledFields,
+    siteAccess: Array.isArray(stored.siteAccess) ? stored.siteAccess : defaults.siteAccess,
+    aiEnabled: typeof stored.aiEnabled === "boolean" ? stored.aiEnabled : defaults.aiEnabled,
+    provider: { ...defaults.provider, ...(stored.provider || {}) },
+  });
+  await syncRegisteredSites();
+}
+
+chrome.runtime.onInstalled.addListener(() => { void initialise(); });
+chrome.runtime.onStartup.addListener(() => { void initialise(); });
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes.siteAccess || changes.disabledSites)) void syncRegisteredSites();
 });
+chrome.permissions.onRemoved.addListener(() => { void syncRegisteredSites(); });
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "register-site" || message?.type === "unregister-site") {
+    const operation = message.type === "register-site" ? registerSite(message.hostname) : unregisterSite(message.hostname);
+    operation.then((hostname) => sendResponse({ ok: true, hostname })).catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Site permission update failed." }));
+    return true;
+  }
+  if (message?.type === "list-permissions") {
+    chrome.permissions.getAll((permissions) => sendResponse({ ok: true, origins: permissions.origins || [] }));
+    return true;
+  }
   if (message?.type !== "analyse") return false;
   const key = `${sender.tab?.id || "unknown"}:${sender.frameId || 0}`;
   activeRequests.get(key)?.abort();
   const controller = new AbortController();
   activeRequests.set(key, controller);
-  chrome.storage.local.get(["aiEnabled", "provider"], async (stored) => {
+  (async () => {
     try {
+      const stored = await storageGet(["aiEnabled", "provider"]);
       if (!stored.aiEnabled || !stored.provider?.apiKey) { sendResponse({ requestId: message.requestId, issues: null }); return; }
+      let providerOrigin;
+      try {
+        providerOrigin = globalThis.DraftwisePermissions.providerPattern(stored.provider.baseUrl);
+      } catch (error) {
+        sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "Invalid provider URL." });
+        return;
+      }
+      if (!await permissionsContains({ origins: [providerOrigin] })) {
+        sendResponse({ requestId: message.requestId, issues: null, error: "Grant provider access in Draftwise settings before enabling AI." });
+        return;
+      }
       const result = await globalThis.DraftwiseProvider.analyzeWithProvider(
         String(message.text || ""),
         message.goals || { audience: "general", intent: "inform", tone: "professional" },
         stored.provider,
-        { signal: controller.signal, preferences: message.style, changedRange: changedRange(String(message.previousText || ""), String(message.text || "")) },
+        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange },
       );
       if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: result.issues });
     } catch (error) {
-      if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "AI analysis failed" });
+      if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "AI analysis failed." });
     } finally {
       if (activeRequests.get(key) === controller) activeRequests.delete(key);
     }
-  });
+  })();
   return true;
 });

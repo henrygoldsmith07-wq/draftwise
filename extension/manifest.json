@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Draftwise — private writing assistant",
+  "version": "0.1.0",
+  "description": "Local-first writing checks and optional BYOK suggestions inside text fields.",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Draftwise settings"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": ["*://chrome.google.com/*", "*://chromewebstore.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

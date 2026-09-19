@@ -13,7 +13,7 @@ import { categoryMatches } from "@/components/draftwise/EditorPrimitives";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { useHistory } from "@/hooks/useHistory";
-import { useRewrite } from "@/hooks/useRewrite";
+import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
 import type { WritingGoals, WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
@@ -143,8 +143,8 @@ export default function Home() {
 
   const retryRewrite = useCallback(() => {
     if (!rewritePreview) return;
-    void requestRewrite({ label: rewritePreview.label, instruction: rewritePreview.label, text: rewritePreview.original, selection: rewritePreview.selection, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled });
-  }, [requestRewrite, rewritePreview, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
+    void requestRewrite(createRewriteRetryArgs(rewritePreview, workspace.provider));
+  }, [requestRewrite, rewritePreview, workspace.provider]);
 
   const copyRewrite = useCallback(() => {
     if (rewritePreview?.replacement) void navigator.clipboard?.writeText(rewritePreview.replacement);

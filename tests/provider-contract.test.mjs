@@ -180,3 +180,14 @@ test("rewrite validation protects structured values and supports explicit except
     globalThis.fetch = originalFetch;
   }
 });
+
+test("rewrite protection keeps currencies, percentages, dates, identifiers, models, and filenames intact", async () => {
+  const originalFetch = globalThis.fetch;
+  const protectedText = "Budget £1,250.50 is 20% for 18 September 2026; contact user@example.com about GPT-5.6 in report-v2.pdf under ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ replacement: "Budget £1,250.00 is 20% for 18 September 2026; contact user@example.com about GPT-5.6 in report-v2.pdf under ABC-123." }) } }] }), { status: 200 });
+  try {
+    await assert.rejects(() => rewriteWithProvider({ text: protectedText, instruction: "Make this concise.", goals, allowProtectedChanges: false }, settings), (error) => error instanceof ProviderError && error.code === "invalid-json");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

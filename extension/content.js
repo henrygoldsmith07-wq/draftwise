@@ -3,7 +3,8 @@
 
   const grammar = globalThis.DraftwiseGrammar;
   const classifier = globalThis.DraftwiseFieldClassifier;
-  if (!grammar || typeof grammar.analyzeLocally !== "function" || !classifier) return;
+  const dom = globalThis.DraftwiseDom;
+  if (!grammar || typeof grammar.analyzeLocally !== "function" || !classifier || !dom) return;
 
   const settings = {
     excludedSites: [],
@@ -21,14 +22,16 @@
   let button = null;
   let panel = null;
   let cache = new Map();
+  let aiPending = false;
+  let aiError = "";
 
   const host = () => location.hostname.replace(/^www\./u, "");
   const siteIsDisabled = () => settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)) || settings.disabledSites.includes(host());
   const fieldSignature = (element) => `${host()}|${element.name || element.id || element.getAttribute("aria-label") || element.tagName}`;
   const fieldIsDisabled = (element) => settings.disabledFields.includes(fieldSignature(element));
   const isSensitive = (element) => classifier.isSensitiveField(element);
-  const isEditable = (element) => Boolean(element && !isSensitive(element) && !fieldIsDisabled(element) && (element.matches("textarea, input, [contenteditable=true]")));
-  const textOf = (element) => element.isContentEditable ? element.innerText : element.value;
+  const isEditable = (element) => Boolean(element && !isSensitive(element) && !fieldIsDisabled(element) && element.matches(dom.EDITABLE_SELECTOR));
+  const textOf = (element) => element.isContentEditable ? dom.buildEditableTextMap(element).text : element.value;
   const issueColor = { spelling: "#e25d70", grammar: "#ef9f55", punctuation: "#8b78e6", repetition: "#d46191", conciseness: "#d8944a", clarity: "#4a9a9d", consistency: "#6a8f68" };
 
   function localAnalysis(text, previous, previousResult) {
@@ -45,7 +48,7 @@
   }
 
   function shadowStyles() {
-    return `:host{all:initial;font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#193a34}*{box-sizing:border-box}.dw-button{position:fixed;z-index:2147483647;width:36px;height:36px;border:1px solid #bedb75;border-radius:11px;background:#173f38;color:#d8f26b;box-shadow:0 7px 18px #173f3830;display:grid;place-items:center;cursor:pointer;font:700 14px system-ui}.dw-button:focus-visible,.dw-accept:focus-visible,.dw-close:focus-visible,.dw-footer button:focus-visible{outline:3px solid #91bdf7;outline-offset:2px}.dw-button:hover{transform:translateY(-1px)}.dw-panel{position:fixed;z-index:2147483647;width:310px;max-height:430px;overflow:auto;border:1px solid #d9e5db;border-radius:14px;background:#fff;box-shadow:0 16px 38px #193a3426;padding:12px;font:13px/1.45 system-ui;color:#193a34}.dw-head{display:flex;align-items:center;gap:7px;padding:2px 1px 11px;border-bottom:1px solid #edf2ed}.dw-mark{width:18px;height:18px;border-radius:6px;background:#173f38;position:relative}.dw-mark:after{content:' ';position:absolute;left:5px;right:4px;top:5px;height:2px;background:#d8f26b;box-shadow:0 4px #d8f26b,0 8px #d8f26b}.dw-title{font-weight:750}.dw-count{margin-left:auto;color:#7a9385;font-size:11px}.dw-close{border:0;background:none;color:#71847a;cursor:pointer;font-size:18px;line-height:1}.dw-issue{padding:11px 2px;border-bottom:1px solid #edf2ed}.dw-issue:last-child{border-bottom:0}.dw-issue-title{display:flex;align-items:center;gap:6px;font-weight:750}.dw-dot{width:7px;height:7px;border-radius:50%;background:var(--dot,#e25d70);flex:none}.dw-meta{margin:3px 0 5px;color:#82938a;font-size:11px;text-transform:capitalize}.dw-copy{margin:0;color:#60766a;font-size:12px}.dw-fix{display:flex;align-items:center;gap:6px;margin-top:8px}.dw-old{color:#bd646a;text-decoration:line-through;overflow-wrap:anywhere}.dw-new{color:#4c9066;font-weight:750;overflow-wrap:anywhere}.dw-accept{margin-left:auto;border:0;border-radius:7px;padding:6px 9px;background:#173f38;color:#d8f26b;font:700 11px system-ui;cursor:pointer}.dw-dismiss{border:0;background:none;color:#84968c;cursor:pointer;font-size:16px}.dw-footer{display:flex;justify-content:space-between;gap:8px;padding-top:10px;color:#8a9a91;font-size:10px}.dw-footer button{border:0;background:none;color:#57896b;cursor:pointer;font:inherit;text-decoration:underline}@media(prefers-color-scheme:dark){.dw-panel{background:#18322f;color:#eff8ef;border-color:#36534b;box-shadow:0 16px 38px #0008}.dw-head,.dw-issue{border-color:#315049}.dw-count,.dw-meta,.dw-copy,.dw-footer{color:#a7beb1}.dw-old{color:#ffadb0}.dw-new{color:#c9f68a}.dw-footer button{color:#b9e5b7}}`;
+    return `:host{all:initial;font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#193a34}*{box-sizing:border-box}.dw-button{position:fixed;z-index:2147483647;width:36px;height:36px;border:1px solid #bedb75;border-radius:11px;background:#173f38;color:#d8f26b;box-shadow:0 7px 18px #173f3830;display:grid;place-items:center;cursor:pointer;font:700 14px system-ui}.dw-button:focus-visible,.dw-accept:focus-visible,.dw-close:focus-visible,.dw-footer button:focus-visible{outline:3px solid #91bdf7;outline-offset:2px}.dw-button:hover{transform:translateY(-1px)}.dw-panel{position:fixed;z-index:2147483647;width:310px;max-height:430px;overflow:auto;border:1px solid #d9e5db;border-radius:14px;background:#fff;box-shadow:0 16px 38px #193a3426;padding:12px;font:13px/1.45 system-ui;color:#193a34}.dw-head{display:flex;align-items:center;gap:7px;padding:2px 1px 11px;border-bottom:1px solid #edf2ed}.dw-mark{width:18px;height:18px;border-radius:6px;background:#173f38;position:relative}.dw-mark:after{content:' ';position:absolute;left:5px;right:4px;top:5px;height:2px;background:#d8f26b;box-shadow:0 4px #d8f26b,0 8px #d8f26b}.dw-title{font-weight:750}.dw-source{padding:2px 5px;border-radius:5px;background:#edf5e5;color:#638744;font-size:9px;font-weight:700}.dw-count{margin-left:auto;color:#7a9385;font-size:11px}.dw-close{border:0;background:none;color:#71847a;cursor:pointer;font-size:18px;line-height:1}.dw-issue{padding:11px 2px;border-bottom:1px solid #edf2ed}.dw-issue:last-child{border-bottom:0}.dw-issue-title{display:flex;align-items:center;gap:6px;font-weight:750}.dw-dot{width:7px;height:7px;border-radius:50%;background:var(--dot,#e25d70);flex:none}.dw-meta{margin:3px 0 5px;color:#82938a;font-size:11px;text-transform:capitalize}.dw-copy{margin:0;color:#60766a;font-size:12px}.dw-fix{display:flex;align-items:center;gap:6px;margin-top:8px}.dw-old{color:#bd646a;text-decoration:line-through;overflow-wrap:anywhere}.dw-new{color:#4c9066;font-weight:750;overflow-wrap:anywhere}.dw-accept{margin-left:auto;border:0;border-radius:7px;padding:6px 9px;background:#173f38;color:#d8f26b;font:700 11px system-ui;cursor:pointer}.dw-dismiss{border:0;background:none;color:#84968c;cursor:pointer;font-size:16px}.dw-pending{color:#78984d;font-size:10px}.dw-error{margin:9px 0 0;padding:7px 8px;border-radius:7px;background:#fff0ee;color:#9a514d;font-size:11px}.dw-footer{display:flex;justify-content:space-between;gap:8px;padding-top:10px;color:#8a9a91;font-size:10px}.dw-footer button{border:0;background:none;color:#57896b;cursor:pointer;font:inherit;text-decoration:underline}@media(prefers-color-scheme:dark){.dw-panel{background:#18322f;color:#eff8ef;border-color:#36534b;box-shadow:0 16px 38px #0008}.dw-head,.dw-issue{border-color:#315049}.dw-count,.dw-meta,.dw-copy,.dw-footer{color:#a7beb1}.dw-old{color:#ffadb0}.dw-new{color:#c9f68a}.dw-footer button{color:#b9e5b7}.dw-source{background:#315049;color:#d8f26b}.dw-error{background:#5b3534;color:#ffd1cc}}`;
   }
 
   function clearPanel() { while (panel?.firstChild) panel.removeChild(panel.firstChild); }
@@ -58,8 +61,10 @@
     button.setAttribute("aria-label", `${activeIssues.length} writing suggestion${activeIssues.length === 1 ? "" : "s"}`);
     clearPanel();
     const header = document.createElement("div"); header.className = "dw-head";
-    header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", `${activeIssues.length} suggestion${activeIssues.length === 1 ? "" : "s"}`, "dw-count"));
+    header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", activeIssues.some((item) => item.source === "ai") ? "AI + local" : "Local", "dw-source"), textNode("span", `${activeIssues.length} suggestion${activeIssues.length === 1 ? "" : "s"}`, "dw-count"));
+    if (aiPending) header.append(textNode("span", "Checking AI…", "dw-pending"));
     const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); close.addEventListener("click", () => { panel.hidden = true; }); header.append(close); panel.append(header);
+    if (aiError) panel.append(textNode("div", aiError, "dw-error"));
     if (activeIssues.length === 0) {
       const empty = document.createElement("div"); empty.className = "dw-issue"; empty.append(textNode("p", "No local issues in this field yet. Draftwise skips sensitive fields.", "dw-copy")); panel.append(empty);
     }
@@ -92,17 +97,21 @@
     panel.style.top = `${top}px`; panel.style.left = `${left}px`;
   }
 
-  function contentRange(element, start, end) {
-    if (!element.isContentEditable) { element.focus(); element.setSelectionRange(start, end); return null; }
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT); let node; let offset = 0; const range = document.createRange();
-    while ((node = walker.nextNode())) { const length = node.textContent?.length || 0; const next = offset + length; if (start >= offset && start <= next) range.setStart(node, start - offset); if (end >= offset && end <= next) { range.setEnd(node, end - offset); return range; } offset = next; }
-    return null;
-  }
-
   function applyIssue(item) {
-    if (!item || !activeField || activeField.isContentEditable && !contentRange(activeField, item.start, item.end)) return;
-    if (activeField.isContentEditable) { const range = contentRange(activeField, item.start, item.end); if (!range) return; range.deleteContents(); range.insertNode(document.createTextNode(item.replacement)); activeField.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" })); }
-    else { const value = activeField.value; if (value.slice(item.start, item.end) !== item.original) return; activeField.focus(); activeField.setRangeText(item.replacement, item.start, item.end, "end"); activeField.dispatchEvent(new Event("input", { bubbles: true })); }
+    if (!item || !activeField) return;
+    if (activeField.isContentEditable) {
+      const map = dom.buildEditableTextMap(activeField);
+      if (map.text.slice(item.start, item.end) !== item.original) return;
+      const range = map.rangeFor(item.start, item.end);
+      if (!range) return;
+      range.deleteContents();
+      range.insertNode(document.createTextNode(item.replacement));
+      activeField.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    } else {
+      const value = activeField.value;
+      if (value.slice(item.start, item.end) !== item.original) return;
+      activeField.focus(); activeField.setRangeText(item.replacement, item.start, item.end, "end"); activeField.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     panel.hidden = true; window.setTimeout(() => scan(activeField), 80);
   }
 
@@ -110,11 +119,13 @@
     if (!isEditable(element) || siteIsDisabled()) return;
     const text = textOf(element); const previous = element.__draftwiseText || ""; const previousResult = element.__draftwiseLocalResult || null; element.__draftwiseText = text; activeField = element;
     const local = localAnalysis(text, previous, previousResult); element.__draftwiseLocalResult = local;
-    activeIssues = local.issues || []; render(); place();
+    activeIssues = local.issues || []; aiError = ""; aiPending = false; render(); place();
     if (!settings.aiEnabled || !text.trim()) return;
     const currentRequest = ++requestId;
     const changedRange = previous !== text && typeof grammar.detectChangedRange === "function" ? grammar.detectChangedRange(previous, text) : null;
-    const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => null);
+    aiPending = true; render();
+    const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => ({ issues: null, error: "AI analysis is unavailable; local suggestions are still active." }));
+    aiPending = false; aiError = response?.error || "";
     if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
     if (Array.isArray(response.issues)) { activeIssues = response.issues; element.__draftwiseLocalResult = { ...local, issues: response.issues }; }
     render(); place();
@@ -132,17 +143,26 @@
     const hostElement = document.createElement("div"); hostElement.id = "draftwise-assistant-host"; root = hostElement.attachShadow({ mode: "open" });
     const styles = document.createElement("style"); styles.textContent = shadowStyles(); root.append(styles);
     button = document.createElement("button"); button.className = "dw-button"; button.type = "button"; button.setAttribute("aria-haspopup", "dialog"); button.addEventListener("click", () => { panel.hidden = !panel.hidden; render(); place(); if (!panel.hidden) panel.querySelector("button")?.focus(); }); root.append(button);
-    panel = document.createElement("div"); panel.className = "dw-panel"; panel.hidden = true; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Draftwise suggestions"); root.append(panel); document.documentElement.append(hostElement); button.hidden = true;
-    window.addEventListener("scroll", place, true); window.addEventListener("resize", place);
+    panel = document.createElement("div"); panel.className = "dw-panel"; panel.hidden = true; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Draftwise suggestions"); panel.setAttribute("aria-live", "polite"); root.append(panel); document.documentElement.append(hostElement); button.hidden = true;
+    window.addEventListener("scroll", place, true); window.addEventListener("resize", place); window.addEventListener("keydown", (event) => { if (event.key === "Escape" && panel && !panel.hidden) { panel.hidden = true; button.focus(); } });
   }
 
   function init(stored) {
     Object.assign(settings, stored || {});
     if (siteIsDisabled()) return;
-    initShadow(); document.querySelectorAll("textarea, input, [contenteditable=true]").forEach(bind);
-    const observer = new MutationObserver(() => document.querySelectorAll("textarea, input, [contenteditable=true]").forEach(bind));
+    initShadow(); dom.bindEditableSubtree(document.documentElement, bind);
+    const observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    chrome.storage.onChanged.addListener((changes) => { for (const [key, value] of Object.entries(changes)) settings[key] = value.newValue; if (siteIsDisabled()) { button.hidden = true; panel.hidden = true; } });
+    chrome.storage.onChanged.addListener((changes) => {
+      for (const [key, value] of Object.entries(changes)) settings[key] = value.newValue;
+      cache.clear(); requestId += 1;
+      if (siteIsDisabled() || (activeField && !isEditable(activeField))) {
+        activeIssues = []; aiPending = false; aiError = ""; button.hidden = true; panel.hidden = true;
+      } else {
+        dom.bindEditableSubtree(document.documentElement, bind);
+        if (activeField) void scan(activeField);
+      }
+    });
   }
 
   chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "aiEnabled", "goals", "style"], init);

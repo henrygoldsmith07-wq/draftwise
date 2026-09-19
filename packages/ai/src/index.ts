@@ -8,6 +8,7 @@ import {
 } from "../../analysis/src/index.ts";
 import {
   analyzeLocally,
+  createAnalysisDiagnostics,
   getWritingStats,
   inferTone,
   scoreWriting,
@@ -48,6 +49,10 @@ const CATEGORY_ALIASES: Record<string, IssueCategory> = {
 
 const VALID_SEVERITIES = new Set<IssueSeverity>(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
+
+function providerAnalysisNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
 interface ProviderIssue {
   start: number;
   end: number;
@@ -314,6 +319,7 @@ export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?
 }
 
 export function parseAnalysisResponse(value: unknown, sourceText: string, options: { preferences?: GrammarOptions; goals?: WritingGoals } = {}): AnalysisResult | null {
+  const startedAt = providerAnalysisNow();
   const parsed = parseProviderPayload(value);
   if (!parsed) return null;
   const local = analyzeLocally(sourceText, options.preferences, options.goals);
@@ -321,6 +327,7 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
   const issues = mergeAnalysisIssues([...local.issues, ...aiIssues]);
   const stats = getWritingStats(sourceText);
   const scores = scoreWriting(stats, issues, options.goals, sourceText);
+  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "provider");
   return {
     analysedText: sourceText,
     issues,
@@ -328,6 +335,7 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
     scores,
     stats,
     source: aiIssues.length ? "local+ai" : "local",
+    ...(diagnostics ? { diagnostics } : {}),
   };
 }
 
@@ -347,6 +355,7 @@ export async function analyzeWithProvider(
   settings: ProviderSettings,
   options: ProviderAnalysisOptions = {},
 ) {
+  const startedAt = providerAnalysisNow();
   const preferences = options.preferences;
   const local = options.localAnalysis ?? analyzeLocally(text, preferences, goals);
   const changed = options.changedRange && text.length > options.changedRange.start
@@ -378,6 +387,7 @@ export async function analyzeWithProvider(
   });
   const issues = mergeAnalysisIssues([...local.issues, ...aiIssues]);
   const stats = getWritingStats(text);
+  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "provider");
   return {
     ...local,
     analysedText: text,
@@ -386,6 +396,7 @@ export async function analyzeWithProvider(
     stats,
     source: aiIssues.length ? "local+ai" : "local",
     changedRange: options.changedRange ?? undefined,
+    ...(diagnostics ? { diagnostics } : {}),
   } satisfies AnalysisResult;
 }
 
@@ -406,10 +417,11 @@ function protectedTokens(text: string) {
   const patterns = [
     /https?:\/\/[^\s)]+/giu,
     /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
-    /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4})\b/giu,
+    /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu,
     /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu,
     /\b\d[\d,.]*%/gu,
     /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b/giu,
+    /\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/g,
     /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu,
     /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu,
     /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu,

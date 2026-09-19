@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeLocally, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
+import { analyzeDocument, analyzeLocally, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
 
 test("local analysis catches typos, punctuation, and repetition", () => {
   const result = analyzeLocally("This is repeatd  wording wording, recieve it!!");
@@ -38,6 +38,49 @@ test("local spellchecking ranks arbitrary candidates and respects names, acronym
   assert.equal(suggestSpelling("receeve", style), "receive");
   const result = analyzeLocally("Ariadne uses TypeScript in a well-known API. Draftwise works; NASA agrees. It can't fail.", style);
   assert.equal(result.issues.some((issue) => issue.ruleId === "spelling-lexicon"), false);
+});
+
+test("spelling handles transpositions, omitted letters, inflections, hyphens, possessives, and Unicode", () => {
+  assert.equal(suggestSpelling("teh"), "the");
+  assert.equal(suggestSpelling("writng"), "writing");
+  assert.equal(suggestSpelling("recieve"), "receive");
+  assert.equal(suggestSpelling("enviroment"), "environment");
+  const result = analyzeLocally("The writer's well-known café has a naïve example.");
+  assert.equal(result.issues.some((issue) => issue.category === "spelling"), false);
+});
+
+test("article exceptions and noun agreement cover common high-confidence cases", () => {
+  const correct = analyzeLocally("An hour passed. An honest answer helps. An honour matters. A university has a user guide for a European one-time test.");
+  assert.equal(correct.issues.some((issue) => issue.ruleId === "grammar-article-agreement"), false);
+  const incorrect = analyzeLocally("A hour is useful. An university is useful. The results is clear. The result are clear.");
+  assert.equal(incorrect.issues.filter((issue) => issue.ruleId === "grammar-article-agreement").length, 2);
+  assert.equal(incorrect.issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement").length, 2);
+});
+
+test("analyzeDocument shares sentence and paragraph measurements with stats", () => {
+  const document = analyzeDocument("A clear sentence. Another useful result.\n\nA final paragraph.");
+  const stats = getWritingStats(document.text, document);
+  assert.deepEqual(document.sentenceLengths, [3, 3, 3]);
+  assert.deepEqual(document.paragraphLengths, [6, 3]);
+  assert.deepEqual(stats.sentenceLengths, document.sentenceLengths);
+  assert.deepEqual(stats.paragraphLengths, document.paragraphLengths);
+});
+
+test("debug analysis diagnostics expose timing without changing normal issue metadata", () => {
+  const previous = globalThis.DraftwiseDebug;
+  globalThis.DraftwiseDebug = true;
+  try {
+    const result = analyzeLocally("This is repeatd.");
+    assert.equal(result.diagnostics?.engine, "local");
+    assert.equal(result.diagnostics?.issueCount, result.issues.length);
+    assert.ok((result.diagnostics?.processingMs ?? -1) >= 0);
+    assert.equal(result.issues[0]?.source, "local");
+    assert.ok(result.issues[0]?.ruleId);
+    assert.ok(result.issues[0]?.explanation);
+  } finally {
+    if (previous === undefined) delete globalThis.DraftwiseDebug;
+    else globalThis.DraftwiseDebug = previous;
+  }
 });
 
 test("readability keeps a legitimate zero score instead of falling back", () => {

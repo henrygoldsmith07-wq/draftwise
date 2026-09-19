@@ -47,7 +47,7 @@ async function registerSite(hostname) {
     id: globalThis.DraftwisePermissions.siteScriptId(normalised),
     matches: origins,
     excludeMatches,
-    js: ["shared-analysis.js", "field-classification.js", "content.js"],
+    js: ["shared-analysis.js", "field-classification.js", "dom-utils.js", "content.js"],
     runAt: "document_idle",
     persistAcrossSessions: true,
   }]);

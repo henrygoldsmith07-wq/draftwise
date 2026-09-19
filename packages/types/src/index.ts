@@ -92,6 +92,14 @@ export interface WritingStats {
   commonWords: FrequencyItem[];
 }
 
+export type AnalysisEngine = "local" | "incremental" | "provider";
+
+export interface AnalysisDiagnostics {
+  processingMs: number;
+  issueCount: number;
+  engine: AnalysisEngine;
+}
+
 export interface AnalysisResult {
   issues: WritingIssue[];
   tone: string[];
@@ -100,6 +108,7 @@ export interface AnalysisResult {
   analysedText: string;
   source: "local" | "ai" | "local+ai";
   changedRange?: { start: number; end: number };
+  diagnostics?: AnalysisDiagnostics;
 }
 
 export interface WritingGoals {

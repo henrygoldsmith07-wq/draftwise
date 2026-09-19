@@ -3,11 +3,16 @@
 import { useCallback, useRef, useState } from "react";
 import { rewriteWithProvider, ProviderError } from "@/packages/ai/src";
 import type { ProviderSettings, RewriteResult, StylePreferences, WritingGoals } from "@/packages/types/src";
+export { createRewriteRetryArgs } from "@/lib/rewrite-retry";
 
 export interface RewritePreviewState extends RewriteResult {
   label: string;
+  instruction: string;
   original: string;
   selection: { start: number; end: number };
+  goals: WritingGoals;
+  style: StylePreferences;
+  aiEnabled: boolean;
   loading?: boolean;
 }
 
@@ -31,15 +36,15 @@ export function useRewrite() {
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
-    setPreview({ label: args.label, original: args.text, selection: args.selection, replacement: "", explanation: "", source: "local", loading: true });
+    setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: "", explanation: "", source: "local", loading: true });
     try {
       const provider = args.aiEnabled ? args.settings : { ...args.settings, apiKey: "" };
       const result = await rewriteWithProvider({ text: args.text, instruction: args.instruction, goals: args.goals, preferences: args.style }, provider, controller.signal);
       if (controller.signal.aborted || currentRun !== runId.current) return;
-      setPreview({ ...result, label: args.label, original: args.text, selection: args.selection });
+      setPreview({ ...result, label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled });
     } catch (reason: unknown) {
       if (controller.signal.aborted || currentRun !== runId.current) return;
-      setPreview({ label: args.label, original: args.text, selection: args.selection, replacement: args.text, explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local" });
+      setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: args.text, explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local" });
     }
   }, []);
 

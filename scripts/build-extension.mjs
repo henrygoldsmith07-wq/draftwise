@@ -10,7 +10,7 @@ const extensionDir = resolve(root, "extension");
 function stripImportsAndExports(source) {
   return source
     .replace(/import[\s\S]*?from\s+["'][^"']+["'];?\s*/gu, "")
-    .replace(/\bexport\s+(?=(?:const|function|class|interface|type))/gu, "");
+    .replace(/\bexport\s+/gu, "");
 }
 
 function transpile(source) {
@@ -38,6 +38,6 @@ await writeFile(resolve(extensionDir, "shared-analysis.js"), `(() => {\n${analys
 
 const aiPrelude = `const { createAnalysisChunks, expandRangeToContext, mapChunkIssue, mergeAnalysisIssues } = DraftwiseAnalysisModule;\nconst { analyzeLocally, getWritingStats, inferTone, scoreWriting } = DraftwiseGrammarModule;\n`;
 const ai = wrapper("DraftwiseProviderModule", aiSource, ["analyzeWithProvider", "ProviderError"], aiPrelude);
-await writeFile(resolve(extensionDir, "shared-provider.js"), `(() => {\n${grammar}${analysis}${ai}globalThis.DraftwiseProvider = DraftwiseProviderModule;\n})();\n`, "utf8");
+await writeFile(resolve(extensionDir, "shared-provider.js"), `(() => {\n${analysis}${grammar}${ai}globalThis.DraftwiseProvider = DraftwiseProviderModule;\n})();\n`, "utf8");
 
 console.log("Draftwise extension bundles are up to date.");

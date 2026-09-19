@@ -1,5 +1,6 @@
 import type {
   AnalysisScores,
+  AnalysisDiagnostics,
   Dialect,
   FrequencyItem,
   IssueCategory,
@@ -26,17 +27,63 @@ const DEFAULT_STYLE_PREFERENCES: StylePreferences = {
   blockedWords: [],
 };
 
+function analysisNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
+function diagnosticsEnabled() {
+  const runtime = globalThis as typeof globalThis & { DraftwiseDebug?: boolean };
+  if (runtime.DraftwiseDebug === true) return true;
+  return typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
+}
+
+export function createAnalysisDiagnostics(issueCount: number, startedAt: number, engine: AnalysisDiagnostics["engine"]): AnalysisDiagnostics | undefined {
+  if (!diagnosticsEnabled()) return undefined;
+  return {
+    processingMs: Math.max(0, Math.round((analysisNow() - startedAt) * 100) / 100),
+    issueCount,
+    engine,
+  };
+}
+
 export const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
 
 const TYPO_FIXES: Record<string, string> = {
   alot: "a lot",
+  adn: "and",
+  acheive: "achieve",
+  adress: "address",
+  arguement: "argument",
+  becuase: "because",
+  beleive: "believe",
+  calender: "calendar",
+  comming: "coming",
+  couldnt: "couldn't",
   definately: "definitely",
+  dont: "don't",
+  goverment: "government",
   enviroment: "environment",
+  expecially: "especially",
+  independant: "independent",
+  maintenence: "maintenance",
   occured: "occurred",
+  occurence: "occurrence",
+  priviledge: "privilege",
+  publically: "publicly",
   recieve: "receive",
+  reciever: "receiver",
+  refered: "referred",
   seperate: "separate",
+  sucess: "success",
+  succesful: "successful",
+  teh: "the",
   thier: "their",
+  tommorow: "tomorrow",
   untill: "until",
+  youre: "you're",
+  theyre: "they're",
+  wasnt: "wasn't",
+  writng: "writing",
   wich: "which",
   youve: "you've",
   isnt: "isn't",
@@ -44,22 +91,22 @@ const TYPO_FIXES: Record<string, string> = {
   doesnt: "doesn't",
   shouldnt: "shouldn't",
   repeatd: "repeated",
+  repeatdly: "repeatedly",
+  seperately: "separately",
   writting: "writing",
   accomodate: "accommodate",
   begining: "beginning",
   commited: "committed",
   embarass: "embarrass",
-  independant: "independent",
   responsability: "responsibility",
-  succesful: "successful",
   tommorrow: "tomorrow",
   writen: "written",
 };
 
-// A compact ranked lexicon keeps the local checker useful in the web app and extension
-// without shipping a multi-megabyte dictionary. Unknown words are only flagged when a
-// high-frequency candidate is within a small edit distance, which avoids name/term noise.
-const SPELLING_FREQUENCY = `
+// Keep the common lexicon inline so the web app and extension share exactly the same
+// local checker. The core list is ordered by frequency; the extended list adds useful
+// vocabulary without shipping a multi-megabyte general-purpose dictionary.
+const SPELLING_CORE = `
 the be to of and a in that have I it is for not on with he as you do at this but his by from they we say her she or an will my one all would there their what so up out if about who get which go me when make made can like time no just him know take people into year your good some could them see other than then now look only come its over think also back after use two how our work first well way even new want because these give day most us
 thing man world life hand part child eye woman place week case point government company number group problem fact home water room mother area money story month lot right study book job word business issue side kind head house service friend power hour game line end member law car city community name president team minute idea kid body information nothing ago lead social understand whether watch together follow parent stop face anything create late speak read level allow add start change offer remember love help move live believe hold bring happen write provide sit stand lose pay meet include continue set learn turn start show hear play run might should mean keep let begin seem help talk receive
 research evidence analysis method methodology result results finding findings data theory sample study academic article paper source citation references conclusion argument explain explanation question answer describe description compare contrast therefore however while although because process system model example report review draft edit writing writer reader sentence paragraph heading title grammar spelling punctuation clarity concise concise clarity simple direct formal professional general technical audience intent tone quality accurate correct safe private local device browser extension application software code package function variable service provider endpoint request response network timeout error test tests benchmark build release project repository version dependency documentation security privacy permission origin host domain field input form textarea content
@@ -70,7 +117,19 @@ analyze analyzed analyzing center color favor organize organized organization re
 javascript typescript python java rust go html css json xml sql api sdk npm node react nextjs browser chrome firefox cloudflare worker workers github git commit branch pull request continuous integration deploy deployment server client frontend backend database storage cache worker queue
 quick brown fox jumps lazy dog hello thanks please welcome ready carefully interesting draftwise assistant improve improvement suggestion suggestions accept dismiss rewrite rewrites alternative alternatives document documents text words word you're we're they're don't can't won't isn't it's that's couldn't wouldn't shouldn't
 `.trim().split(/\s+/u);
+const SPELLING_EXTENDED = `
+ability able absence absolute absolutely abstract abundant accelerate acceptable access accident accompany accomplish achievement acknowledge acquire across action activate activity actual adapt adequate adjust administration admire admission adopt advance advantage advertise advice advise affect afford afraid agency agenda aggressive agriculture aircraft alarm album alcohol alert allocate allowance alter alternative ambitious analyse announcement annual anticipate anxiety apartment apparent appeal appearance application appoint appreciate approach appropriate approval argue arise arrangement arrival aspect assemble assess assessment assign assistance assumption assure atmosphere attach attempt attention attitude attorney attract attractive audience author authority automatic available average avoid awareness balance barrier basic basis battery beautiful behaviour belief belong benefit beside bicycle biology boundary branch bravery breathe brilliant budget calculate campaign candidate capability capacity capture category celebrate challenge champion channel chapter character charity chemical circumstance citizen clarify classic climate clinical combine comfortable command comment commercial communicate communication competition competitive complaint complete complex component compose composition compromise concentration concept conclude condition conference confidence confirm conflict connect consequence conservative consider consistent constant construct consumer contain contemporary content contract contribute convenient coordinate corporation creative crisis criterion crucial curious current customer damage database deadline debate decade decline dedicate defend define definite demonstrate deny department depend deposit derive destination detail detect determine device diagram digital dimension direction discover discussion display distance distinct distribute district diverse document duration dynamic earn editorial efficient element eliminate emerge emphasis emotional employ employee enable encounter encourage energy engine enhance enormous ensure enterprise entertain entire enthusiasm equivalent establish estimate ethics evaluate evidence exact examine exception exchange exclude execute exhibit expand expectation expense experience experiment expert export expose express extension external factor failure familiar fashion feature feedback festival fiction finance flexible flight flourish focus foreign formal foundation framework frequent function fundamental gain gallery gender generate generation generous geography global govern guidance habit handle hardware healthy hesitate highlight historical honest honour hospital household however hygiene ideal identify illustrate image imagination immediate implement implication importance impressive improve incentive incident include income indicate individual industry inevitable influence initial innovate inquiry insight inspect install instance instead institute integrate intelligence intend intense interact interest internal international interpret interrupt introduce invest investigate involve isolate issue item journey judge justice junior keyboard laboratory language launch layer legal legacy length lesson liberal library licence lifetime likely limit liquid literature locate logical loyalty maintain maintenance manage manner manual manufacture margin market material mature maximum measure mechanism media medicine mention mental method migrate minimum minor mission mobile moderate modern monitor motivate multiple mutual native natural nearby negotiate negative negotiate network neutral notice notion objective obtain obvious occasion official operate opportunity option ordinary organise outcome overall participate partner particular pattern perceive perform permission perspective phase physical policy position positive potential practice precise predict prefer prepare present previous primary principle privacy proceed process produce professional progress project promote propose protect psychology publish purchase pursue quality quarter question rapid rarely react realistic reason recommend recover reduce refer reflect region register regular reject release relevant reliable remain remove replace represent require residence resolve resource respond responsibility restrict retail reveal revise routine safety sample satisfy schedule scope secure segment select sensitive sequence separate serious significant similar simple sincere since single situation sketch solution source specific stable standard statement strategic strategy strengthen structure submit substantial succeed sufficient suggest support survey symbol technical technique technology temporary tension terminology terminal theme thorough thought throughout topic transform transition translate transport trend typical unique update useful valid value variable various vehicle version virtual visible vision visual volume volunteer warn whereas whole widely willing window within without wonder workflow worthy writing wrong youth
+`.trim().split(/\s+/u);
+const SPELLING_COMMON = `
+above across again against almost already always among another anyone anything appear around ask away become before behind below between both call called country customer enough event example effect experience family far few final find following full future great help has history important including interface interfaces later least loose lunch main matter matters message much must need never next note often once open original others own plan possible practical probably question rather reason real recent right same saw send several something sometimes specific step still sure task team tell than though through today under user users usually value was why yet are aspects act box changer close contact being
+`.trim().split(/\s+/u);
+const SPELLING_COMMON_EXTRA = ["stay"];
+const SPELLING_UNICODE = `
+café naïve résumé fiancée jalapeño façade coöperate déjà touché protégé über voilà mañana señor São München Zürich Łódź Αθήνα Москва 東京 北京
+`.trim().split(/\s+/u);
+const SPELLING_FREQUENCY = [...new Set([...SPELLING_CORE, ...SPELLING_UNICODE, ...SPELLING_COMMON, ...SPELLING_COMMON_EXTRA, ...SPELLING_EXTENDED])];
 const SPELLING_WORDS = new Set(SPELLING_FREQUENCY);
+const SPELLING_RANK = new Map(SPELLING_FREQUENCY.map((word, index) => [word.toLocaleLowerCase(), index]));
 const SPELLING_INDEX = new Map<number, string[]>();
 SPELLING_FREQUENCY.forEach((word) => {
   const normalized = word.toLocaleLowerCase();
@@ -79,6 +138,20 @@ SPELLING_FREQUENCY.forEach((word) => {
   SPELLING_INDEX.set(normalized.length, bucket);
 });
 const SPELLING_CACHE = new Map<string, string | null>();
+
+const CONTRACTIONS = new Set([
+  "aren't", "can't", "couldn't", "didn't", "doesn't", "don't", "hadn't", "hasn't", "haven't", "he'd", "he'll", "he's",
+  "i'd", "i'll", "i'm", "i've", "isn't", "it'd", "it'll", "it's", "let's", "mightn't", "mustn't", "shan't", "she'd",
+  "she'll", "she's", "shouldn't", "that's", "there's", "they'd", "they'll", "they're", "they've", "wasn't", "we'd", "we'll",
+  "we're", "we've", "weren't", "what's", "where's", "who's", "won't", "wouldn't", "you'd", "you'll", "you're", "you've",
+]);
+
+const ARTICLE_AN_EXCEPTIONS = new Set(["heir", "heirloom", "honest", "honestly", "honour", "honours", "honor", "hour", "hourly"]);
+const ARTICLE_A_SOUND_PREFIXES = /^(?:euro|ewe|one|once|uni|use|user|usual|utensil|ubiquit|u[nr]i)/u;
+
+const KEYBOARD_NEIGHBOURS: Record<string, string> = {
+  a: "qwsz", b: "vghn", c: "xdfv", d: "serfcx", e: "wrsd", f: "drtgvc", g: "ftyhbv", h: "gyujnb", i: "ujk", j: "huikmn", k: "jiolm", l: "kop", m: "njk", n: "bhjm", o: "iklp", p: "ol", q: "wa", r: "edft", s: "awedxz", t: "rfgy", u: "yhji", v: "cfgb", w: "qase", x: "zsdc", y: "tugh", z: "asx",
+};
 
 const DIALECT_VARIANTS: Record<string, { "en-GB": string; "en-US": string }> = {
   analyze: { "en-GB": "analyse", "en-US": "analyze" },
@@ -94,6 +167,20 @@ const DIALECT_VARIANTS: Record<string, { "en-GB": string; "en-US": string }> = {
   traveled: { "en-GB": "travelled", "en-US": "traveled" },
   behavior: { "en-GB": "behaviour", "en-US": "behavior" },
   license: { "en-GB": "licence", "en-US": "license" },
+  catalogue: { "en-GB": "catalogue", "en-US": "catalog" },
+  cancelled: { "en-GB": "cancelled", "en-US": "canceled" },
+  defence: { "en-GB": "defence", "en-US": "defense" },
+  favourite: { "en-GB": "favourite", "en-US": "favorite" },
+  fulfil: { "en-GB": "fulfil", "en-US": "fulfill" },
+  labelled: { "en-GB": "labelled", "en-US": "labeled" },
+  metre: { "en-GB": "metre", "en-US": "meter" },
+  practise: { "en-GB": "practise", "en-US": "practice" },
+  programme: { "en-GB": "programme", "en-US": "program" },
+  theatre: { "en-GB": "theatre", "en-US": "theater" },
+  travelling: { "en-GB": "travelling", "en-US": "traveling" },
+  optimise: { "en-GB": "optimise", "en-US": "optimize" },
+  prioritise: { "en-GB": "prioritise", "en-US": "prioritize" },
+  specialise: { "en-GB": "specialise", "en-US": "specialize" },
 };
 
 const FILLER_WORDS = new Set([
@@ -165,6 +252,8 @@ export interface ParsedDocument {
   sentences: SentenceSpan[];
   paragraphs: Array<{ text: string; start: number; end: number; tokens: Token[] }>;
   frequencies: Map<string, number>;
+  sentenceLengths: number[];
+  paragraphLengths: number[];
 }
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
@@ -192,6 +281,7 @@ function preserveCase(original: string, replacement: string) {
 function boundedEditDistance(left: string, right: string, limit = 2) {
   if (Math.abs(left.length - right.length) > limit) return limit + 1;
   let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  let previousPrevious: number[] | null = null;
   for (let row = 1; row <= left.length; row += 1) {
     const current = [row];
     let rowMinimum = current[0];
@@ -201,11 +291,15 @@ function boundedEditDistance(left: string, right: string, limit = 2) {
         current[column - 1] + 1,
         previous[column] + 1,
         previous[column - 1] + cost,
+        previousPrevious && row > 1 && column > 1 && left[row - 1] === right[column - 2] && left[row - 2] === right[column - 1]
+          ? previousPrevious[column - 2] + 1
+          : limit + 1,
       );
       current[column] = value;
       rowMinimum = Math.min(rowMinimum, value);
     }
     if (rowMinimum > limit) return limit + 1;
+    previousPrevious = previous;
     previous = current;
   }
   return previous[right.length];
@@ -215,39 +309,87 @@ function spellingKey(word: string, preferences: StylePreferences) {
   return `${preferences.dialect}:${word.toLocaleLowerCase()}`;
 }
 
+function dictionaryHas(word: string, preferences: StylePreferences) {
+  const lower = word.toLocaleLowerCase().normalize("NFC");
+  return SPELLING_WORDS.has(lower)
+    || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase().normalize("NFC") === lower)
+    || preferences.names?.some((value) => value.toLocaleLowerCase().normalize("NFC") === lower);
+}
+
+function inflectionRoots(lower: string) {
+  const roots = new Set<string>();
+  const add = (value: string) => { if (value.length >= 3) roots.add(value); };
+  if (lower.endsWith("ies")) add(`${lower.slice(0, -3)}y`);
+  if (lower.endsWith("ves")) { add(`${lower.slice(0, -3)}f`); add(`${lower.slice(0, -3)}fe`); }
+  if (lower.endsWith("es")) { add(lower.slice(0, -2)); add(lower.slice(0, -1)); }
+  if (lower.endsWith("s")) add(lower.slice(0, -1));
+  if (lower.endsWith("ied")) add(`${lower.slice(0, -3)}y`);
+  if (lower.endsWith("ed")) {
+    const root = lower.slice(0, -2);
+    add(root); add(`${root}e`); if (/(.)\1$/u.test(root)) add(root.slice(0, -1));
+  }
+  if (lower.endsWith("ing")) {
+    const root = lower.slice(0, -3);
+    add(root); add(`${root}e`); if (/(.)\1$/u.test(root)) add(root.slice(0, -1));
+  }
+  if (lower.endsWith("er") || lower.endsWith("est")) add(lower.replace(/(?:er|est)$/u, ""));
+  if (lower.endsWith("ly")) add(lower.slice(0, -2));
+  return roots;
+}
+
 function isKnownSpelling(word: string, preferences: StylePreferences) {
-  const lower = word.toLocaleLowerCase();
-  if (SPELLING_WORDS.has(lower) || TYPO_FIXES[lower] || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase() === lower) || preferences.names?.some((value) => value.toLocaleLowerCase() === lower)) return true;
-  const stems = [
-    lower.endsWith("ies") ? lower.slice(0, -3) + "y" : "",
-    lower.endsWith("es") ? lower.slice(0, -1) : "",
-    lower.endsWith("s") ? lower.slice(0, -1) : "",
-    lower.endsWith("ed") ? lower.slice(0, -2) : "",
-    lower.endsWith("ing") ? lower.slice(0, -3) : "",
-  ];
-  if (stems.some((stem) => stem.length >= 3 && SPELLING_WORDS.has(stem))) return true;
+  const lower = word.toLocaleLowerCase().normalize("NFC");
+  const asciiContraction = lower.replaceAll("’", "'");
+  if (dictionaryHas(lower, preferences) || CONTRACTIONS.has(asciiContraction)) return true;
+  const possessive = lower.match(/^(.+?)(?:['’]s|s['’])$/u);
+  if (possessive?.[1] && dictionaryHas(possessive[1], preferences)) return true;
   const parts = lower.split(/[’'-]/u).filter(Boolean);
-  if (parts.length > 1 && parts.every((part) => SPELLING_WORDS.has(part) || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase() === part))) return true;
-  return false;
+  if (parts.length > 1 && parts.every((part) => part === "s" || dictionaryHas(part, preferences))) return true;
+  return [...inflectionRoots(lower)].some((root) => dictionaryHas(root, preferences));
+}
+
+function keyboardPenalty(left: string, right: string) {
+  let penalty = Math.abs(left.length - right.length);
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (left[index] === right[index]) continue;
+    if (!KEYBOARD_NEIGHBOURS[left[index]]?.includes(right[index] ?? "")) penalty += 1;
+  }
+  return penalty;
+}
+
+function dialectPenalty(word: string, preferences: StylePreferences) {
+  for (const variants of Object.values(DIALECT_VARIANTS)) {
+    if (word === variants[preferences.dialect]) return 0;
+    if (word === variants[preferences.dialect === "en-GB" ? "en-US" : "en-GB"]) return 1;
+  }
+  return 0;
 }
 
 export function suggestSpelling(word: string, preferences: GrammarOptions = {}) {
   const merged = mergePreferences(preferences);
-  const lower = word.toLocaleLowerCase();
+  const lower = word.toLocaleLowerCase().normalize("NFC");
   const key = spellingKey(word, merged);
-  if (isKnownSpelling(word, merged) || /[^\p{ASCII}]/u.test(word) || /^[A-Z][\p{L}'’-]+$/u.test(word) || /^[A-Z]{2,}[\w-]*$/u.test(word)) {
+  if (TYPO_FIXES[lower]) return TYPO_FIXES[lower];
+  if (isKnownSpelling(word, merged) || /^[A-Z][\p{L}'’-]+$/u.test(word) || /^[A-Z]{2,}[\w-]*$/u.test(word)) {
     return null;
   }
   if (SPELLING_CACHE.has(key)) return SPELLING_CACHE.get(key) ?? null;
+  if (lower.length < 3) return null;
   const maxDistance = lower.length >= 8 ? 2 : 1;
-  let best: { word: string; distance: number; rank: number } | null = null;
+  const hasUnicode = /[^\p{ASCII}]/u.test(lower);
+  let best: { word: string; distance: number; keyboard: number; dialect: number; rank: number } | null = null;
   for (let length = Math.max(1, lower.length - maxDistance); length <= lower.length + maxDistance; length += 1) {
     for (const candidate of SPELLING_INDEX.get(length) ?? []) {
-      if (candidate === lower || candidate[0] !== lower[0]) continue;
+      if (candidate === lower || (hasUnicode && !/[^\p{ASCII}]/u.test(candidate))) continue;
       const distance = boundedEditDistance(lower, candidate, maxDistance);
       if (distance > maxDistance) continue;
-      const rank = SPELLING_FREQUENCY.indexOf(candidate);
-      if (!best || distance < best.distance || (distance === best.distance && rank < best.rank)) best = { word: candidate, distance, rank };
+      const candidateScore = { word: candidate, distance, keyboard: keyboardPenalty(lower, candidate), dialect: dialectPenalty(candidate, merged), rank: SPELLING_RANK.get(candidate) ?? Number.MAX_SAFE_INTEGER };
+      if (!best
+        || candidateScore.distance < best.distance
+        || (candidateScore.distance === best.distance && candidateScore.keyboard < best.keyboard)
+        || (candidateScore.distance === best.distance && candidateScore.keyboard === best.keyboard && candidateScore.dialect < best.dialect)
+        || (candidateScore.distance === best.distance && candidateScore.keyboard === best.keyboard && candidateScore.dialect === best.dialect && candidateScore.rank < best.rank)) best = candidateScore;
     }
   }
   const result = best?.word ?? null;
@@ -310,8 +452,18 @@ export function parseDocument(text: string): ParsedDocument {
   }
   const frequencies = new Map<string, number>();
   for (const token of tokens) frequencies.set(token.lower, (frequencies.get(token.lower) ?? 0) + 1);
-  return { text, tokens, sentences, paragraphs, frequencies };
+  return {
+    text,
+    tokens,
+    sentences,
+    paragraphs,
+    frequencies,
+    sentenceLengths: sentences.map((sentence) => sentence.tokens.length),
+    paragraphLengths: paragraphs.map((paragraph) => paragraph.tokens.length),
+  };
 }
+
+export const analyzeDocument = parseDocument;
 
 function shouldIgnore(ruleId: string, original: string, preferences: StylePreferences) {
   const lower = original.trim().toLocaleLowerCase();
@@ -386,20 +538,44 @@ function findSpelling(text: string, preferences: StylePreferences, document = pa
 
 function findConfusedWords(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
-  const patterns: Array<[RegExp, string, string, string]> = [
+  const patterns: Array<[RegExp, string, string, string, number?]> = [
     [/\b(your)\s+(welcome|going|right|sure)\b/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
     [/\b(its)\s+(a|an|not|been|going)\b/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
-    [/\b(their)\s+(is|are|was|were)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
+    [/\b(their)\s+(is|are|was|were|has|have|a|an|not)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
+    [/\b(there)\s+(own|idea|ideas|team|house|car|name|responsibility)\b/giu, "their", "grammar-confused-there", "Their shows possession; there points to a place or introduces a statement."],
+    [/\b(better|worse|more|less|rather|different)\s+(then)\b/giu, "than", "grammar-confused-than", "Than compares; then describes time or sequence.", 2],
+    [/\b(an?|the|this|that)\s+(affect)\b/giu, "effect", "grammar-confused-affect", "Effect is usually the noun for a result; affect is usually the verb.", 2],
+    [/\b(to|will|can|may|might|could|does|did)\s+(effect)\b/giu, "affect", "grammar-confused-effect", "Affect is usually the verb meaning to influence; effect is usually the noun.", 2],
+    [/\b(to)\s+(much|many|late|long|loud|quiet|far|quickly)\b/giu, "too", "grammar-confused-too", "Too means excessively or also; to usually introduces a destination or verb.", 1],
+    [/\b(too)\s+(the|a|an|my|your|our|their)\b/giu, "to", "grammar-confused-to", "To usually introduces a destination or verb; too means excessively or also.", 1],
+    [/\b(to)\s+(advice)\b/giu, "advise", "grammar-confused-advice", "Advise is the verb; advice is the noun.", 1],
+    [/\b(some|good|useful|professional)\s+(advise)\b/giu, "advice", "grammar-confused-advise", "Advice is the noun; advise is the verb.", 2],
+    [/\b(to|will|can|may|might|could)\s+(loose)\b/giu, "lose", "grammar-confused-loose", "Lose means misplace or fail to win; loose means not tight.", 2],
   ];
-  for (const [pattern, replacement, ruleId, explanation] of patterns) {
+  for (const [pattern, replacement, ruleId, explanation, groupIndex = 1] of patterns) {
     for (const match of text.matchAll(pattern)) {
       const start = (match.index ?? 0);
-      const original = match[1] ?? "";
-      const wordStart = start;
+      const original = match[groupIndex] ?? "";
+      const wordStart = start + (match[0]?.indexOf(original) ?? 0);
       pushIssue(issues, makeIssue(ruleId, wordStart, wordStart + original.length, original, preserveCase(original, replacement), "grammar", "medium", "Check the commonly confused word", explanation, 0.78, preferences));
     }
   }
   return issues;
+}
+
+function articleFor(word: string) {
+  const lower = word.toLocaleLowerCase();
+  if (/^[A-Z]{2,}/u.test(word) && /^(?:u|uk|un|url|uuid|ui|usb|utc)/iu.test(word)) return "a";
+  if (ARTICLE_AN_EXCEPTIONS.has(lower)) return "an";
+  if (ARTICLE_A_SOUND_PREFIXES.test(lower)) return "a";
+  return /^[aeiou]/u.test(lower) ? "an" : "a";
+}
+
+function nounLooksPlural(word: string) {
+  const lower = word.toLocaleLowerCase();
+  if (["children", "criteria", "media", "men", "people", "results", "women"].includes(lower)) return true;
+  if (!lower.endsWith("s")) return false;
+  return !/(?:analysis|basis|business|class|gas|glass|is|mathematics|news|physics|series|species|status|ss|us)$/u.test(lower);
 }
 
 function findPrecisionGrammarIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
@@ -412,10 +588,7 @@ function findPrecisionGrammarIssues(text: string, preferences: StylePreferences,
   }
   for (const match of text.matchAll(/\b(a|an)\s+([\p{L}][\p{L}'’-]*)/giu)) {
     const article = (match[1] ?? "").toLocaleLowerCase();
-    const word = (match[2] ?? "").toLocaleLowerCase();
-    const vowelSoundException = /^(?:uni|use|user|eu|one|once|ou)/u.test(word);
-    const shouldUseAn = /^[aeiou]/u.test(word) && !vowelSoundException;
-    const expected = shouldUseAn ? "an" : "a";
+    const expected = articleFor(match[2] ?? "");
     if (article === expected) continue;
     const start = (match.index ?? 0) + (match[0].toLocaleLowerCase().indexOf(article));
     pushIssue(issues, makeIssue("grammar-article-agreement", start, start + article.length, match[1] ?? article, preserveCase(match[1] ?? article, expected), "grammar", "medium", "Check the article", `Use “${expected}” before “${match[2]}” in this context.`, 0.9, preferences));
@@ -423,10 +596,18 @@ function findPrecisionGrammarIssues(text: string, preferences: StylePreferences,
   const agreementPatterns: Array<[RegExp, Record<string, string>]> = [
     [/\b(he|she|it)\s+(are|were|have|do)\b/giu, { are: "is", were: "was", have: "has", do: "does" }],
     [/\b(they|we|you)\s+(is|was|has|does)\b/giu, { is: "are", was: "were", has: "have", does: "do" }],
+    [/\b(?:the|this|that|my|your|our|their)\s+([\p{L}][\p{L}'’-]*)\s+(is|was|has|does)\b/giu, { is: "are", was: "were", has: "have", does: "do" }],
+    [/\b(?:the|this|that|my|your|our|their)\s+([\p{L}][\p{L}'’-]*)\s+(are|were|have|do)\b/giu, { are: "is", were: "was", have: "has", do: "does" }],
+    [/\b(?:the|these|those)\s+(?:latest|final|overall|main|primary|key|new|old)\s+([\p{L}][\p{L}'’-]*)\s+(is|was|has|does|are|were|have|do)\b/giu, { is: "are", was: "were", has: "have", does: "do", are: "is", were: "was", have: "has", do: "does" }],
   ];
   for (const [pattern, replacements] of agreementPatterns) {
     for (const match of text.matchAll(pattern)) {
+      const subject = match[1] ?? "";
       const verb = match[2] ?? "";
+      const subjectIsPlural = nounLooksPlural(subject);
+      const pluralVerb = ["are", "were", "have", "do"].includes(verb.toLocaleLowerCase());
+      const singularVerb = ["is", "was", "has", "does"].includes(verb.toLocaleLowerCase());
+      if ((pluralVerb && subjectIsPlural) || (singularVerb && !subjectIsPlural && !["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase()))) continue;
       const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
       pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, replacements[verb.toLocaleLowerCase()] ?? verb), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.94, preferences));
     }
@@ -600,8 +781,8 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
   const tokens = document.tokens;
   const sentences = document.sentences;
   const paragraphs = document.paragraphs.length;
-  const sentenceLengths = sentences.map((sentence) => sentence.tokens.length);
-  const paragraphLengths = document.paragraphs.map((paragraph) => paragraph.tokens.length);
+  const sentenceLengths = document.sentenceLengths;
+  const paragraphLengths = document.paragraphLengths;
   const words = tokens.length;
   const syllables = tokens.reduce((total, token) => total + countSyllables(token.value), 0);
   const readability = words && sentences.length
@@ -664,9 +845,10 @@ function weightedIssuePenalty(issues: WritingIssue[], categories: IssueCategory[
   }, 0);
 }
 
-function goalAlignmentEstimate(text: string, stats: WritingStats, goals?: WritingGoals) {
+function goalAlignmentEstimate(text: string, stats: WritingStats, goals?: WritingGoals, document = parseDocument(text)) {
   if (!goals || !stats.words) return goals ? 60 : 0;
   const lower = text.toLocaleLowerCase();
+  const words = document.tokens.map((token) => token.lower);
   const markerScore = (markers: string[]) => markers.reduce((count, marker) => count + (lower.includes(marker) ? 1 : 0), 0);
   const audienceMarkers: Record<WritingGoals["audience"], string[]> = {
     academic: ["research", "evidence", "study", "analysis", "method", "findings", "citation"],
@@ -690,16 +872,31 @@ function goalAlignmentEstimate(text: string, stats: WritingStats, goals?: Writin
     formal: ["therefore", "however", "shall", "regarding", "accordingly"],
     casual: ["really", "just", "we", "you", "can't", "won't"],
   };
+  const evidenceMarkers = ["evidence", "data", "source", "citation", "finding", "result", "research"];
+  const explanationMarkers = ["because", "means", "example", "how", "why", "therefore", "explain"];
+  const persuasionMarkers = ["should", "recommend", "benefit", "need", "best", "must", "support"];
+  const narrativeMarkers = ["then", "suddenly", "before", "after", "felt", "said", "walked", "story"];
+  const terminology = new Set(["api", "system", "data", "method", "model", "function", "configuration", "implementation", "test", "code", "evidence", "citation"]);
   const audience = Math.min(24, markerScore(audienceMarkers[goals.audience]) * 4);
-  const intent = Math.min(24, markerScore(intentMarkers[goals.intent]) * 4);
+  const intentMarkersForGoal = goals.intent === "inform" ? intentMarkers.inform.concat(evidenceMarkers) : goals.intent === "explain" ? intentMarkers.explain.concat(explanationMarkers) : goals.intent === "persuade" ? intentMarkers.persuade.concat(persuasionMarkers) : goals.intent === "story" ? intentMarkers.story.concat(narrativeMarkers) : intentMarkers.describe;
+  const intent = Math.min(24, markerScore(intentMarkersForGoal) * 3.2);
   const tone = Math.min(24, markerScore(toneMarkers[goals.tone]) * 4);
+  const sentenceMidpoint: Record<WritingGoals["audience"], number> = { academic: 24, professional: 18, technical: 20, casual: 13, general: 17 };
+  const sentenceFit = Math.max(0, 10 - Math.abs(stats.averageSentenceLength - sentenceMidpoint[goals.audience]) * 0.55);
+  const terminologyDensity = words.filter((word) => terminology.has(word)).length / Math.max(1, words.length);
+  const terminologyFit = goals.audience === "technical" ? Math.min(7, terminologyDensity * 100) : goals.audience === "academic" ? Math.min(5, terminologyDensity * 65) : Math.max(0, 3 - terminologyDensity * 12);
+  const directWords = words.filter((word) => ["you", "your", "we", "our", "us"].includes(word)).length;
+  const directness = directWords / Math.max(1, words.length);
+  const directAddressFit = ["casual", "general"].includes(goals.audience) || ["friendly", "casual"].includes(goals.tone) ? Math.min(6, directness * 100) : Math.max(0, 3 - directness * 8);
+  const contractionCount = words.filter((word) => word.includes("'") || word.includes("’")).length;
+  const contractionFit = ["casual", "friendly"].includes(goals.tone) ? Math.min(4, contractionCount * 0.8) : ["formal", "professional"].includes(goals.tone) ? Math.max(-5, -contractionCount * 0.8) : 0;
   const formalityPenalty = goals.tone === "formal" && stats.fillerWords ? Math.min(12, stats.fillerWords * 2) : 0;
-  return clamp(46 + audience + intent + tone - formalityPenalty);
+  return clamp(42 + audience + intent + tone + sentenceFit + terminologyFit + directAddressFit + contractionFit - formalityPenalty);
 }
 
-function engagementEstimate(text: string, stats: WritingStats) {
+function engagementEstimate(text: string, stats: WritingStats, document = parseDocument(text)) {
   if (!stats.words) return 0;
-  const words = tokensIn(text).map((token) => token.lower);
+  const words = document.tokens.map((token) => token.lower);
   const directWords = words.filter((word) => ["you", "your", "we", "our", "us"].includes(word)).length;
   const directness = Math.min(15, (directWords / Math.max(1, stats.words)) * 100);
   const sentenceVariety = Math.min(10, new Set(stats.sentenceLengths).size * 1.5);
@@ -709,7 +906,7 @@ function engagementEstimate(text: string, stats: WritingStats) {
   return clamp(54 + directness + Math.min(15, stats.vocabularyDiversity * 24) + sentenceVariety + Math.min(8, questions * 2) + activeSignal - repetitionPenalty);
 }
 
-export function scoreWriting(stats: WritingStats, issues: WritingIssue[], goals?: WritingGoals, text = ""): AnalysisScores {
+export function scoreWriting(stats: WritingStats, issues: WritingIssue[], goals?: WritingGoals, text = "", document?: ParsedDocument): AnalysisScores {
   const high = issues.filter((item) => item.severity === "high").length;
   const medium = issues.filter((item) => item.severity === "medium").length;
   const hasText = stats.words > 0;
@@ -718,10 +915,11 @@ export function scoreWriting(stats: WritingStats, issues: WritingIssue[], goals?
   const conciseness = hasText ? clamp(98 - weightedIssuePenalty(issues, ["conciseness", "repetition", "word choice"], 3.2) - (stats.fillerWords / Math.max(1, stats.words)) * 180) : 0;
   const readabilityBase = Number.isFinite(stats.readability) ? stats.readability : (hasText ? 65 : 0);
   const readability = hasText ? clamp(readabilityBase) : 0;
-  const engagement = engagementEstimate(text, stats);
+  const analysedDocument = document ?? parseDocument(text);
+  const engagement = engagementEstimate(text, stats, analysedDocument);
   const consistency = hasText ? clamp(100 - weightedIssuePenalty(issues, ["consistency", "spelling", "capitalization"], 4.5) - Math.min(20, stats.repeatedWords.length * 1.4)) : 0;
-  const goalAlignment = goalAlignmentEstimate(text, stats, goals);
-  const directWords = tokensIn(text).filter((token) => ["you", "your", "we", "our", "us"].includes(token.lower)).length;
+  const goalAlignment = goalAlignmentEstimate(text, stats, goals, analysedDocument);
+  const directWords = analysedDocument.tokens.filter((token) => ["you", "your", "we", "our", "us"].includes(token.lower)).length;
   const breakdown: Record<ScoreDimension, { score: number; summary: string; signals: string[] }> = {
     correctness: scoreContribution(correctness, "Based on confidence-weighted grammar, spelling, punctuation, and capitalization findings.", [`${high} high-confidence high-impact issue${high === 1 ? "" : "s"}`, `${medium} medium-severity issue${medium === 1 ? "" : "s"}`]),
     clarity: scoreContribution(clarity, "Reflects sentence structure, vague wording, passive voice, and sentence length.", [`${stats.longSentences} long sentence${stats.longSentences === 1 ? "" : "s"}`, `${stats.passiveVoicePercentage}% passive-voice estimate`]),
@@ -729,7 +927,7 @@ export function scoreWriting(stats: WritingStats, issues: WritingIssue[], goals?
     readability: scoreContribution(readability, "A transparent Flesch-style estimate, not an objective measure of quality.", [`Average sentence length: ${stats.averageSentenceLength || 0} words`, `Vocabulary diversity: ${Math.round(stats.vocabularyDiversity * 100)}%`]),
     engagement: scoreContribution(engagement, "An estimate from whole-document directness, sentence variety, vocabulary variety, questions, and active-voice signals.", [`${Math.round((directWords / Math.max(1, stats.words)) * 100)}% direct-address words`, `${new Set(stats.sentenceLengths).size} sentence-length patterns`]),
     consistency: scoreContribution(consistency, "Reflects dialect, preferred terminology, capitalization, spelling variants, and repeated vocabulary patterns.", [`${stats.repeatedWords.length} repeated vocabulary pattern${stats.repeatedWords.length === 1 ? "" : "s"}`, `${issues.filter((item) => item.category === "consistency").length} terminology finding${issues.filter((item) => item.category === "consistency").length === 1 ? "" : "s"}`]),
-    goalAlignment: scoreContribution(goalAlignment, "A best-effort estimate using audience, intent, and tone signals; it is not an objective judgement.", [goals ? `${goals.audience} audience` : "No goal selected", goals ? `${goals.intent} intent` : "No intent selected", goals ? `${goals.tone} tone` : "Neutral baseline"]),
+    goalAlignment: scoreContribution(goalAlignment, "A best-effort estimate using audience, intent, tone, sentence length, terminology, direct address, and evidence signals; it is not an objective judgement.", [goals ? `${goals.audience} audience` : "No goal selected", goals ? `${goals.intent} intent` : "No intent selected", goals ? `${goals.tone} tone` : "Neutral baseline", `Average sentence: ${stats.averageSentenceLength || 0} words`]),
   };
   const overall = hasText ? clamp(correctness * 0.29 + clarity * 0.17 + conciseness * 0.14 + readability * 0.12 + engagement * 0.1 + consistency * 0.1 + goalAlignment * 0.08) : 0;
   return { correctness, clarity, conciseness, readability, engagement, consistency, goalAlignment, overall, grammar: correctness, breakdown };
@@ -740,8 +938,9 @@ export function mergeWritingIssues(issues: WritingIssue[]): WritingIssue[] {
 }
 
 export function analyzeLocally(text: string, options: GrammarOptions = {}, goals?: WritingGoals) {
+  const startedAt = analysisNow();
   const preferences = mergePreferences(options);
-  const document = parseDocument(text);
+  const document = analyzeDocument(text);
   const issues = mergeWritingIssues([
     ...findSpelling(text, preferences, document),
     ...findConfusedWords(text, preferences),
@@ -753,7 +952,8 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
     ...findStructureIssues(text, preferences, document),
   ]);
   const stats = getWritingStats(text, document);
-  return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text) };
+  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "local");
+  return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text, document), ...(diagnostics ? { diagnostics } : {}) };
 }
 
 function expandLocalContext(text: string, start: number, end: number, contextWindow = 320) {
@@ -789,6 +989,7 @@ export function analyzeLocallyIncremental(
   goals?: WritingGoals,
 ) {
   if (!changedRange || previousText === nextText) return analyzeLocally(nextText, options, goals);
+  const startedAt = analysisNow();
   const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
   const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
   const delta = nextText.length - previousText.length;
@@ -807,8 +1008,10 @@ export function analyzeLocallyIncremental(
     end: issue.end + nextRegion.start,
   }));
   const issues = mergeWritingIssues([...retained, ...recalculated]);
-  const stats = getWritingStats(nextText);
-  return { issues, tone: inferTone(nextText), stats, scores: scoreWriting(stats, issues, goals, nextText) };
+  const document = analyzeDocument(nextText);
+  const stats = getWritingStats(nextText, document);
+  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "incremental");
+  return { issues, tone: inferTone(nextText, document), stats, scores: scoreWriting(stats, issues, goals, nextText, document), ...(diagnostics ? { diagnostics } : {}) };
 }
 
 export const categoryColors: Record<IssueCategory, string> = {

@@ -1,10 +1,10 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import { analyzeWithProvider, ProviderError } from "@/packages/ai/src";
+import { analyzeWithTriage, ProviderError } from "@/packages/ai/src";
 import { detectChangedRange, LruCache, createAnalysisCacheKey } from "@/packages/analysis/src";
 import { analyzeLocally, analyzeLocallyIncremental } from "@/packages/grammar/src";
-import type { AnalysisResult, ProviderSettings, StylePreferences, WritingGoals } from "@/packages/types/src";
+import type { AnalysisResult, ClassifierSettings, ProviderSettings, StylePreferences, WritingGoals } from "@/packages/types/src";
 
 const emptyResult = (text: string, goals: WritingGoals, style: StylePreferences): AnalysisResult => {
   const local = analyzeLocally(text, style, goals);
@@ -17,9 +17,10 @@ interface UseAnalysisArgs {
   style: StylePreferences;
   settings: ProviderSettings;
   aiEnabled: boolean;
+  classifier?: ClassifierSettings | null;
 }
 
-export function useAnalysis({ text, goals, style, settings, aiEnabled }: UseAnalysisArgs) {
+export function useAnalysis({ text, goals, style, settings, aiEnabled, classifier }: UseAnalysisArgs) {
   const [analysis, setAnalysis] = useState(() => emptyResult(text, goals, style));
   const [status, setStatus] = useState<"local" | "analysing" | "ready" | "error">("local");
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +48,14 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled }: UseAnal
     });
     abort.current?.abort();
 
+    // Cloud AI (provider + classifier.dev) only runs when explicitly enabled.
+    // Local analysis above already ran synchronously; triage below decides
+    // whether unresolved chunks need the expensive model at all.
     if (!aiEnabled || !settings.apiKey.trim() || !settings.baseUrl.trim() || !settings.model.trim() || !text.trim()) return;
-    const cacheKey = createAnalysisCacheKey(text, JSON.stringify({ settings: { baseUrl: settings.baseUrl, model: settings.model }, goals, style }), changedRange);
+    const classifierKey = classifier?.model?.trim()
+      ? `${classifier.baseUrl}|${classifier.model}`
+      : "heuristic-only";
+    const cacheKey = createAnalysisCacheKey(text, JSON.stringify({ settings: { baseUrl: settings.baseUrl, model: settings.model }, classifier: classifierKey, goals, style }), changedRange);
     const cached = cache.current.get(cacheKey);
     if (cached) {
       startTransition(() => {
@@ -59,9 +66,19 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled }: UseAnal
     }
     const controller = new AbortController();
     abort.current = controller;
+    // Intelligent debounce: 650ms avoids a classifier request on every keystroke
+    // while batching the changed/context chunks into one triage pass.
     const timer = window.setTimeout(() => {
       setStatus("analysing");
-      void analyzeWithProvider(text, goals, settings, { signal: controller.signal, preferences: style, changedRange, localAnalysis: local })
+      void analyzeWithTriage(text, goals, settings, {
+        signal: controller.signal,
+        preferences: style,
+        changedRange,
+        localAnalysis: local,
+        classifier: classifier ?? null,
+        triageEnabled: true,
+        uncertainPolicy: "skip",
+      })
         .then((remote) => {
           if (controller.signal.aborted || currentRun !== runId.current) return;
           cache.current.set(cacheKey, remote);
@@ -74,12 +91,12 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled }: UseAnal
           setStatus("error");
           setError(reason instanceof ProviderError ? reason.message : reason instanceof Error ? reason.message : "AI analysis failed. Local checks are still available.");
         });
-    }, 280);
+    }, 650);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [aiEnabled, goals, settings, style, text]);
+  }, [aiEnabled, classifier, goals, settings, style, text]);
 
   useEffect(() => () => abort.current?.abort(), []);
   return { analysis, status, error, isAnalysing: status === "analysing" };

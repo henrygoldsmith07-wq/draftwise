@@ -109,6 +109,10 @@ export interface AnalysisResult {
   source: "local" | "ai" | "local+ai";
   changedRange?: { start: number; end: number };
   diagnostics?: AnalysisDiagnostics;
+  triage?: {
+    decisions: ClassifierChunkDecision[];
+    metrics: TriageMetrics;
+  };
 }
 
 export interface WritingGoals {
@@ -170,6 +174,74 @@ export interface RewriteResult {
   source: "local" | "ai";
 }
 
+export type TriageCategory =
+  | "correctness"
+  | "clarity"
+  | "conciseness"
+  | "engagement"
+  | "tone"
+  | "consistency"
+  | "structure"
+  | "word-choice"
+  | "style"
+  | "other";
+
+export type TriageDecision = "ai-needed" | "locally-sufficient" | "uncertain";
+
+export interface ClassifierSettings {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  timeoutMs?: number;
+  maxExcerptChars?: number;
+}
+
+export type ClassifierErrorCode =
+  | "missing-key"
+  | "invalid-url"
+  | "insecure-url"
+  | "invalid-model"
+  | "unauthorized"
+  | "rate-limited"
+  | "timeout"
+  | "network"
+  | "cors"
+  | "invalid-json"
+  | "unknown";
+
+export interface ClassifierChunkInput {
+  chunkId: string;
+  excerpt: string;
+  startOffset: number;
+  endOffset: number;
+  signals: {
+    localIssueCount: number;
+    localCategories: string[];
+    hasLongSentence: boolean;
+    hasVagueOrFiller: boolean;
+    hasPassiveOrWordiness: boolean;
+  };
+  categories: TriageCategory[];
+}
+
+export interface ClassifierChunkDecision {
+  chunkId: string;
+  decision: TriageDecision;
+  categories: TriageCategory[];
+  confidence: number;
+  reason: string;
+  fallback?: boolean;
+}
+
+export interface TriageMetrics {
+  candidateChunks: number;
+  classifierCalls: number;
+  providerCalls: number;
+  avoidedProviderCalls: number;
+  fallbackCount: number;
+  processingMs: number;
+}
+
 export interface DraftwiseWorkspace {
   version: 2;
   title: string;
@@ -177,6 +249,7 @@ export interface DraftwiseWorkspace {
   goals: WritingGoals;
   style: StylePreferences;
   provider: ProviderSettings;
+  classifier?: ClassifierSettings;
   aiEnabled: boolean;
   theme: "light" | "dark" | "system";
 }
@@ -211,6 +284,27 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   customHeaders: "",
 };
 
+export const DEFAULT_CLASSIFIER_SETTINGS: ClassifierSettings = {
+  baseUrl: "https://classifier.dev/v1",
+  model: "draftwise-triage-v1",
+  apiKey: "",
+  timeoutMs: 8_000,
+  maxExcerptChars: 500,
+};
+
+export const TRIAGE_CATEGORIES: TriageCategory[] = [
+  "correctness",
+  "clarity",
+  "conciseness",
+  "engagement",
+  "tone",
+  "consistency",
+  "structure",
+  "word-choice",
+  "style",
+  "other",
+];
+
 export const DEFAULT_WORKSPACE = (draft: string): DraftwiseWorkspace => ({
   version: 2,
   title: "Untitled draft",
@@ -218,6 +312,7 @@ export const DEFAULT_WORKSPACE = (draft: string): DraftwiseWorkspace => ({
   goals: DEFAULT_GOALS,
   style: DEFAULT_STYLE_PREFERENCES,
   provider: DEFAULT_PROVIDER_SETTINGS,
+  classifier: DEFAULT_CLASSIFIER_SETTINGS,
   aiEnabled: false,
   theme: "system",
 });

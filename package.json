@@ -16,7 +16,8 @@
     "test:extension": "node --test tests/extension.test.mjs",
     "extension:build": "node scripts/build-extension.mjs",
     "benchmark": "node --experimental-strip-types scripts/benchmark.mjs",
-    "evaluate": "node --experimental-strip-types scripts/evaluate-rules.mjs"
+    "evaluate": "node --experimental-strip-types scripts/evaluate-rules.mjs",
+    "evaluate:triage": "node --experimental-strip-types scripts/evaluate-triage.mjs"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",

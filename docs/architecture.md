@@ -9,17 +9,19 @@ edit
   └─ changed range → safe sentence/paragraph context
        ├─ discard affected issues → local rules on the changed region → remap/merge
        ├─ recalculate document statistics and scores
-       └─ changed range → context expansion → bounded provider chunks
-                                  └─ optional provider requests
+       └─ changed range → context expansion → bounded chunks
+                                  ├─ heuristic selects unresolved/ambiguous chunks
+                                  ├─ classifier.dev (batched excerpts + signals, decision only)
+                                  └─ expensive provider only for ai-needed chunks
                                        └─ validate → map offsets → merge
 ```
 
-`packages/types` is the contract. `packages/grammar` is pure and has no browser or network dependency. It builds a reusable `ParsedDocument`, uses a compact ranked local lexicon with edit-distance candidates, and exposes incremental local analysis. `packages/analysis` owns changed-range detection, safe chunk boundaries, offset mapping, bounded caching, unaffected-issue retention, and sorted overlap resolution. `packages/ai` adapts an OpenAI-compatible endpoint and never applies a rewrite directly.
+`packages/types` is the contract. `packages/grammar` is pure and has no browser or network dependency. It builds a reusable `ParsedDocument`, uses a compact ranked local lexicon with edit-distance candidates, and exposes incremental local analysis. `packages/analysis` owns changed-range detection, safe chunk boundaries, offset mapping, bounded caching, unaffected-issue retention, and sorted overlap resolution. `packages/ai` adapts an OpenAI-compatible endpoint, gates expensive calls behind `classifier.dev` triage (see `docs/classifier-triage.md`), and never applies a rewrite directly. The classifier returns decisions only and never rewrites user text.
 
 ## Web flow
 
 1. `useDraftPersistence` renders the stable initial workspace, hydrates from versioned storage, then writes only after hydration. This prevents an initial empty state from overwriting a saved draft.
-2. `useAnalysis` retains the previous result, expands the edit to safe context boundaries, recalculates only that region locally, shifts unaffected issue offsets, and recomputes document-level stats/scores. Remote work is debounced, cancellable, and cached in a bounded LRU.
+2. `useAnalysis` retains the previous result, expands the edit to safe context boundaries, recalculates only that region locally, shifts unaffected issue offsets, and recomputes document-level stats/scores. Remote work is debounced (650ms, no classifier request on every keystroke), batched, cancellable, and cached in a bounded LRU. Local-first triage sends only minimised excerpts for unresolved chunks to `classifier.dev`; expensive AI runs only for `ai-needed` chunks.
 3. AI requests are full-document chunks on the first run and changed/context chunks after edits; each settled provider response remains paired with its originating chunk before relative ranges are mapped back to absolute offsets. Partial failures keep successful suggestions; all-failure cases remain explicit.
 4. Provider responses are accepted only when the range is valid and the returned `original` exactly matches the submitted text. Unknown categories, invalid severities, malformed JSON, and unsafe rewrite output are discarded or surfaced as a local fallback.
 5. Accepting a suggestion is a targeted replacement guarded by an exact original-text check. Rewrite actions capture the selection, show a preview, and refuse to apply if the draft changed underneath them.
@@ -30,8 +32,8 @@ The Manifest V3 content script is intentionally small and dependency-free:
 
 - `shared-analysis.js` exposes the compiled local rules.
 - `content.js` finds editable fields, skips sensitive/disabled/read-only fields, debounces local checks, and renders a closed Shadow DOM assistant using DOM text nodes.
-- AI messages contain text, goals, style, and a request ID only. The content script never receives provider settings or an API key.
-- `background.js` is the service-worker boundary. It dynamically registers content scripts only for granted site patterns, reads the key from `chrome.storage.local`, requires a separate provider-origin permission, validates provider requests through the shared AI bundle, aborts stale per-tab/per-frame requests, and returns only validated issues.
+- AI messages contain text, goals, style, and a request ID only. The content script never receives provider or classifier settings or API keys.
+- `background.js` is the service-worker boundary. It dynamically registers content scripts only for granted site patterns, reads provider and classifier keys from `chrome.storage.local`, requires separate provider-origin and classifier-origin permissions, runs local-first triage with bounded caching, aborts stale per-tab/per-frame requests, and returns only validated issues.
 - `field-classification.js` tokenises metadata and blocks explicit credential/payment/OTP patterns without treating substrings such as `auth` inside `author` as sensitive.
 - `options.html` and `options.js` manage opt-in AI, style preferences, exclusions, site grant/revoke/disable actions, independent provider-origin access, and local deletion.
 

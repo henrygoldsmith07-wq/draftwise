@@ -4,6 +4,7 @@ const permissionsApi = globalThis.DraftwisePermissions;
 const defaults = {
   aiEnabled: false,
   provider: { provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "", temperature: 0.2, maxTokens: 900, customHeaders: "" },
+  classifier: { baseUrl: "https://classifier.dev/v1", model: "draftwise-triage-v1", apiKey: "", timeoutMs: 8000, maxExcerptChars: 500 },
   style: { dialect: "en-GB", names: [], allowContractions: true, passiveVoiceSensitivity: "normal" },
   excludedSites: [],
   disabledSites: [],
@@ -32,6 +33,7 @@ async function readState() {
     ...defaults,
     ...stored,
     provider: { ...defaults.provider, ...(stored.provider || {}) },
+    classifier: { ...defaults.classifier, ...(stored.classifier || {}) },
     style: { ...defaults.style, ...(stored.style || {}) },
     excludedSites: Array.isArray(stored.excludedSites) ? stored.excludedSites : [],
     disabledSites: Array.isArray(stored.disabledSites) ? stored.disabledSites : [],
@@ -41,6 +43,10 @@ async function readState() {
 
 function providerPattern() {
   return permissionsApi.providerPattern(get("baseUrl").value.trim());
+}
+
+function classifierPattern() {
+  return permissionsApi.providerPattern(get("classifierBaseUrl").value.trim());
 }
 
 async function renderProviderPermission() {
@@ -66,6 +72,23 @@ function createPermissionButton(label, action, className = "") {
   button.className = className;
   button.addEventListener("click", action);
   return button;
+}
+
+async function renderClassifierPermission() {
+  const status = get("classifierAccessStatus");
+  const label = get("classifierOriginLabel");
+  if (!status || !label) return;
+  try {
+    const pattern = classifierPattern();
+    const granted = await permissionContains({ origins: [pattern] });
+    status.textContent = granted ? "Granted" : "Not granted";
+    status.style.color = granted ? "#619171" : "#a36b4e";
+    label.textContent = `Classifier worker access: ${pattern.replace(/\/\*$/u, "")} (decision only, never rewrites)`;
+  } catch (error) {
+    status.textContent = "Invalid classifier URL";
+    status.style.color = "#b34f5b";
+    label.textContent = error instanceof Error ? error.message : "Enter a valid HTTPS classifier URL.";
+  }
 }
 
 async function renderSitePermissions() {
@@ -103,6 +126,13 @@ async function saveSettings() {
     new URL(baseUrl);
     providerPatternValue = permissionsApi.providerPattern(baseUrl);
   } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS provider URL.", true); return; }
+  const classifierBaseUrlEl = get("classifierBaseUrl");
+  const classifierModelEl = get("classifierModel");
+  const classifierKeyEl = get("classifierKey");
+  const classifierBaseUrl = classifierBaseUrlEl ? classifierBaseUrlEl.value.trim().replace(/\/$/u, "") : "";
+  const classifierModel = classifierModelEl ? classifierModelEl.value.trim() : "";
+  const classifierKey = classifierKeyEl ? classifierKeyEl.value.trim() : "";
+  if (classifierBaseUrl) { try { permissionsApi.providerPattern(classifierBaseUrl); } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS classifier URL.", true); return; } }
   const model = get("model").value.trim();
   if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) { setStatus("Enter a valid model ID.", true); return; }
   const state = await readState();
@@ -110,10 +140,12 @@ async function saveSettings() {
   await storageSet({
     aiEnabled: toggleValue("aiEnabled"),
     provider: { ...state.provider, provider: "openai-compatible", baseUrl, model, apiKey: get("apiKey").value.trim(), temperature: 0.2, maxTokens: 900, customHeaders: "" },
+    classifier: { ...state.classifier, baseUrl: classifierBaseUrl || state.classifier.baseUrl, model: classifierModel || state.classifier.model, apiKey: classifierKey },
     style: { ...state.style, dialect: get("dialect").value, allowContractions: toggleValue("allowContractions"), passiveVoiceSensitivity: get("passiveSensitivity").value },
     excludedSites: [...new Set(excludedSites)],
   });
   await renderProviderPermission();
+  await renderClassifierPermission();
   setStatus(`Saved locally. Provider origin: ${providerPatternValue.replace(/\/\*$/u, "")}`);
 }
 
@@ -134,6 +166,23 @@ async function revokeProviderAccess() {
   } catch (error) { setStatus(error instanceof Error ? error.message : "Provider access could not be revoked.", true); }
 }
 
+async function grantClassifierAccess() {
+  try {
+    const pattern = classifierPattern();
+    const granted = await permissionRequest({ origins: [pattern] });
+    if (!granted) { setStatus("Classifier access was not granted.", true); return; }
+    await renderClassifierPermission(); setStatus("Classifier access granted.");
+  } catch (error) { setStatus(error instanceof Error ? error.message : "Classifier access could not be granted.", true); }
+}
+
+async function revokeClassifierAccess() {
+  try {
+    const pattern = classifierPattern();
+    const removed = await permissionRemove({ origins: [pattern] });
+    await renderClassifierPermission(); setStatus(removed ? "Classifier access revoked." : "Classifier access was not revoked.", !removed);
+  } catch (error) { setStatus(error instanceof Error ? error.message : "Classifier access could not be revoked.", true); }
+}
+
 async function grantSiteAccess() {
   let hostname;
   try { hostname = permissionsApi.normaliseHostname(get("siteAccess").value); } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid hostname.", true); return; }
@@ -151,8 +200,12 @@ async function load() {
   const provider = state.provider; const style = state.style;
   setToggle("aiEnabled", state.aiEnabled); setToggle("allowContractions", style.allowContractions);
   get("baseUrl").value = provider.baseUrl; get("model").value = provider.model; get("apiKey").value = provider.apiKey;
+  const classifier = state.classifier;
+  if (get("classifierBaseUrl")) get("classifierBaseUrl").value = classifier.baseUrl;
+  if (get("classifierModel")) get("classifierModel").value = classifier.model;
+  if (get("classifierKey")) get("classifierKey").value = classifier.apiKey;
   get("dialect").value = style.dialect; get("passiveSensitivity").value = style.passiveVoiceSensitivity; get("excludedSites").value = state.excludedSites.join("\n");
-  await renderProviderPermission(); await renderSitePermissions();
+  await renderProviderPermission(); await renderClassifierPermission(); await renderSitePermissions();
 }
 
 get("aiEnabled").addEventListener("click", () => setToggle("aiEnabled", !toggleValue("aiEnabled")));
@@ -160,6 +213,9 @@ get("allowContractions").addEventListener("click", () => setToggle("allowContrac
 get("baseUrl").addEventListener("input", () => { void renderProviderPermission(); });
 get("save").addEventListener("click", () => { void saveSettings(); });
 get("grantProviderAccess").addEventListener("click", () => { void grantProviderAccess(); });
+if (get("grantClassifierAccess")) get("grantClassifierAccess").addEventListener("click", () => { void grantClassifierAccess(); });
+if (get("revokeClassifierAccess")) get("revokeClassifierAccess").addEventListener("click", () => { void revokeClassifierAccess(); });
+if (get("classifierBaseUrl")) get("classifierBaseUrl").addEventListener("input", () => { void renderClassifierPermission(); });
 get("revokeProviderAccess").addEventListener("click", () => { void revokeProviderAccess(); });
 get("grantAccess").addEventListener("click", () => { void grantSiteAccess(); });
 get("forgetKey").addEventListener("click", async () => { const state = await readState(); await storageSet({ provider: { ...state.provider, apiKey: "" }, aiEnabled: false }); get("apiKey").value = ""; setToggle("aiEnabled", false); setStatus("Key forgotten"); });
@@ -168,6 +224,7 @@ get("clearData").addEventListener("click", async () => {
   const state = await readState();
   for (const site of state.siteAccess) await permissionRemove({ origins: permissionsApi.sitePatterns(site) });
   try { await permissionRemove({ origins: [permissionsApi.providerPattern(state.provider.baseUrl)] }); } catch { /* already invalid or revoked */ }
+  try { await permissionRemove({ origins: [permissionsApi.providerPattern(state.classifier.baseUrl)] }); } catch { /* already invalid or revoked */ }
   await new Promise((resolve) => chrome.storage.local.clear(resolve));
   await load(); setStatus("Local extension data cleared");
 });

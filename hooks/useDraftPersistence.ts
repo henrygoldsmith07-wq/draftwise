@@ -50,6 +50,7 @@ export function readWorkspaceFromStorage(initial: DraftwiseWorkspace, storage: W
       goals: { ...initial.goals, ...(parsed.goals ?? {}) },
       style: { ...initial.style, ...(parsed.style ?? {}) },
       provider: { ...initial.provider, ...(parsed.provider ?? {}) },
+      classifier: { ...(initial.classifier ?? { baseUrl: "https://classifier.dev/v1", model: "draftwise-triage-v1", apiKey: "" }), ...(parsed.classifier ?? {}) },
     };
   } catch {
     return initial;

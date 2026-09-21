@@ -1,6 +1,8 @@
 importScripts("shared-provider.js", "permissions.js");
 
 const activeRequests = new Map();
+const analysisCache = new Map();
+const ANALYSIS_CACHE_LIMIT = 24;
 const excludeMatches = ["*://chrome.google.com/*", "*://chromewebstore.google.com/*", "*://chromewebstore.googleusercontent.com/*"];
 const defaults = {
   excludedSites: [],
@@ -8,6 +10,13 @@ const defaults = {
   disabledFields: [],
   siteAccess: [],
   aiEnabled: false,
+  classifier: {
+    baseUrl: "https://classifier.dev/v1",
+    model: "draftwise-triage-v1",
+    apiKey: "",
+    timeoutMs: 8000,
+    maxExcerptChars: 500,
+  },
   provider: {
     provider: "openai-compatible",
     baseUrl: "https://api.openai.com/v1",
@@ -79,6 +88,7 @@ async function initialise() {
     siteAccess: Array.isArray(stored.siteAccess) ? stored.siteAccess : defaults.siteAccess,
     aiEnabled: typeof stored.aiEnabled === "boolean" ? stored.aiEnabled : defaults.aiEnabled,
     provider: { ...defaults.provider, ...(stored.provider || {}) },
+    classifier: { ...defaults.classifier, ...(stored.classifier || {}) },
   });
   await syncRegisteredSites();
 }
@@ -109,8 +119,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   activeRequests.set(key, controller);
   (async () => {
     try {
-      const stored = await storageGet(["aiEnabled", "provider"]);
+      const stored = await storageGet(["aiEnabled", "provider", "classifier"]);
+      const text = String(message.text || "");
       if (!stored.aiEnabled || !stored.provider?.apiKey) { sendResponse({ requestId: message.requestId, issues: null }); return; }
+      if (!text.trim()) { sendResponse({ requestId: message.requestId, issues: null }); return; }
       let providerOrigin;
       try {
         providerOrigin = globalThis.DraftwisePermissions.providerPattern(stored.provider.baseUrl);
@@ -122,13 +134,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ requestId: message.requestId, issues: null, error: "Grant provider access in Draftwise settings before enabling AI." });
         return;
       }
-      const result = await globalThis.DraftwiseProvider.analyzeWithProvider(
-        String(message.text || ""),
+      // Classifier origin requires a separate grant; heuristic-only mode needs no grant.
+      const classifier = stored.classifier && stored.classifier.apiKey && stored.classifier.baseUrl && stored.classifier.model ? stored.classifier : null;
+      if (classifier) {
+        let classifierOrigin;
+        try {
+          classifierOrigin = globalThis.DraftwisePermissions.providerPattern(classifier.baseUrl);
+        } catch (error) {
+          sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "Invalid classifier URL." });
+          return;
+        }
+        if (!await permissionsContains({ origins: [classifierOrigin] })) {
+          sendResponse({ requestId: message.requestId, issues: null, error: "Grant classifier access in Draftwise settings before enabling AI triage." });
+          return;
+        }
+      }
+      const cacheKey = JSON.stringify({ text, goals: message.goals, style: message.style, range: message.changedRange, model: stored.provider.model, classifier: classifier ? classifier.model : "heuristic-only" });
+      const cached = analysisCache.get(cacheKey);
+      if (cached) {
+        if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: cached.issues, triage: cached.triage });
+        return;
+      }
+      const triageFn = globalThis.DraftwiseProvider.analyzeWithTriage || globalThis.DraftwiseProvider.analyzeWithProvider;
+      const result = await triageFn(
+        text,
         message.goals || { audience: "general", intent: "inform", tone: "professional" },
         stored.provider,
-        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange },
+        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: "skip" },
       );
-      if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: result.issues });
+      if (!controller.signal.aborted) {
+        analysisCache.set(cacheKey, { issues: result.issues, triage: result.triage || null });
+        while (analysisCache.size > ANALYSIS_CACHE_LIMIT) analysisCache.delete(analysisCache.keys().next().value);
+        sendResponse({ requestId: message.requestId, issues: result.issues, triage: result.triage || null });
+      }
     } catch (error) {
       if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "AI analysis failed." });
     } finally {

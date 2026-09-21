@@ -37,7 +37,7 @@ const grammar = wrapper("DraftwiseGrammarModule", grammarSource, ["analyzeLocall
 await writeFile(resolve(extensionDir, "shared-analysis.js"), `(() => {\n${analysis}${grammar}globalThis.DraftwiseGrammar = DraftwiseGrammarModule;\n})();\n`, "utf8");
 
 const aiPrelude = `const { createAnalysisChunks, expandRangeToContext, mapChunkIssue, mergeAnalysisIssues } = DraftwiseAnalysisModule;\nconst { analyzeLocally, getWritingStats, inferTone, scoreWriting } = DraftwiseGrammarModule;\n`;
-const ai = wrapper("DraftwiseProviderModule", aiSource, ["analyzeWithProvider", "ProviderError"], aiPrelude);
+const ai = wrapper("DraftwiseProviderModule", aiSource, ["analyzeWithProvider", "analyzeWithTriage", "triageChunks", "parseClassifierDecisions", "isChunkUnresolved", "buildClassifierExcerpt", "validateClassifierUrl", "ClassifierError", "ProviderError"], aiPrelude);
 await writeFile(resolve(extensionDir, "shared-provider.js"), `(() => {\n${analysis}${grammar}${ai}globalThis.DraftwiseProvider = DraftwiseProviderModule;\n})();\n`, "utf8");
 
 console.log("Draftwise extension bundles are up to date.");

@@ -68,7 +68,7 @@ export default function Home() {
   const [systemDark, setSystemDark] = useState(false);
   const { selection, selectedText, updateFromElement, setSelection } = useSelection(workspace.draft);
   const { preview: rewritePreview, run: requestRewrite, cancel: cancelRewrite, selectAlternative } = useRewrite();
-  const analysisState = useAnalysis({ text: workspace.draft, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled });
+  const analysisState = useAnalysis({ text: workspace.draft, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled, classifier: workspace.classifier ?? null });
   const analysis = analysisState.analysis;
   const issues = analysis.issues;
 
@@ -234,7 +234,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} onSettingsChange={(provider) => updateWorkspace({ provider })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onClearData={clearLocalData} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </main>
   );

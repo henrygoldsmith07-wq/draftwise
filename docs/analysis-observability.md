@@ -9,3 +9,5 @@ globalThis.DraftwiseDebug = true;
 ```
 
 The diagnostics are intended for rule tuning, evaluation, and performance investigation. They are not rendered as user-facing copy by the product UI.
+
+The language evaluator reports corpus size, precision, recall, false positives per 1,000 words, per-category and per-rule metrics, and a one-finding-per-1,000-word false-positive budget. Triage evaluators separately report candidate selection, classifier request/latency/bytes, excerpt size, provider chunks avoided, and explicit classifier failure/omission counts.

@@ -90,6 +90,13 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(background, /shared-provider/iu);
   assert.match(background, /registerContentScripts/iu);
   assert.match(background, /providerPattern/iu);
+  assert.match(background, /clear-ai-cache/iu);
+  assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
+  const options = await readFile(file("extension/options.js"), "utf8");
+  assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);
+  assert.match(options, /classifier:\s*\{\s*\.\.\.state\.classifier,\s*apiKey:\s*""/iu);
+  assert.match(options, /clear-ai-cache/iu);
+  assert.doesNotMatch(options, /draftwise-triage-v1|classifierModel/iu);
 });
 
 function fakeElement(tagName, children = []) {

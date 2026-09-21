@@ -30,6 +30,7 @@ import type {
   TriageCategory,
   TriageDecision,
   TriageMetrics,
+  UncertainPolicy,
   WritingGoals,
   WritingIssue,
 } from "../../types/src/index.js";
@@ -507,16 +508,33 @@ export const TRIAGE_TAXONOMY: TriageCategory[] = [
 ];
 
 export const DEFAULT_CLASSIFIER_SETTINGS_VALUE: ClassifierSettings = {
-  baseUrl: "https://classifier.dev/v1",
-  model: "draftwise-triage-v1",
-  apiKey: "",
+  baseUrl: "https://classifier.dev",
+  uncertainPolicy: "provider",
   timeoutMs: 8_000,
   maxExcerptChars: 500,
 };
 
-export const CLASSIFIER_DEBOUNCE_MS = 650;
 export const CLASSIFIER_MAX_EXCERPT_CHARS = 500;
-export const CLASSIFIER_MAX_BATCH_CHUNKS = 5;
+export const CLASSIFIER_MAX_BATCH_CHUNKS = 1_000;
+export const TRIAGE_LABEL_FORMULATIONS = {
+  "semantic-v2": [
+    "The local writing checks are sufficient; no semantic AI review is needed.",
+    "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
+    "It is unclear whether semantic AI review would add enough value.",
+  ],
+  "direct-v1": [
+    "Local checks are enough; do not use AI review.",
+    "AI review is needed to find useful semantic writing issues.",
+    "Uncertain whether AI review would help.",
+  ],
+} as const;
+export type TriageLabelFormulationId = keyof typeof TRIAGE_LABEL_FORMULATIONS;
+export const TRIAGE_LABEL_FORMULATION_ID: TriageLabelFormulationId = "semantic-v2";
+export const CLASSIFIER_TRIAGE_LABELS = TRIAGE_LABEL_FORMULATIONS[TRIAGE_LABEL_FORMULATION_ID];
+export const TRIAGE_CONFIDENCE_THRESHOLDS = {
+  aiNeeded: 0.75,
+  locallySufficient: 0.80,
+} as const;
 
 export class ClassifierError extends Error {
   readonly code: ClassifierErrorCode;
@@ -528,10 +546,6 @@ export class ClassifierError extends Error {
     this.status = status;
     this.name = "ClassifierError";
   }
-}
-
-function classifierNow() {
-  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
 
 export function validateClassifierUrl(baseUrl: string) {
@@ -553,15 +567,19 @@ export function validateClassifierUrl(baseUrl: string) {
 
 function endpointForClassifier(baseUrl: string) {
   const parsed = validateClassifierUrl(baseUrl);
-  const path = parsed.pathname.replace(/\/$/u, "");
-  parsed.pathname = path.endsWith("/classify") ? path : `${path}/classify`;
+  const path = parsed.pathname.replace(/\/+$/u, "");
+  if (path.endsWith("/classify")) parsed.pathname = path;
+  else if (path.endsWith("/v1")) parsed.pathname = path + "/classify";
+  else parsed.pathname = path + "/v1/classify";
   return parsed.toString();
 }
 
 function classifierErrorForStatus(status: number) {
   if (status === 401 || status === 403) return new ClassifierError("unauthorized", "The classifier rejected this API key.", status);
-  if (status === 404) return new ClassifierError("invalid-model", "The classifier could not find this model or endpoint.", status);
+  if (status === 400) return new ClassifierError("invalid-request", "The classifier rejected the request shape or labels.", status);
+  if (status === 404) return new ClassifierError("invalid-url", "The classifier endpoint was not found.", status);
   if (status === 429) return new ClassifierError("rate-limited", "The classifier is rate-limiting requests. Local checks remain available.", status);
+  if (status >= 500) return new ClassifierError("network", "The classifier service is temporarily unavailable.", status);
   return new ClassifierError("unknown", `The classifier returned an error (${status}).`, status);
 }
 
@@ -623,10 +641,22 @@ export function normaliseTriageDecision(value: unknown): TriageDecision | null {
 /** Minimise transmitted text: truncate to a word boundary and redact structured tokens. */
 export function redactExcerptForClassifier(text: string) {
   return String(text || "")
-    .replace(/https?:\/\/[^\s)]+/giu, "[url]")
+    .replace(/https?:\/\/[^\s<>"']+/giu, "[url]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu, "[email]")
-    .replace(/\b(?:\d{1,3}(?:[,.]\d{3})+|\d{4,})\b/gu, "[number]")
-    .replace(/\b\d[\d.,]*%/gu, "[percent]");
+    .replace(/["“'](?:sk[-_][A-Za-z0-9_-]{8,}|[A-Za-z0-9+/=_-]{24,})["”']/gu, "[quoted-secret]")
+    .replace(/\b(?:sk|pk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gu, "[token]")
+    .replace(/\b(?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=:-]{6,}["']?/giu, "[secret]")
+    .replace(/\b(?:GPT|Claude|Gemini|Llama|OpenAI)\s*[-_ ]?\d+[A-Za-z]?(?:\.\d+){0,3}(?:[-_][A-Za-z0-9]+)?\b/giu, "[model]")
+    .replace(/\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|tsv|json|xml|md|png|jpe?g|zip|tar|gz)\b/giu, "[filename]")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, "[uuid]")
+    .replace(/\b(?:v|version|release)[-_]?\d+(?:\.\d+){0,3}\b/giu, "[version]")
+    .replace(/\b(?:id|ticket|ref(?:erence)?|case|order|invoice|account|request)[\s:#-]*[A-Za-z0-9][A-Za-z0-9_/-]{2,}\b/giu, "[identifier]")
+    .replace(/\b[A-Z]{2,}(?:[-_][A-Z0-9]{2,})+\b/gu, "[identifier]")
+    .replace(/(?:£|\$|€|¥|₹)\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\b\d+(?:[.,]\d+)?\s?(?:USD|GBP|EUR|JPY)\b/giu, "[currency]")
+    .replace(/\b\d+(?:[.,]\d+)?\s?%/gu, "[percentage]")
+    .replace(/\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s+\d{4})\b/giu, "[date]")
+    .replace(/\b(?:\+?\d[\d().\s-]{7,}\d)\b/gu, "[phone]")
+    .replace(/\b\d{6,}\b/gu, "[number]");
 }
 
 export function buildClassifierExcerpt(chunkText: string, maxChars = CLASSIFIER_MAX_EXCERPT_CHARS) {
@@ -690,6 +720,9 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
   const trimmed = text.trim();
   const categories = inferTriageCategories(text, issuesInChunk);
   if (trimmed.length < 20) {
+    if ((trimmed.match(/[.!?]/gu) ?? []).length >= 2) {
+      return { unresolved: true, reasons: ["short-fragment"], categories: ["structure"] };
+    }
     return { unresolved: false, reasons: ["too-short"], categories: [] };
   }
   const signals = collectChunkSignals(text, issuesInChunk);
@@ -774,85 +807,94 @@ export function buildClassifierInputs(
     });
 }
 
+function normaliseClassifierLabel(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
+}
+
+function getTriageLabels(formulationId: TriageLabelFormulationId = TRIAGE_LABEL_FORMULATION_ID) {
+  return TRIAGE_LABEL_FORMULATIONS[formulationId] ?? CLASSIFIER_TRIAGE_LABELS;
+}
+
+function isKnownClassifierLabel(value: string, labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS) {
+  const normalised = normaliseClassifierLabel(value);
+  return labels.some((label) => normaliseClassifierLabel(label) === normalised);
+}
+
+export function mapClassifierLabel(label: string, confidence: number, labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS): TriageDecision {
+  const normalised = normaliseClassifierLabel(label);
+  const localLabel = normaliseClassifierLabel(labels[0]);
+  const aiLabel = normaliseClassifierLabel(labels[1]);
+  if (normalised === localLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.locallySufficient) return "locally-sufficient";
+  if (normalised === aiLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.aiNeeded) return "ai-needed";
+  return "uncertain";
+}
+
 /**
- * Validate classifier.dev output. The classifier must never rewrite user text:
- * any replacement/rewrite/corrected fields are discarded and never returned.
+ * Validate the classifier.dev response contract. Results are deliberately
+ * paired by response order: classifier.dev returns one result per input and
+ * does not know Draftwise chunk IDs.
  */
-export function parseClassifierDecisions(value: unknown, expectedInputs: ClassifierChunkInput[]): ClassifierChunkDecision[] {
-  const expectedIds = new Set(expectedInputs.map((input) => input.chunkId));
-  let rawList: unknown[] = [];
-  if (Array.isArray(value)) rawList = value;
-  else if (isRecord(value) && Array.isArray((value as Record<string, unknown>).results)) rawList = (value as Record<string, unknown>).results as unknown[];
-  else if (isRecord(value) && Array.isArray((value as Record<string, unknown>).decisions)) rawList = (value as Record<string, unknown>).decisions as unknown[];
-  else if (isRecord(value) && typeof (value as Record<string, unknown>).chunkId === "string") rawList = [value];
-  else return [];
-  const seen = new Set<string>();
-  return rawList.flatMap((raw): ClassifierChunkDecision[] => {
-    if (!isRecord(raw) || typeof raw.chunkId !== "string" || !expectedIds.has(raw.chunkId)) return [];
-    if (seen.has(raw.chunkId)) return [];
-    // Explicitly ignore rewrite-like fields: classifier.dev must never rewrite.
-    // Accepted keys are decision/categories/confidence/reason only.
-    const decision = normaliseTriageDecision((raw as Record<string, unknown>).decision);
-    const finalDecision: TriageDecision = decision ?? "uncertain";
-    const rawCategories = (raw as Record<string, unknown>).categories;
-    const categories = Array.isArray(rawCategories)
-      ? [...new Set(rawCategories.map(normaliseTriageCategory))].slice(0, 4)
-      : ["other" as TriageCategory];
-    const confidenceRaw = (raw as Record<string, unknown>).confidence;
-    const confidence = typeof confidenceRaw === "number" && Number.isFinite(confidenceRaw)
-      ? Math.max(0, Math.min(1, confidenceRaw))
-      : 0.5;
-    const reasonRaw = (raw as Record<string, unknown>).reason;
-    const reason = typeof reasonRaw === "string" ? reasonRaw.slice(0, 300) : finalDecision === "uncertain" ? "unclassified fallback" : "";
-    seen.add(raw.chunkId);
-    return [{
-      chunkId: raw.chunkId,
-      decision: finalDecision,
-      categories: categories.length ? categories : ["other"],
+export function parseClassifierDecisions(
+  value: unknown,
+  expectedInputs: ClassifierChunkInput[],
+  labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS,
+): Array<ClassifierChunkDecision | null> {
+  const rawList = isRecord(value) && Array.isArray(value.results)
+    ? value.results
+    : Array.isArray(value)
+      ? value
+      : [];
+  return rawList.slice(0, expectedInputs.length).map((raw, index): ClassifierChunkDecision | null => {
+    if (!isRecord(raw) || typeof raw.label !== "string") return null;
+    const confidenceRaw = raw.confidence;
+    if (typeof confidenceRaw !== "number" || !Number.isFinite(confidenceRaw)) return null;
+    const confidence = Math.max(0, Math.min(1, confidenceRaw));
+    const label = raw.label.trim();
+    if (!label) return null;
+    const input = expectedInputs[index];
+    const decision = mapClassifierLabel(label, confidence, labels);
+    return {
+      chunkId: input.chunkId,
+      decision,
+      categories: input.categories.length ? input.categories : ["other"],
       confidence,
-      reason,
-      fallback: decision === null,
-    }];
+      reason: ("classifier.dev label: " + label).slice(0, 300),
+      fallback: !isKnownClassifierLabel(label, labels),
+    };
   });
 }
 
 export interface ClassifierRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  labelFormulationId?: TriageLabelFormulationId;
 }
 
 async function requestClassifierDecisions(
   inputs: ClassifierChunkInput[],
   settings: ClassifierSettings,
   options: ClassifierRequestOptions = {},
-): Promise<ClassifierChunkDecision[]> {
+): Promise<Array<ClassifierChunkDecision | null>> {
   if (!inputs.length) return [];
-  if (!settings.apiKey.trim()) throw new ClassifierError("missing-key", "Add a classifier API key to enable cloud triage.");
-  const model = String(settings.model || "").trim();
-  if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) throw new ClassifierError("invalid-model", "Add a valid classifier model ID.");
   const endpoint = endpointForClassifier(settings.baseUrl);
+  const labels = getTriageLabels(options.labelFormulationId);
   const timeoutMs = Math.max(1_000, Math.min(30_000, options.timeoutMs ?? settings.timeoutMs ?? 8_000));
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), timeoutMs);
   const cancel = () => timeoutController.abort();
   options.signal?.addEventListener("abort", cancel, { once: true });
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const apiKey = settings.apiKey?.trim();
+    if (apiKey) headers.Authorization = "Bearer " + apiKey;
     const response = await fetch(endpoint, {
       method: "POST",
       signal: timeoutController.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey.trim()}`,
-      },
+      headers,
       body: JSON.stringify({
-        model,
-        // Minimal payload: excerpt + signals + goals context only. Never full document.
-        inputs: inputs.map((input) => ({
-          chunkId: input.chunkId,
-          excerpt: input.excerpt,
-          signals: input.signals,
-          categories: input.categories,
-        })),
+        inputs: inputs.map((input) => input.excerpt),
+        labels,
+        instructions: "Choose exactly one label for each input. Return results in the same order as inputs. Do not rewrite or quote the input.",
       }),
     });
     if (!response.ok) throw classifierErrorForStatus(response.status);
@@ -871,7 +913,10 @@ async function requestClassifierDecisions(
     } catch {
       throw new ClassifierError("invalid-json", "The classifier returned invalid JSON.");
     }
-    return parseClassifierDecisions(payload, inputs);
+    const parsed = parseClassifierDecisions(payload, inputs, labels);
+    return parsed.length < inputs.length
+      ? [...parsed, ...Array.from({ length: inputs.length - parsed.length }, () => null)]
+      : parsed;
   } catch (error) {
     if (error instanceof ClassifierError) throw error;
     if (options.signal?.aborted) throw error;
@@ -887,9 +932,9 @@ async function requestClassifierDecisions(
 function fallbackDecision(input: ClassifierChunkInput, reason: string): ClassifierChunkDecision {
   return {
     chunkId: input.chunkId,
-    decision: "uncertain",
+    decision: "ai-needed",
     categories: input.categories.length ? input.categories : ["other"],
-    confidence: 0.5,
+    confidence: 0.65,
     reason: reason.slice(0, 300),
     fallback: true,
   };
@@ -898,7 +943,8 @@ function fallbackDecision(input: ClassifierChunkInput, reason: string): Classifi
 export interface TriageOptions {
   signal?: AbortSignal;
   classifier?: ClassifierSettings | null;
-  uncertainPolicy?: "allow" | "skip";
+  uncertainPolicy?: UncertainPolicy;
+  labelFormulationId?: TriageLabelFormulationId;
   maxExcerptChars?: number;
   timeoutMs?: number;
 }
@@ -909,13 +955,39 @@ export interface TriageOutcome {
   metrics: TriageMetrics;
 }
 
-/** Local-first triage: heuristic selects candidates, classifier.dev filters, fallback stays local. */
+function buildTriageMetrics(
+  chunks: AnalysisChunk[],
+  decisions: ClassifierChunkDecision[],
+  candidateChunks: number,
+  uncertainPolicy: UncertainPolicy,
+  classifierRequests: number,
+  classifiedChunks: number,
+  classifierFailures: number,
+  omittedClassifierResults: number,
+  providerRequests = 0,
+): TriageMetrics {
+  const providerChunks = decisions.filter((decision) => decision.decision === "ai-needed" || (decision.decision === "uncertain" && uncertainPolicy === "provider")).length;
+  return {
+    candidateChunks,
+    classifierRequests,
+    classifiedChunks,
+    locallySufficientChunks: decisions.filter((decision) => decision.decision === "locally-sufficient").length,
+    aiNeededChunks: decisions.filter((decision) => decision.decision === "ai-needed").length,
+    uncertainChunks: decisions.filter((decision) => decision.decision === "uncertain").length,
+    classifierFailures,
+    omittedClassifierResults,
+    providerRequests,
+    providerChunks,
+    avoidedProviderChunks: Math.max(0, chunks.length - providerChunks),
+  };
+}
+
+/** Local-first triage: local rules, optional classifier.dev gate, then provider only when policy allows. */
 export async function triageChunks(
   chunks: AnalysisChunk[],
   localIssues: WritingIssue[],
   options: TriageOptions = {},
 ): Promise<TriageOutcome> {
-  const startedAt = classifierNow();
   const assessed = selectTriageCandidates(chunks, localIssues);
   const locallySufficient = assessed.filter((item) => !item.assessment.unresolved);
   const inputs = buildClassifierInputs(assessed, options.maxExcerptChars ?? CLASSIFIER_MAX_EXCERPT_CHARS);
@@ -924,27 +996,18 @@ export async function triageChunks(
     decision: "locally-sufficient" as const,
     categories: [],
     confidence: 0.9,
-    reason: `locally sufficient: ${item.assessment.reasons.join(",") || "clean"}`,
+    reason: "locally sufficient: " + (item.assessment.reasons.join(",") || "clean"),
   }));
   if (!inputs.length) {
     return {
       decisions,
       candidateCount: 0,
-      metrics: {
-        candidateChunks: 0,
-        classifierCalls: 0,
-        providerCalls: 0,
-        avoidedProviderCalls: chunks.length,
-        fallbackCount: 0,
-        processingMs: Math.max(0, Math.round((classifierNow() - startedAt) * 100) / 100),
-      },
+      metrics: buildTriageMetrics(chunks, decisions, 0, options.uncertainPolicy ?? "provider", 0, 0, 0, 0),
     };
   }
   const classifier = options.classifier;
-  const hasClassifierKey = Boolean(classifier?.apiKey?.trim()) && Boolean(classifier?.baseUrl?.trim()) && Boolean(classifier?.model?.trim());
-  if (!classifier || !hasClassifierKey) {
-    // Heuristic-only mode: unresolved candidates proceed to AI, clean chunks do not.
-    // This still avoids provider calls without any network use.
+  if (!classifier?.baseUrl?.trim()) {
+    // No classifier endpoint is configured: unresolved candidates are sent to the provider.
     for (const input of inputs) {
       decisions.push({
         chunkId: input.chunkId,
@@ -958,63 +1021,51 @@ export async function triageChunks(
     return {
       decisions,
       candidateCount: inputs.length,
-      metrics: {
-        candidateChunks: inputs.length,
-        classifierCalls: 0,
-        providerCalls: inputs.length,
-        avoidedProviderCalls: Math.max(0, chunks.length - inputs.length),
-        fallbackCount: inputs.length,
-        processingMs: Math.max(0, Math.round((classifierNow() - startedAt) * 100) / 100),
-      },
+      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", 0, 0, 0, 0),
     };
   }
+  const inputBatches: ClassifierChunkInput[][] = [];
+  for (let offset = 0; offset < inputs.length; offset += CLASSIFIER_MAX_BATCH_CHUNKS) {
+    inputBatches.push(inputs.slice(offset, offset + CLASSIFIER_MAX_BATCH_CHUNKS));
+  }
+  let classifierRequests = 0;
   try {
-    const results = await requestClassifierDecisions(inputs, classifier, { signal: options.signal, timeoutMs: options.timeoutMs ?? classifier.timeoutMs });
-    const byId = new Map(results.map((result) => [result.chunkId, result]));
-    let fallbacks = 0;
-    for (const input of inputs) {
-      const found = byId.get(input.chunkId);
+    const results: Array<ClassifierChunkDecision | null> = [];
+    for (const inputBatch of inputBatches) {
+      classifierRequests += 1;
+      results.push(...await requestClassifierDecisions(inputBatch, classifier, {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs ?? classifier.timeoutMs,
+        labelFormulationId: options.labelFormulationId,
+      }));
+    }
+    let omittedClassifierResults = 0;
+    for (let index = 0; index < inputs.length; index += 1) {
+      const input = inputs[index];
+      const found = results[index];
       if (found) decisions.push(found);
       else {
-        fallbacks += 1;
-        decisions.push(fallbackDecision(input, "classifier omitted chunk; local fallback"));
+        omittedClassifierResults += 1;
+        decisions.push(fallbackDecision(input, "classifier omitted a result; provider review required"));
       }
     }
-    const aiNeeded = decisions.filter((item) => item.decision === "ai-needed").length;
-    const uncertainAllowed = options.uncertainPolicy === "allow"
-      ? decisions.filter((item) => item.decision === "uncertain").length
-      : 0;
     return {
       decisions,
       candidateCount: inputs.length,
-      metrics: {
-        candidateChunks: inputs.length,
-        classifierCalls: 1,
-        providerCalls: aiNeeded + uncertainAllowed,
-        avoidedProviderCalls: Math.max(0, chunks.length - aiNeeded - uncertainAllowed),
-        fallbackCount: decisions.filter((item) => item.fallback).length + fallbacks,
-        processingMs: Math.max(0, Math.round((classifierNow() - startedAt) * 100) / 100),
-      },
+      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, results.filter((result) => result !== null).length, 0, omittedClassifierResults),
     };
   } catch (error) {
     if (options.signal?.aborted) throw error;
-    // Safe fallback: keep local results, do not trigger expensive AI on classifier failure.
-    // `uncertain` with skip policy means provider is skipped; metrics record the fallback.
+    // A classifier outage is observable and never silently downgrades the unresolved work.
     for (const input of inputs) {
       const message = error instanceof ClassifierError ? error.message : "classifier unavailable";
-      decisions.push(fallbackDecision(input, `classifier fallback: ${message}`));
+      const code = error instanceof ClassifierError ? " [" + error.code + "]" : "";
+      decisions.push(fallbackDecision(input, "classifier failure" + code + ": " + message + "; provider review required"));
     }
     return {
       decisions,
       candidateCount: inputs.length,
-      metrics: {
-        candidateChunks: inputs.length,
-        classifierCalls: 1,
-        providerCalls: options.uncertainPolicy === "allow" ? inputs.length : 0,
-        avoidedProviderCalls: options.uncertainPolicy === "allow" ? Math.max(0, chunks.length - inputs.length) : chunks.length,
-        fallbackCount: inputs.length,
-        processingMs: Math.max(0, Math.round((classifierNow() - startedAt) * 100) / 100),
-      },
+      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, 0, 1, 0),
     };
   }
 }
@@ -1022,179 +1073,24 @@ export async function triageChunks(
 export function filterChunksForProvider(
   chunks: AnalysisChunk[],
   decisions: ClassifierChunkDecision[],
-  uncertainPolicy: "allow" | "skip" = "skip",
+  uncertainPolicy: UncertainPolicy = "provider",
 ) {
   const byId = new Map(decisions.map((decision) => [decision.chunkId, decision]));
   return chunks.filter((chunk) => {
     const decision = byId.get(chunk.id);
     if (!decision) return false;
     if (decision.decision === "ai-needed") return true;
-    if (decision.decision === "uncertain" && uncertainPolicy === "allow") return true;
+    if (decision.decision === "uncertain" && uncertainPolicy === "provider") return true;
     return false;
   });
 }
 
-// Bounded per-excerpt cache for classifier decisions (safe: keyed by excerpt hash + model).
-class TriageCache {
-  private readonly values = new Map<string, ClassifierChunkDecision>();
-  private readonly limit: number;
-
-  constructor(limit = 64) {
-    this.limit = limit;
-  }
-
-  get(key: string) {
-    const value = this.values.get(key);
-    if (value !== undefined) {
-      this.values.delete(key);
-      this.values.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: string, value: ClassifierChunkDecision) {
-    this.values.delete(key);
-    this.values.set(key, value);
-    while (this.values.size > this.limit) this.values.delete(this.values.keys().next().value as string);
-  }
-
-  clear() {
-    this.values.clear();
-  }
-
-  get size() {
-    return this.values.size;
-  }
-}
-
-export function createClassifierCacheKey(excerpt: string, model: string, categories: TriageCategory[]) {
-  let hash = 0;
-  const source = `${model}:${categories.join(",")}:${excerpt}`;
-  for (let index = 0; index < source.length; index += 1) {
-    hash = (hash * 31 + source.charCodeAt(index)) | 0;
-  }
-  return `${model}:${categories.join(",")}:${source.length}:${hash}`;
-}
-
-export interface TriageSchedulerOptions {
-  classifier: ClassifierSettings;
-  debounceMs?: number;
-  maxBatchChunks?: number;
-  maxExcerptChars?: number;
-  uncertainPolicy?: "allow" | "skip";
-  cacheLimit?: number;
-}
-
-/**
- * Intelligent debounce/batching scheduler for classifier.dev.
- * Coalesces rapid edits, batches up to maxBatchChunks per request,
- * caches per-excerpt decisions, and supports cancellation.
- */
-export function createTriageScheduler(schedulerOptions: TriageSchedulerOptions) {
-  const debounceMs = Math.max(100, Math.min(5_000, schedulerOptions.debounceMs ?? CLASSIFIER_DEBOUNCE_MS));
-  const maxBatch = Math.max(1, Math.min(10, schedulerOptions.maxBatchChunks ?? CLASSIFIER_MAX_BATCH_CHUNKS));
-  const cache = new TriageCache(schedulerOptions.cacheLimit ?? 64);
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const queue: Array<{
-    input: ClassifierChunkInput;
-    resolve: (value: ClassifierChunkDecision) => void;
-    reject: (reason: unknown) => void;
-    signal?: AbortSignal;
-  }> = [];
-  let controller: AbortController | null = null;
-
-  const flush = async () => {
-    timer = null;
-    const batch = queue.splice(0, queue.length);
-    if (!batch.length) return;
-    controller?.abort();
-    controller = new AbortController();
-    const active = batch.filter((item) => !item.signal?.aborted);
-    for (const item of batch) {
-      if (item.signal?.aborted) item.reject(new ClassifierError("unknown", "Triage request cancelled."));
-    }
-    if (!active.length) return;
-    // Serve cached decisions without network.
-    const uncached: typeof active = [];
-    for (const item of active) {
-      const key = createClassifierCacheKey(item.input.excerpt, schedulerOptions.classifier.model, item.input.categories);
-      const cached = cache.get(key);
-      if (cached) item.resolve({ ...cached, chunkId: item.input.chunkId });
-      else uncached.push(item);
-    }
-    if (!uncached.length) return;
-    // Batch into groups to bound request size.
-    for (let offset = 0; offset < uncached.length; offset += maxBatch) {
-      const group = uncached.slice(offset, offset + maxBatch);
-      if (group.some((item) => item.signal?.aborted)) {
-        for (const item of group) {
-          if (item.signal?.aborted) item.reject(new ClassifierError("unknown", "Triage request cancelled."));
-          else uncached.push(item);
-        }
-        continue;
-      }
-      try {
-        const results = await requestClassifierDecisions(
-          group.map((item) => item.input),
-          schedulerOptions.classifier,
-          { signal: controller.signal },
-        );
-        const byId = new Map(results.map((result) => [result.chunkId, result]));
-        for (const item of group) {
-          const found = byId.get(item.input.chunkId) ?? fallbackDecision(item.input, "classifier omitted chunk; local fallback");
-          cache.set(createClassifierCacheKey(item.input.excerpt, schedulerOptions.classifier.model, item.input.categories), found);
-          if (item.signal?.aborted) item.reject(new ClassifierError("unknown", "Triage request cancelled."));
-          else item.resolve(found);
-        }
-      } catch (error) {
-        if (controller.signal.aborted) {
-          for (const item of group) item.reject(error);
-          return;
-        }
-        for (const item of group) {
-          const fallback = fallbackDecision(item.input, error instanceof Error ? error.message : "classifier fallback");
-          if (item.signal?.aborted) item.reject(error);
-          else item.resolve(fallback);
-        }
-      }
-    }
-  };
-
-  const schedule = (inputs: ClassifierChunkInput[], signal?: AbortSignal) => {
-    // Cancellation support: aborting the signal rejects pending entries.
-    if (signal?.aborted) return Promise.reject(new ClassifierError("unknown", "Triage request cancelled."));
-    const promises = inputs.map((input) => new Promise<ClassifierChunkDecision>((resolve, reject) => {
-      const key = createClassifierCacheKey(input.excerpt, schedulerOptions.classifier.model, input.categories);
-      const cached = cache.get(key);
-      if (cached) {
-        resolve({ ...cached, chunkId: input.chunkId });
-        return;
-      }
-      queue.push({ input, resolve, reject, signal });
-    }));
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void flush(), debounceMs);
-    return Promise.all(promises);
-  };
-
-  const cancel = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    controller?.abort();
-    controller = null;
-    const pending = queue.splice(0, queue.length);
-    for (const item of pending) item.reject(new ClassifierError("unknown", "Triage request cancelled."));
-  };
-
-  const clear = () => cache.clear();
-
-  return { schedule, cancel, clear, cache };
-}
 
 export interface ProviderTriageOptions extends ProviderAnalysisOptions {
   classifier?: ClassifierSettings | null;
   triageEnabled?: boolean;
-  uncertainPolicy?: "allow" | "skip";
+  uncertainPolicy?: UncertainPolicy;
+  labelFormulationId?: TriageLabelFormulationId;
   classifierTimeoutMs?: number;
 }
 
@@ -1225,14 +1121,16 @@ export async function analyzeWithTriage(
   if (!triageEnabled) {
     return analyzeWithProvider(text, goals, settings, options);
   }
+  const uncertainPolicy = options.uncertainPolicy ?? options.classifier?.uncertainPolicy ?? "provider";
   const triage = await triageChunks(chunks, local.issues, {
     signal: options.signal,
     classifier: options.classifier ?? null,
-    uncertainPolicy: options.uncertainPolicy ?? "skip",
+    uncertainPolicy,
+    labelFormulationId: options.labelFormulationId,
     maxExcerptChars: options.classifier?.maxExcerptChars,
     timeoutMs: options.classifierTimeoutMs ?? options.classifier?.timeoutMs,
   });
-  const aiChunks = filterChunksForProvider(chunks, triage.decisions, options.uncertainPolicy ?? "skip");
+  const aiChunks = filterChunksForProvider(chunks, triage.decisions, uncertainPolicy);
   if (!aiChunks.length) {
     const stats = getWritingStats(text);
     const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider");
@@ -1276,7 +1174,15 @@ export async function analyzeWithTriage(
     stats,
     source: aiIssues.length ? "local+ai" : "local",
     changedRange: options.changedRange ?? undefined,
-    triage: { decisions: triage.decisions, metrics: { ...triage.metrics, providerCalls: successful.length } },
+    triage: {
+      decisions: triage.decisions,
+      metrics: {
+        ...triage.metrics,
+        providerRequests: aiChunks.length,
+        providerChunks: aiChunks.length,
+        avoidedProviderChunks: Math.max(0, chunks.length - aiChunks.length),
+      },
+    },
     ...(diagnostics ? { diagnostics } : {}),
   } as AnalysisResult & { triage: TriageOutcome };
 }

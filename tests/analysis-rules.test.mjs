@@ -57,6 +57,30 @@ test("article exceptions and noun agreement cover common high-confidence cases",
   assert.equal(incorrect.issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement").length, 2);
 });
 
+test("British dialect rules distinguish contextual licence, practise, and programme", () => {
+  const british = analyzeLocally(
+    "The authority will license the company. I practice every day. I need a driving license. The training program helps. The software program runs.",
+    { dialect: "en-GB" },
+  );
+  const dialectIssues = british.issues.filter((issue) => issue.ruleId === "dialect-spelling");
+  assert.ok(dialectIssues.some((issue) => issue.original === "practice" && issue.replacement === "practise"));
+  assert.ok(dialectIssues.some((issue) => issue.original === "license" && issue.replacement === "licence"));
+  assert.ok(dialectIssues.some((issue) => issue.original === "program" && issue.replacement === "programme"));
+  assert.equal(dialectIssues.some((issue) => issue.original === "will" || issue.original === "software"), false);
+  assert.equal(dialectIssues.filter((issue) => issue.original === "license").length, 1);
+  assert.equal(dialectIssues.filter((issue) => issue.original === "program").length, 1);
+});
+
+test("dialect rules leave ambiguous contextual forms alone and handle US counterparts", () => {
+  const ambiguous = analyzeLocally("They discuss license, practice, and program.", { dialect: "en-GB" });
+  assert.equal(ambiguous.issues.some((issue) => issue.ruleId === "dialect-spelling"), false);
+  const us = analyzeLocally("I will use a licence. I practise every day. The television programme starts.", { dialect: "en-US" });
+  const dialectIssues = us.issues.filter((issue) => issue.ruleId === "dialect-spelling");
+  assert.ok(dialectIssues.some((issue) => issue.original === "licence" && issue.replacement === "license"));
+  assert.ok(dialectIssues.some((issue) => issue.original === "practise" && issue.replacement === "practice"));
+  assert.ok(dialectIssues.some((issue) => issue.original === "programme" && issue.replacement === "program"));
+});
+
 test("analyzeDocument shares sentence and paragraph measurements with stats", () => {
   const document = analyzeDocument("A clear sentence. Another useful result.\n\nA final paragraph.");
   const stats = getWritingStats(document.text, document);

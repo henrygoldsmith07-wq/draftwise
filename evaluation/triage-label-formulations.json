@@ -1,0 +1,44 @@
+{
+  "selected": "semantic-v2",
+  "decision": "semantic-v2",
+  "rationale": "The semantic boundary is explicit enough to bias recall while still giving classifier.dev a clear locally-sufficient option.",
+  "formulations": [
+    {
+      "id": "semantic-v2",
+      "labels": [
+        "The local writing checks are sufficient; no semantic AI review is needed.",
+        "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
+        "It is unclear whether semantic AI review would add enough value."
+      ],
+      "tradeoff": "Longer labels carry the intended boundary and reduce ambiguity, at the cost of a slightly larger request."
+    },
+    {
+      "id": "direct-v1",
+      "labels": [
+        "Local checks are enough; do not use AI review.",
+        "AI review is needed to find useful semantic writing issues.",
+        "Uncertain whether AI review would help."
+      ],
+      "tradeoff": "Shorter labels reduce prompt size, but the local-versus-semantic distinction is less explicit and may reduce recall."
+    }
+  ],
+  "evaluation_method": "The offline evaluator runs both formulations against the same corpus and compares AI recall, false-filter rate, uncertain rate, excerpt size, and latency. Keep the formulation that meets the false-filter budget while preserving recall.",
+  "last_offline_measurement": {
+    "corpusSize": 51,
+    "semantic-v2": {
+      "accuracy": 0.941,
+      "aiPrecision": 0.923,
+      "aiRecall": 1,
+      "falseFilterRate": 0,
+      "uncertainRate": 0.078
+    },
+    "direct-v1": {
+      "accuracy": 0.941,
+      "aiPrecision": 0.923,
+      "aiRecall": 1,
+      "falseFilterRate": 0,
+      "uncertainRate": 0.078
+    },
+    "selection": "semantic-v2 remains selected because it states the local-versus-semantic boundary explicitly; live evaluation should be rerun before changing the default."
+  }
+}

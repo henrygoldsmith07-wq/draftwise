@@ -11,9 +11,9 @@ const defaults = {
   siteAccess: [],
   aiEnabled: false,
   classifier: {
-    baseUrl: "https://classifier.dev/v1",
-    model: "draftwise-triage-v1",
+    baseUrl: "https://classifier.dev",
     apiKey: "",
+    uncertainPolicy: "provider",
     timeoutMs: 8000,
     maxExcerptChars: 500,
   },
@@ -27,6 +27,36 @@ const defaults = {
     customHeaders: "",
   },
 };
+
+function stableSerialise(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(stableSerialise).join(",") + "]";
+  return "{" + Object.keys(value).sort().filter((key) => value[key] !== undefined).map((key) => JSON.stringify(key) + ":" + stableSerialise(value[key])).join(",") + "}";
+}
+
+function settingsFingerprint(value) {
+  const source = stableSerialise(value);
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return "settings-" + (hash >>> 0).toString(16) + "-" + source.length;
+}
+
+function safeCustomHeadersFingerprint(raw) {
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return settingsFingerprint({ invalid: true, length: String(raw || "").length });
+    const safe = Object.entries(parsed)
+      .filter(([name]) => !/(authorization|api[-_ ]?key|token|secret|password|credential)/iu.test(name))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => [name, settingsFingerprint(value)]);
+    return settingsFingerprint(safe);
+  } catch {
+    return settingsFingerprint({ invalid: true, length: String(raw || "").length });
+  }
+}
 
 function chromeCall(method, args = []) {
   return new Promise((resolve, reject) => {
@@ -81,6 +111,8 @@ async function syncRegisteredSites() {
 
 async function initialise() {
   const stored = await storageGet(Object.keys(defaults));
+  const storedClassifier = { ...(stored.classifier || {}) };
+  delete storedClassifier.model;
   await storageSet({
     excludedSites: Array.isArray(stored.excludedSites) ? stored.excludedSites : defaults.excludedSites,
     disabledSites: Array.isArray(stored.disabledSites) ? stored.disabledSites : defaults.disabledSites,
@@ -88,7 +120,7 @@ async function initialise() {
     siteAccess: Array.isArray(stored.siteAccess) ? stored.siteAccess : defaults.siteAccess,
     aiEnabled: typeof stored.aiEnabled === "boolean" ? stored.aiEnabled : defaults.aiEnabled,
     provider: { ...defaults.provider, ...(stored.provider || {}) },
-    classifier: { ...defaults.classifier, ...(stored.classifier || {}) },
+    classifier: { ...defaults.classifier, ...storedClassifier },
   });
   await syncRegisteredSites();
 }
@@ -103,6 +135,13 @@ chrome.permissions.onRemoved.addListener(() => { void syncRegisteredSites(); });
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "clear-ai-cache") {
+    for (const controller of activeRequests.values()) controller.abort();
+    activeRequests.clear();
+    analysisCache.clear();
+    sendResponse({ ok: true });
+    return true;
+  }
   if (message?.type === "register-site" || message?.type === "unregister-site") {
     const operation = message.type === "register-site" ? registerSite(message.hostname) : unregisterSite(message.hostname);
     operation.then((hostname) => sendResponse({ ok: true, hostname })).catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Site permission update failed." }));
@@ -134,8 +173,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ requestId: message.requestId, issues: null, error: "Grant provider access in Draftwise settings before enabling AI." });
         return;
       }
-      // Classifier origin requires a separate grant; heuristic-only mode needs no grant.
-      const classifier = stored.classifier && stored.classifier.apiKey && stored.classifier.baseUrl && stored.classifier.model ? stored.classifier : null;
+      // Classifier origin requires a separate grant. classifier.dev itself is keyless;
+      // a workspace key is only an optional limit/identity credential.
+      const classifier = stored.classifier && stored.classifier.baseUrl ? stored.classifier : null;
       if (classifier) {
         let classifierOrigin;
         try {
@@ -149,7 +189,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
       }
-      const cacheKey = JSON.stringify({ text, goals: message.goals, style: message.style, range: message.changedRange, model: stored.provider.model, classifier: classifier ? classifier.model : "heuristic-only" });
+      const cacheKey = JSON.stringify({
+        text,
+        goals: message.goals,
+        style: message.style,
+        range: message.changedRange,
+        settings: settingsFingerprint({
+          engineVersion: "analysis-engine-v3",
+          provider: {
+            provider: stored.provider.provider,
+            baseUrl: stored.provider.baseUrl,
+            model: stored.provider.model,
+            temperature: stored.provider.temperature,
+            maxTokens: stored.provider.maxTokens,
+            customHeaders: safeCustomHeadersFingerprint(stored.provider.customHeaders),
+          },
+          classifier: classifier
+            ? {
+                baseUrl: classifier.baseUrl,
+                timeoutMs: classifier.timeoutMs || 8000,
+                maxExcerptChars: classifier.maxExcerptChars || 500,
+                credentialConfigured: Boolean(classifier.apiKey),
+                labelFormulationId: "semantic-v2",
+                uncertainPolicy: classifier.uncertainPolicy || "provider",
+              }
+            : null,
+          triagePolicy: "provider",
+        }),
+      });
       const cached = analysisCache.get(cacheKey);
       if (cached) {
         if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: cached.issues, triage: cached.triage });
@@ -160,7 +227,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         text,
         message.goals || { audience: "general", intent: "inform", tone: "professional" },
         stored.provider,
-        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: "skip" },
+        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: classifier?.uncertainPolicy === "local" ? "local" : "provider", labelFormulationId: "semantic-v2" },
       );
       if (!controller.signal.aborted) {
         analysisCache.set(cacheKey, { issues: result.issues, triage: result.triage || null });

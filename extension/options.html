@@ -14,7 +14,7 @@
       <div class="brand"><span class="mark" aria-hidden="true"></span><span>draftwise</span></div>
       <p class="eyebrow">Extension settings</p>
       <h1>Helpful, wherever you write.</h1>
-      <p>Local checks run in the page. AI is optional and runs in the Manifest V3 service worker, so page-facing code never handles your API key.</p>
+      <p>Local checks run in the page. AI is optional and runs in the Manifest V3 service worker, so page-facing code never handles your provider or classifier keys.</p>
       <section class="card" aria-labelledby="privacy-title">
         <div class="callout"><span aria-hidden="true">✦</span><div><strong id="privacy-title">Private by default</strong><span>Draftwise skips sensitive fields and sends nothing until you enable AI and grant site access.</span></div></div>
         <div class="row"><label for="aiEnabled"><strong>Enable AI suggestions</strong><span>Only the changed analysis chunks go to your chosen endpoint.</span></label><button class="toggle" id="aiEnabled" type="button" role="switch" aria-checked="false" aria-label="Enable AI suggestions"><i aria-hidden="true"></i></button></div>
@@ -23,10 +23,11 @@
         <div class="permission-status"><div><strong>Provider access</strong><span id="providerAccessStatus">Not granted</span><small id="providerOriginLabel">The service worker needs access to this provider origin for AI requests.</small></div><div class="permission-actions"><button class="secondary" id="grantProviderAccess" type="button">Grant provider access</button><button class="secondary" id="revokeProviderAccess" type="button">Revoke</button></div></div>
         <label class="field"><span>API key — stored in extension storage</span><input id="apiKey" type="password" autocomplete="off" placeholder="sk-…" /></label>
         <span class="section-label">Classifier triage (cheap gate before expensive AI)</span>
-        <p class="hint">Local rules run first. Only unresolved chunks go to classifier.dev (decision only, never rewrites), and only ai-needed chunks reach your provider. Classifier runs only when AI is enabled. Leave the key empty for heuristic-only mode.</p>
-        <div class="field-grid"><label class="field"><span>Classifier base URL</span><input id="classifierBaseUrl" inputmode="url" placeholder="https://classifier.dev/v1" /></label><label class="field"><span>Classifier model</span><input id="classifierModel" placeholder="draftwise-triage-v1" /></label></div>
+        <p class="hint">Local rules run first. Only unresolved, redacted excerpts go to classifier.dev (label and confidence only, never rewrites), and only ai-needed chunks reach your provider. Classifier runs only when AI is enabled and is keyless by default.</p>
+        <label class="field"><span>Classifier base URL — advanced override</span><input id="classifierBaseUrl" inputmode="url" placeholder="https://classifier.dev" /></label>
         <div class="permission-status"><div><strong>Classifier access</strong><span id="classifierAccessStatus">Not granted</span><small id="classifierOriginLabel">The service worker needs access to this classifier origin for triage.</small></div><div class="permission-actions"><button class="secondary" id="grantClassifierAccess" type="button">Grant classifier access</button><button class="secondary" id="revokeClassifierAccess" type="button">Revoke</button></div></div>
-        <label class="field"><span>Classifier key — stored in extension storage</span><input id="classifierKey" type="password" autocomplete="off" placeholder="clf-…" /></label>
+        <label class="field"><span>Classifier workspace key — optional, stored in extension storage</span><input id="classifierKey" type="password" autocomplete="off" placeholder="Optional classifier.dev key" /></label>
+        <label class="field"><span>Uncertain classifier results</span><select id="uncertainPolicy"><option value="provider">Send to provider (higher recall)</option><option value="local">Keep local (lower cost)</option></select></label>
         <span class="section-label">Writing profile</span>
         <div class="field-grid"><label class="field"><span>Dialect</span><select id="dialect"><option value="en-GB">British English</option><option value="en-US">US English</option></select></label><label class="field"><span>Passive voice sensitivity</span><select id="passiveSensitivity"><option value="off">Off</option><option value="normal">Normal</option><option value="strict">Strict</option></select></label></div>
         <div class="row"><label for="allowContractions"><strong>Allow contractions</strong><span>Keep natural forms such as “can’t” when enabled.</span></label><button class="toggle" id="allowContractions" type="button" role="switch" aria-checked="true" aria-label="Allow contractions"><i aria-hidden="true"></i></button></div>
@@ -34,7 +35,7 @@
         <label class="field"><span>Exclude websites — one hostname per line</span><textarea id="excludedSites" placeholder="bank.example.com&#10;mail.example.com"></textarea></label>
         <div class="access-row"><input id="siteAccess" aria-label="Website hostname to grant access to" placeholder="example.com" /><button class="secondary" id="grantAccess" type="button">Grant access</button></div><div id="sitePermissions" class="permission-list" aria-live="polite"><span class="hint">No site access granted yet.</span></div>
         <button class="save" id="save" type="button">Save settings</button><span class="status" id="status" role="status" aria-live="polite"></span>
-        <div class="danger-zone"><div><strong>Local data</strong><div class="hint">Forget the provider key or clear all Draftwise extension settings.</div></div><div><button class="secondary" id="forgetKey" type="button">Forget key</button><button class="danger" id="clearData" type="button">Clear all</button></div></div>
+        <div class="danger-zone"><div><strong>Local data</strong><div class="hint">Forget provider and classifier credentials, or clear all Draftwise extension settings.</div></div><div><button class="secondary" id="forgetKey" type="button">Forget keys</button><button class="danger" id="clearData" type="button">Clear all</button></div></div>
       </section>
       <p class="hint">To install locally: open <code>chrome://extensions</code>, enable Developer mode, choose Load unpacked, select this folder, then grant access only to sites where you want Draftwise to run.</p>
     </main>

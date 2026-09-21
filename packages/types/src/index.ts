@@ -187,26 +187,27 @@ export type TriageCategory =
   | "other";
 
 export type TriageDecision = "ai-needed" | "locally-sufficient" | "uncertain";
+export type UncertainPolicy = "provider" | "local";
 
 export interface ClassifierSettings {
   baseUrl: string;
-  model: string;
-  apiKey: string;
+  /** Optional advanced credential for classifier.dev Pro/workspace limits. */
+  apiKey?: string;
   timeoutMs?: number;
   maxExcerptChars?: number;
+  uncertainPolicy?: UncertainPolicy;
 }
 
 export type ClassifierErrorCode =
-  | "missing-key"
   | "invalid-url"
   | "insecure-url"
-  | "invalid-model"
   | "unauthorized"
   | "rate-limited"
   | "timeout"
   | "network"
   | "cors"
   | "invalid-json"
+  | "invalid-request"
   | "unknown";
 
 export interface ClassifierChunkInput {
@@ -235,11 +236,16 @@ export interface ClassifierChunkDecision {
 
 export interface TriageMetrics {
   candidateChunks: number;
-  classifierCalls: number;
-  providerCalls: number;
-  avoidedProviderCalls: number;
-  fallbackCount: number;
-  processingMs: number;
+  classifierRequests: number;
+  classifiedChunks: number;
+  locallySufficientChunks: number;
+  aiNeededChunks: number;
+  uncertainChunks: number;
+  classifierFailures: number;
+  omittedClassifierResults: number;
+  providerRequests: number;
+  providerChunks: number;
+  avoidedProviderChunks: number;
 }
 
 export interface DraftwiseWorkspace {
@@ -285,9 +291,8 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
 };
 
 export const DEFAULT_CLASSIFIER_SETTINGS: ClassifierSettings = {
-  baseUrl: "https://classifier.dev/v1",
-  model: "draftwise-triage-v1",
-  apiKey: "",
+  baseUrl: "https://classifier.dev",
+  uncertainPolicy: "provider",
   timeoutMs: 8_000,
   maxExcerptChars: 500,
 };

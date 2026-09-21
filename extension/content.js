@@ -80,7 +80,7 @@
       }
       const dismiss = textNode("button", "×", "dw-dismiss"); dismiss.type = "button"; dismiss.setAttribute("aria-label", `Dismiss ${item.title || "suggestion"}`); dismiss.addEventListener("click", () => { activeIssues = activeIssues.filter((candidate) => candidate.id !== item.id); render(); }); fix.append(dismiss); issue.append(fix); panel.append(issue);
     });
-    const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", "Local-first"));
+    const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", settings.aiEnabled ? "Local checks + optional AI" : "Local checks"));
     const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; chrome.storage.local.set({ disabledSites: settings.disabledSites }); panel.hidden = true; button.hidden = true; }); footer.append(disable); panel.append(footer);
     if (actionable.length) panel.setAttribute("aria-label", `${actionable.length} actionable writing suggestions`);
   }

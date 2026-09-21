@@ -1,8 +1,8 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import { analyzeWithTriage, ProviderError } from "@/packages/ai/src";
-import { detectChangedRange, LruCache, createAnalysisCacheKey } from "@/packages/analysis/src";
+import { analyzeWithTriage, ProviderError, TRIAGE_LABEL_FORMULATION_ID } from "@/packages/ai/src";
+import { createAnalysisCacheKey, createAnalysisSettingsFingerprint, detectChangedRange, LruCache } from "@/packages/analysis/src";
 import { analyzeLocally, analyzeLocallyIncremental } from "@/packages/grammar/src";
 import type { AnalysisResult, ClassifierSettings, ProviderSettings, StylePreferences, WritingGoals } from "@/packages/types/src";
 
@@ -10,6 +10,22 @@ const emptyResult = (text: string, goals: WritingGoals, style: StylePreferences)
   const local = analyzeLocally(text, style, goals);
   return { ...local, analysedText: text, source: "local" };
 };
+
+const ANALYSIS_ENGINE_VERSION = "analysis-engine-v3";
+
+function safeCustomHeadersFingerprint(raw: string) {
+  try {
+    const parsed = JSON.parse(raw || "{}") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return createAnalysisSettingsFingerprint({ invalid: true, length: raw.length });
+    const safeEntries = Object.entries(parsed as Record<string, unknown>)
+      .filter(([name]) => !/(authorization|api[-_ ]?key|token|secret|password|credential)/iu.test(name))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => [name, createAnalysisSettingsFingerprint(value)] as const);
+    return createAnalysisSettingsFingerprint(safeEntries);
+  } catch {
+    return createAnalysisSettingsFingerprint({ invalid: true, length: raw.length });
+  }
+}
 
 interface UseAnalysisArgs {
   text: string;
@@ -51,11 +67,35 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
     // Cloud AI (provider + classifier.dev) only runs when explicitly enabled.
     // Local analysis above already ran synchronously; triage below decides
     // whether unresolved chunks need the expensive model at all.
-    if (!aiEnabled || !settings.apiKey.trim() || !settings.baseUrl.trim() || !settings.model.trim() || !text.trim()) return;
-    const classifierKey = classifier?.model?.trim()
-      ? `${classifier.baseUrl}|${classifier.model}`
-      : "heuristic-only";
-    const cacheKey = createAnalysisCacheKey(text, JSON.stringify({ settings: { baseUrl: settings.baseUrl, model: settings.model }, classifier: classifierKey, goals, style }), changedRange);
+    if (!aiEnabled || !settings.apiKey.trim() || !settings.baseUrl.trim() || !settings.model.trim() || !text.trim()) {
+      cache.current.clear();
+      return;
+    }
+    const settingsFingerprint = createAnalysisSettingsFingerprint({
+      engineVersion: ANALYSIS_ENGINE_VERSION,
+      goals,
+      style,
+      provider: {
+        provider: settings.provider,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        temperature: settings.temperature,
+        maxTokens: settings.maxTokens,
+        customHeaders: safeCustomHeadersFingerprint(settings.customHeaders),
+      },
+      classifier: classifier
+        ? {
+            baseUrl: classifier.baseUrl,
+            timeoutMs: classifier.timeoutMs ?? 8_000,
+            maxExcerptChars: classifier.maxExcerptChars ?? 500,
+            credentialConfigured: Boolean(classifier.apiKey?.trim()),
+            labelFormulationId: TRIAGE_LABEL_FORMULATION_ID,
+            uncertainPolicy: classifier.uncertainPolicy ?? "provider",
+          }
+        : null,
+      triagePolicy: classifier?.uncertainPolicy ?? "provider",
+    });
+    const cacheKey = createAnalysisCacheKey(text, settingsFingerprint, changedRange);
     const cached = cache.current.get(cacheKey);
     if (cached) {
       startTransition(() => {
@@ -77,7 +117,8 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
         localAnalysis: local,
         classifier: classifier ?? null,
         triageEnabled: true,
-        uncertainPolicy: "skip",
+        uncertainPolicy: classifier?.uncertainPolicy ?? "provider",
+        labelFormulationId: TRIAGE_LABEL_FORMULATION_ID,
       })
         .then((remote) => {
           if (controller.signal.aborted || currentRun !== runId.current) return;

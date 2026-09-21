@@ -1,0 +1,30 @@
+name: Live triage evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Number of corpus entries to evaluate (blank means all)"
+        required: false
+        default: ""
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run live classifier evaluation
+        env:
+          CLASSIFIER_API_KEY: ${{ secrets.CLASSIFIER_API_KEY }}
+          CLASSIFIER_BASE_URL: ${{ secrets.CLASSIFIER_BASE_URL }}
+        run: |
+          if [ -n "${{ inputs.limit }}" ]; then
+            npm run evaluate:triage:live -- --limit=${{ inputs.limit }}
+          else
+            npm run evaluate:triage:live
+          fi

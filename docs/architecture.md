@@ -10,9 +10,9 @@ edit
        ├─ discard affected issues → local rules on the changed region → remap/merge
        ├─ recalculate document statistics and scores
        └─ changed range → context expansion → bounded chunks
-                                  ├─ heuristic selects unresolved/ambiguous chunks
-                                  ├─ classifier.dev (batched excerpts + signals, decision only)
-                                  └─ expensive provider only for ai-needed chunks
+                                   ├─ heuristic selects unresolved/ambiguous chunks
+                                   ├─ classifier.dev (ordered redacted excerpts + labels, decision only)
+                                   └─ expensive provider for ai-needed chunks or classifier failures
                                        └─ validate → map offsets → merge
 ```
 
@@ -21,7 +21,7 @@ edit
 ## Web flow
 
 1. `useDraftPersistence` renders the stable initial workspace, hydrates from versioned storage, then writes only after hydration. This prevents an initial empty state from overwriting a saved draft.
-2. `useAnalysis` retains the previous result, expands the edit to safe context boundaries, recalculates only that region locally, shifts unaffected issue offsets, and recomputes document-level stats/scores. Remote work is debounced (650ms, no classifier request on every keystroke), batched, cancellable, and cached in a bounded LRU. Local-first triage sends only minimised excerpts for unresolved chunks to `classifier.dev`; expensive AI runs only for `ai-needed` chunks.
+2. `useAnalysis` retains the previous result, expands the edit to safe context boundaries, recalculates only that region locally, shifts unaffected issue offsets, and recomputes document-level stats/scores. Remote work is debounced (650ms, no classifier request on every keystroke), batched, cancellable, and cached in a bounded LRU. Local-first triage sends only redacted excerpts for unresolved chunks to `classifier.dev`; uncertain results default to the provider, and classifier failures become explicit provider-required fallbacks.
 3. AI requests are full-document chunks on the first run and changed/context chunks after edits; each settled provider response remains paired with its originating chunk before relative ranges are mapped back to absolute offsets. Partial failures keep successful suggestions; all-failure cases remain explicit.
 4. Provider responses are accepted only when the range is valid and the returned `original` exactly matches the submitted text. Unknown categories, invalid severities, malformed JSON, and unsafe rewrite output are discarded or surfaced as a local fallback.
 5. Accepting a suggestion is a targeted replacement guarded by an exact original-text check. Rewrite actions capture the selection, show a preview, and refuse to apply if the draft changed underneath them.

@@ -4,7 +4,7 @@ const permissionsApi = globalThis.DraftwisePermissions;
 const defaults = {
   aiEnabled: false,
   provider: { provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "", temperature: 0.2, maxTokens: 900, customHeaders: "" },
-  classifier: { baseUrl: "https://classifier.dev/v1", model: "draftwise-triage-v1", apiKey: "", timeoutMs: 8000, maxExcerptChars: 500 },
+  classifier: { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider", timeoutMs: 8000, maxExcerptChars: 500 },
   style: { dialect: "en-GB", names: [], allowContractions: true, passiveVoiceSensitivity: "normal" },
   excludedSites: [],
   disabledSites: [],
@@ -29,11 +29,13 @@ function backgroundMessage(value) { return new Promise((resolve) => chrome.runti
 
 async function readState() {
   const stored = await storageGet(Object.keys(defaults));
+  const storedClassifier = { ...(stored.classifier || {}) };
+  delete storedClassifier.model;
   return {
     ...defaults,
     ...stored,
     provider: { ...defaults.provider, ...(stored.provider || {}) },
-    classifier: { ...defaults.classifier, ...(stored.classifier || {}) },
+    classifier: { ...defaults.classifier, ...storedClassifier },
     style: { ...defaults.style, ...(stored.style || {}) },
     excludedSites: Array.isArray(stored.excludedSites) ? stored.excludedSites : [],
     disabledSites: Array.isArray(stored.disabledSites) ? stored.disabledSites : [],
@@ -127,11 +129,10 @@ async function saveSettings() {
     providerPatternValue = permissionsApi.providerPattern(baseUrl);
   } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS provider URL.", true); return; }
   const classifierBaseUrlEl = get("classifierBaseUrl");
-  const classifierModelEl = get("classifierModel");
   const classifierKeyEl = get("classifierKey");
   const classifierBaseUrl = classifierBaseUrlEl ? classifierBaseUrlEl.value.trim().replace(/\/$/u, "") : "";
-  const classifierModel = classifierModelEl ? classifierModelEl.value.trim() : "";
   const classifierKey = classifierKeyEl ? classifierKeyEl.value.trim() : "";
+  const uncertainPolicy = get("uncertainPolicy")?.value === "local" ? "local" : "provider";
   if (classifierBaseUrl) { try { permissionsApi.providerPattern(classifierBaseUrl); } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS classifier URL.", true); return; } }
   const model = get("model").value.trim();
   if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) { setStatus("Enter a valid model ID.", true); return; }
@@ -140,7 +141,7 @@ async function saveSettings() {
   await storageSet({
     aiEnabled: toggleValue("aiEnabled"),
     provider: { ...state.provider, provider: "openai-compatible", baseUrl, model, apiKey: get("apiKey").value.trim(), temperature: 0.2, maxTokens: 900, customHeaders: "" },
-    classifier: { ...state.classifier, baseUrl: classifierBaseUrl || state.classifier.baseUrl, model: classifierModel || state.classifier.model, apiKey: classifierKey },
+    classifier: { ...state.classifier, baseUrl: classifierBaseUrl || state.classifier.baseUrl, apiKey: classifierKey, uncertainPolicy },
     style: { ...state.style, dialect: get("dialect").value, allowContractions: toggleValue("allowContractions"), passiveVoiceSensitivity: get("passiveSensitivity").value },
     excludedSites: [...new Set(excludedSites)],
   });
@@ -202,8 +203,8 @@ async function load() {
   get("baseUrl").value = provider.baseUrl; get("model").value = provider.model; get("apiKey").value = provider.apiKey;
   const classifier = state.classifier;
   if (get("classifierBaseUrl")) get("classifierBaseUrl").value = classifier.baseUrl;
-  if (get("classifierModel")) get("classifierModel").value = classifier.model;
-  if (get("classifierKey")) get("classifierKey").value = classifier.apiKey;
+  if (get("classifierKey")) get("classifierKey").value = classifier.apiKey || "";
+  if (get("uncertainPolicy")) get("uncertainPolicy").value = classifier.uncertainPolicy === "local" ? "local" : "provider";
   get("dialect").value = style.dialect; get("passiveSensitivity").value = style.passiveVoiceSensitivity; get("excludedSites").value = state.excludedSites.join("\n");
   await renderProviderPermission(); await renderClassifierPermission(); await renderSitePermissions();
 }
@@ -218,10 +219,19 @@ if (get("revokeClassifierAccess")) get("revokeClassifierAccess").addEventListene
 if (get("classifierBaseUrl")) get("classifierBaseUrl").addEventListener("input", () => { void renderClassifierPermission(); });
 get("revokeProviderAccess").addEventListener("click", () => { void revokeProviderAccess(); });
 get("grantAccess").addEventListener("click", () => { void grantSiteAccess(); });
-get("forgetKey").addEventListener("click", async () => { const state = await readState(); await storageSet({ provider: { ...state.provider, apiKey: "" }, aiEnabled: false }); get("apiKey").value = ""; setToggle("aiEnabled", false); setStatus("Key forgotten"); });
+get("forgetKey").addEventListener("click", async () => {
+  const state = await readState();
+  await backgroundMessage({ type: "clear-ai-cache" });
+  await storageSet({ provider: { ...state.provider, apiKey: "" }, classifier: { ...state.classifier, apiKey: "" }, aiEnabled: false });
+  get("apiKey").value = "";
+  if (get("classifierKey")) get("classifierKey").value = "";
+  setToggle("aiEnabled", false);
+  setStatus("Cloud credentials forgotten");
+});
 get("clearData").addEventListener("click", async () => {
   if (!window.confirm("Clear Draftwise extension settings and the stored API key?")) return;
   const state = await readState();
+  await backgroundMessage({ type: "clear-ai-cache" });
   for (const site of state.siteAccess) await permissionRemove({ origins: permissionsApi.sitePatterns(site) });
   try { await permissionRemove({ origins: [permissionsApi.providerPattern(state.provider.baseUrl)] }); } catch { /* already invalid or revoked */ }
   try { await permissionRemove({ origins: [permissionsApi.providerPattern(state.classifier.baseUrl)] }); } catch { /* already invalid or revoked */ }

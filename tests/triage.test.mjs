@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   analyzeWithTriage,
   buildClassifierExcerpt,
-  createTriageScheduler,
+  CLASSIFIER_TRIAGE_LABELS,
   filterChunksForProvider,
   isChunkUnresolved,
   parseClassifierDecisions,
@@ -27,9 +27,8 @@ const provider = {
   customHeaders: "",
 };
 const classifier = {
-  baseUrl: "https://classifier.dev/v1",
-  model: "draftwise-triage-v1",
-  apiKey: "clf-key",
+  baseUrl: "https://classifier.dev",
+  apiKey: "",
   timeoutMs: 5000,
   maxExcerptChars: 500,
 };
@@ -69,18 +68,26 @@ test("classifier excerpts minimise transmitted text and redact structured tokens
   assert.ok(!excerpt.includes("support@example.com"));
   assert.ok(!excerpt.includes("https://example.com/help"));
   assert.ok(excerpt.includes("[email]") || excerpt.includes("[url]"));
-  assert.ok(redactExcerptForClassifier("Budget £1,250.50 is 20%").includes("[number]") || redactExcerptForClassifier("Budget £1,250.50 is 20%").includes("[percent]"));
+  const redacted = redactExcerptForClassifier("Budget £1,250.50 is 20% on 2026-09-21; use API_KEY=secret-value, model GPT-4o-mini, version v2, file draft.docx, id ABC-123, UUID 123e4567-e89b-12d3-a456-426614174000, phone +44 20 7946 0958, token \"sk-test-123456789\".");
+  assert.match(redacted, /\[currency\]/u);
+  assert.match(redacted, /\[percentage\]/u);
+  assert.match(redacted, /\[date\]/u);
+  assert.match(redacted, /\[secret\]/u);
+  assert.match(redacted, /\[model\]/u);
+  assert.match(redacted, /\[version\]/u);
+  assert.match(redacted, /\[filename\]/u);
+  assert.match(redacted, /\[identifier\]|\[uuid\]/u);
+  assert.match(redacted, /\[phone\]/u);
+  assert.match(redacted, /\[quoted-secret\]/u);
 });
 
 test("classifier responses never rewrite: replacement fields are discarded", () => {
   const inputs = [{ chunkId: "chunk-0", excerpt: "hello", startOffset: 0, endOffset: 5, signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false }, categories: ["clarity"] }];
   const decisions = parseClassifierDecisions({
     results: [{
-      chunkId: "chunk-0",
-      decision: "ai-needed",
-      categories: ["clarity"],
+      label: CLASSIFIER_TRIAGE_LABELS[1],
       confidence: 0.9,
-      reason: "needs depth",
+      scores: { [CLASSIFIER_TRIAGE_LABELS[1]]: 0.9 },
       replacement: "HACKED",
       rewrite: "HACKED",
       correctedText: "HACKED",
@@ -92,14 +99,36 @@ test("classifier responses never rewrite: replacement fields are discarded", () 
   assert.ok(!("rewrite" in decisions[0]));
 });
 
-test("other/fallback handling: unknown decisions and categories map to uncertain/other", () => {
+test("ordered classifier results map by input position and unknown labels stay uncertain", () => {
   const inputs = [{ chunkId: "chunk-0", excerpt: "hello world test", startOffset: 0, endOffset: 16, signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false }, categories: ["clarity"] }];
-  const unknown = parseClassifierDecisions({ results: [{ chunkId: "chunk-0", decision: "mystery", categories: ["nonsense"], confidence: 2 }] }, inputs);
+  const unknown = parseClassifierDecisions({ results: [{ label: "mystery", scores: {}, confidence: 2 }] }, inputs);
   assert.equal(unknown[0].decision, "uncertain");
-  assert.deepEqual(unknown[0].categories, ["other"]);
+  assert.deepEqual(unknown[0].categories, ["clarity"]);
   assert.equal(unknown[0].fallback, true);
   const missing = parseClassifierDecisions({ results: [] }, inputs);
   assert.equal(missing.length, 0);
+});
+
+test("malformed ordered results leave an explicit hole instead of shifting chunk identity", () => {
+  const inputs = [0, 1, 2].map((index) => ({
+    chunkId: "chunk-" + index,
+    excerpt: "hello world test " + index,
+    startOffset: index * 20,
+    endOffset: index * 20 + 18,
+    signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false },
+    categories: ["clarity"],
+  }));
+  const decisions = parseClassifierDecisions({
+    results: [
+      { label: CLASSIFIER_TRIAGE_LABELS[0], confidence: 0.9 },
+      { label: null, confidence: 0.9 },
+      { label: CLASSIFIER_TRIAGE_LABELS[1], confidence: 0.9 },
+    ],
+  }, inputs);
+  assert.equal(decisions.length, 3);
+  assert.equal(decisions[0]?.chunkId, "chunk-0");
+  assert.equal(decisions[1], null);
+  assert.equal(decisions[2]?.chunkId, "chunk-2");
 });
 
 test("classifier URL validation requires HTTPS except localhost", () => {
@@ -109,17 +138,66 @@ test("classifier URL validation requires HTTPS except localhost", () => {
   assert.throws(() => validateClassifierUrl("https://user:pass@classifier.dev/v1"), (e) => e instanceof ClassifierError && e.code === "invalid-url");
 });
 
+test("classifier.dev request uses the official keyless ordered payload", async () => {
+  const text = "This thing is really useful for various aspects of the work and stuff.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, init) => {
+    request = { url: String(url), headers: init.headers, body: JSON.parse(init.body) };
+    return new Response(JSON.stringify({ results: request.body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[2], confidence: 0.55, scores: {} })) }), { status: 200 });
+  };
+  try {
+    const outcome = await triageChunks(createAnalysisChunks(text), local.issues, { classifier: { baseUrl: "https://classifier.dev" } });
+    assert.equal(request.url, "https://classifier.dev/v1/classify");
+    assert.deepEqual(Object.keys(request.body).sort(), ["inputs", "instructions", "labels"]);
+    assert.ok(request.body.inputs.every((input) => typeof input === "string"));
+    assert.deepEqual(request.body.labels, CLASSIFIER_TRIAGE_LABELS);
+    assert.equal(request.headers.Authorization, undefined);
+    assert.equal(outcome.metrics.classifierRequests, 1);
+    assert.equal(outcome.decisions.some((decision) => decision.decision === "uncertain"), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("uncertain policy can keep low-confidence classifier results local", async () => {
+  const text = "This thing is really useful for various aspects of the work and stuff.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      results: body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[2], confidence: 0.55 })),
+    }), { status: 200 });
+  };
+  try {
+    const outcome = await triageChunks(createAnalysisChunks(text), local.issues, {
+      classifier,
+      uncertainPolicy: "local",
+    });
+    assert.ok(outcome.decisions.some((decision) => decision.decision === "uncertain"));
+    assert.equal(outcome.metrics.providerChunks, 0);
+    assert.equal(filterChunksForProvider(createAnalysisChunks(text), outcome.decisions, "local").length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("triage preserves incremental ranges: decisions pair by chunkId and map to absolute offsets", async () => {
   const text = `${"The writer reviews the draft and shares clear feedback. ".repeat(20)}This thing is really useful for various aspects of the work and stuff. ${"The team shares the next steps with the client. ".repeat(20)}`;
   const local = analyzeLocally(text, { dialect: "en-GB" });
   const chunks = createAnalysisChunks(text, { maxChars: 500, contextWindow: 16 });
   assert.ok(chunks.length >= 2);
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ results: chunks.map((c) => ({ chunkId: c.id, decision: "locally-sufficient", categories: [], confidence: 0.9, reason: "mock" })) }), { status: 200 });
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ results: body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[0], confidence: 0.9, scores: {} })) }), { status: 200 });
+  };
   try {
     const outcome = await triageChunks(chunks, local.issues, { classifier });
     assert.equal(outcome.decisions.length, chunks.length);
-    const filtered = filterChunksForProvider(chunks, outcome.decisions, "skip");
+    const filtered = filterChunksForProvider(chunks, outcome.decisions, "local");
     assert.equal(filtered.length, 0);
     // chunk ids preserved
     for (const d of outcome.decisions) assert.ok(chunks.some((c) => c.id === d.chunkId));
@@ -134,7 +212,7 @@ test("expensive AI only runs for ai-needed chunks (calls avoided)", async () => 
   let providerCalls = 0;
   globalThis.fetch = async (url) => {
     const target = String(url);
-    if (target.includes("classifier.dev")) return new Response(JSON.stringify({ results: [{ chunkId: "chunk-0-53", decision: "locally-sufficient", categories: [], confidence: 0.9 }] }), { status: 200 });
+    if (target.includes("classifier.dev")) return new Response(JSON.stringify({ results: [{ label: CLASSIFIER_TRIAGE_LABELS[0], confidence: 0.9, scores: {} }] }), { status: 200 });
     providerCalls += 1;
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
   };
@@ -158,8 +236,7 @@ test("ai-needed chunks reach the provider with absolute offsets intact", async (
     const target = String(url);
     if (target.includes("classifier.dev")) {
       const body = JSON.parse(init.body);
-      const chunkId = body.inputs[0].chunkId;
-      return new Response(JSON.stringify({ results: [{ chunkId, decision: "ai-needed", categories: ["clarity"], confidence: 0.85, reason: "mock" }] }), { status: 200 });
+      return new Response(JSON.stringify({ results: body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[1], confidence: 0.85, scores: {} })) }), { status: 200 });
     }
     calls.push(JSON.parse(init.body));
     // Echo a valid AI issue inside the chunk text
@@ -182,7 +259,7 @@ test("ai-needed chunks reach the provider with absolute offsets intact", async (
   }
 });
 
-test("classifier failure falls back to local without expensive AI (skip policy)", async () => {
+test("classifier failure is explicit and proceeds to the provider by default", async () => {
   const text = "This thing is really useful for various aspects that might need review.";
   const originalFetch = globalThis.fetch;
   let providerCalls = 0;
@@ -192,10 +269,12 @@ test("classifier failure falls back to local without expensive AI (skip policy)"
     return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
   };
   try {
-    const result = await analyzeWithTriage(text, goals, provider, { classifier, uncertainPolicy: "skip" });
-    assert.equal(providerCalls, 0);
+    const result = await analyzeWithTriage(text, goals, provider, { classifier });
+    assert.ok(providerCalls >= 1);
     assert.equal(result.source, "local");
-    assert.ok(result.triage.metrics.fallbackCount >= 1);
+    assert.equal(result.triage.metrics.classifierFailures, 1);
+    assert.ok(result.triage.metrics.aiNeededChunks >= 1);
+    assert.ok(result.triage.metrics.providerChunks >= 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -217,36 +296,6 @@ test("cancellation aborts triage and provider work", async () => {
   }
 });
 
-test("scheduler batches, debounces and caches classifier decisions", async () => {
-  const originalFetch = globalThis.fetch;
-  let fetchCalls = 0;
-  globalThis.fetch = async (_url, init) => {
-    fetchCalls += 1;
-    const body = JSON.parse(init.body);
-    return new Response(JSON.stringify({ results: body.inputs.map((i) => ({ chunkId: i.chunkId, decision: "locally-sufficient", categories: [], confidence: 0.9 })) }), { status: 200 });
-  };
-  try {
-    const scheduler = createTriageScheduler({ classifier, debounceMs: 30, maxBatchChunks: 5 });
-    const inputs = [0, 1, 2].map((n) => ({
-      chunkId: `chunk-${n}`,
-      excerpt: `excerpt ${n} with enough text to be unique and stable for caching tests`,
-      startOffset: n * 10,
-      endOffset: n * 10 + 10,
-      signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false },
-      categories: ["other"],
-    }));
-    const first = await scheduler.schedule(inputs);
-    assert.equal(first.length, 3);
-    assert.equal(fetchCalls, 1);
-    // Second identical schedule hits cache without network
-    const second = await scheduler.schedule(inputs);
-    assert.equal(second.length, 3);
-    assert.equal(fetchCalls, 1);
-    scheduler.cancel();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
 
 test("content script keeps credentials out of page context", async () => {
   const content = await readFile(new URL("../extension/content.js", import.meta.url), "utf8");

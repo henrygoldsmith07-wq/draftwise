@@ -1,81 +1,65 @@
 # Classifier triage (classifier.dev)
 
-Draftwise reduces expensive model calls with a cheap triage gate. Local rules always
-run first. Only unresolved or ambiguous chunks are sent to `classifier.dev`, and
-only `ai-needed` chunks proceed to the expensive provider.
+Draftwise runs local rules first. Only unresolved candidates are considered for semantic triage. A classifier response is a routing decision; it never rewrites text.
 
 ```text
 edit
- └─ changed range → safe context → local rules (full local issues + scores)
-      └─ heuristic selects unresolved/ambiguous chunks
-           └─ classifier.dev (batched excerpts + signals only)
-                ├─ ai-needed → expensive provider for those chunks only
-                ├─ locally-sufficient → keep local, no cloud model call
-                └─ uncertain / other / fallback → keep local, no model call (skip policy)
+ └─ changed range → safe context → local rules
+      ├─ locally sufficient → keep local; no cloud request
+      └─ unresolved candidate → redacted excerpt → classifier.dev (optional)
+           ├─ locally-sufficient → keep local
+           ├─ ai-needed → configured provider for that chunk
+           └─ uncertain → provider by default, or local when explicitly configured
 ```
 
 ## Contract
 
-- Endpoint: `POST {baseUrl}/classify` where `baseUrl` defaults to
-  `https://classifier.dev/v1`. HTTPS is required except for localhost.
-- Auth: `Authorization: Bearer <classifier key>` in the service worker only.
-  Content scripts never receive provider or classifier keys.
-- Request body: `{ model, inputs: [{ chunkId, excerpt, signals, categories }] }`.
-  `excerpt` is truncated to ~500 chars with URLs, emails, and long numbers
-  redacted to `[url]` / `[email]` / `[number]`. The full document is never sent.
-- Response: `{ results: [{ chunkId, decision, categories, confidence, reason }] }`.
-  - `decision` is one of `ai-needed`, `locally-sufficient`, `uncertain`.
-    Unknown values fall back to `uncertain`.
-  - `categories` use the triage taxonomy: `correctness`, `clarity`,
-    `conciseness`, `engagement`, `tone`, `consistency`, `structure`,
-    `word-choice`, `style`, `other`. Unknown categories map to `other`.
-  - `confidence` is clamped to `0..1`.
-  - Any `replacement`, `rewrite`, `correctedText`, or similar fields are
-    discarded. **classifier.dev must never directly rewrite user text.**
-    Decisions only gate provider calls; all edits stay preview-first.
+- Endpoint: `POST https://classifier.dev/v1/classify` by default. A configured base URL ending in `/v1` or `/classify` is also accepted. HTTPS is required except for localhost development.
+- Authentication is optional. Draftwise sends `Authorization: Bearer <key>` only when an optional classifier workspace key is configured. No key is required for the default classifier.dev path.
+- Request body follows classifier.dev’s contract: `{ inputs: string[], labels: string[], instructions?: string }`. Inputs are ordered excerpts, never Draftwise objects with chunk IDs, local signals, categories, goals, or provider settings.
+- Draftwise sends the selected semantic-v2 labels:
+  1. `The local writing checks are sufficient; no semantic AI review is needed.`
+  2. `A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.`
+  3. `It is unclear whether semantic AI review would add enough value.`
+- Response shape is `{ results: [{ label, confidence, scores }] }`. Results are paired to inputs strictly by response order. Draftwise maps the first label to `locally-sufficient`, the second to `ai-needed`, and the third or an unknown label to `uncertain`.
+- Confidence thresholds are conservative: `ai-needed` requires at least `0.75`, `locally-sufficient` requires at least `0.80`; otherwise the result is `uncertain`.
+- Excerpts are bounded and redact URLs, emails, phone numbers, currencies, percentages, dates, identifiers, filenames, model/version strings, UUIDs, API tokens, quoted secrets, and long numeric values. The full document is never sent to classifier.dev.
+- `scores` are accepted as classifier metadata but are not trusted for edits. Any rewrite-like field is ignored.
 
-## Gating rules
+## Fallback and observability
 
-- Cloud AI (classifier + provider) runs only when the single `aiEnabled`
-  toggle is on. If `aiEnabled` is off, no classifier request is made.
-- Heuristic-only mode (no classifier key) still avoids provider calls for
-  clean chunks: unresolved candidates proceed to AI, clean chunks do not.
-  This preserves recall when the classifier is unconfigured.
-- With a classifier key, candidates are batched (up to 5 per request) after a
-  650ms debounce. Rapid typing cancels stale requests via `AbortController`.
-- Incremental ranges are preserved: each decision carries its originating
-  `chunkId`, and provider issues are mapped from chunk-relative to absolute
-  offsets with exact-`original` checks before display.
-- Caching is bounded: per-excerpt LRU (64 entries) plus per-analysis LRU (24
-  entries). Cache keys include excerpt hash + model + categories, never keys.
-- Failure policy (`uncertainPolicy: "skip"` by default): classifier timeouts,
-  network errors, invalid JSON, omitted chunks, or `uncertain` decisions keep
-  local results and skip the expensive model. Metrics record `fallbackCount`.
-  Use `"allow"` only for high-recall mode where `uncertain` also calls the
-  provider.
+- With no classifier URL configured, unresolved candidates go directly to the provider. Clean chunks still stop locally.
+- A classifier timeout, rate limit, invalid response, CORS/network failure, or omitted result is recorded as a classifier failure/omission and the affected candidate is marked `ai-needed`. Outages never silently downgrade semantic review to local-only.
+- `uncertainPolicy` defaults to `"provider"`. `"local"` is available when a workspace explicitly accepts lower recall.
+- The production path uses the hook/extension debounce and direct batches of up to classifier.dev’s 1,000-input limit. The removed scheduler is not part of the request path.
+- Cache identities include document text/range plus an engine version, goals, style, provider URL/model/temperature/max tokens, safe custom-header fingerprint, classifier URL/config, and triage policy. Raw credentials are never cache keys.
+- The shared metrics interface is:
 
-## Privacy and safety
+```ts
+interface TriageMetrics {
+  candidateChunks: number;
+  classifierRequests: number;
+  classifiedChunks: number;
+  locallySufficientChunks: number;
+  aiNeededChunks: number;
+  uncertainChunks: number;
+  classifierFailures: number;
+  omittedClassifierResults: number;
+  providerRequests: number;
+  providerChunks: number;
+  avoidedProviderChunks: number;
+}
+```
 
-- Extension content scripts send `text`, `changedRange`, `goals`, `style`,
-  and `requestId` only. Keys stay in `chrome.storage.local` and are read only
-  in `background.js` (service worker).
-- Provider-origin and classifier-origin permissions are granted separately
-  from site access and never inferred from a site grant.
-- Sensitive fields (passwords, payment fields, OTP, credentials, hidden,
-  disabled, read-only) are skipped before any analysis; see
-  `extension/field-classification.js`. Triage does not weaken those checks.
-- Provider output remains untrusted: ranges, categories, replacements, URLs,
-  numbers, and markup are validated before display. Accepting a suggestion is
-  a targeted replacement guarded by an exact-text check; rewrites are
-  preview-first.
+## Privacy boundaries
+
+Classifier.dev is a separate cloud path from the configured AI provider. When AI is enabled, the UI and docs must not imply that nothing leaves the device: local rules stay on-device, redacted candidate excerpts may leave for classifier triage, and selected chunks may leave for provider analysis.
+
+In the extension, provider and classifier origins require separate permissions. Content scripts never receive credentials; the service worker owns the requests.
 
 ## Evaluation
 
-- Labelled dataset: `evaluation/triage-corpus.json` with
-  `expectedDecision` (`ai-needed` / `locally-sufficient` / `uncertain`) and
-  `expectedCategories` from the taxonomy above.
-- Run `npm run evaluate:triage` to measure model calls avoided, issue recall,
-  false filtering, latency, excerpt minimisation, and cloud calls per session
-  (classifier + provider, batched 5 per request, 5 chunks per session).
-- Use `npm run evaluate:triage -- --strict` as a release gate
-  (recall ≥ 0.75, false filtering ≤ 0.25, avoided ≥ 0.25).
+- Corpus: `evaluation/triage-corpus.json`, with labelled expected decisions/categories and short excerpts.
+- Offline: `npm run evaluate:triage:offline` uses deterministic fixtures and never calls the network. It reports accuracy, AI precision/recall, false-filter rate, uncertain rate, candidate-selection precision/recall, calls, avoided provider chunks, excerpt size, local/classifier latency, request bytes, redaction checks, and fallback metrics. It also compares the recorded semantic-v2 and direct-v1 label formulations.
+- Live: `npm run evaluate:triage:live` uses the configured classifier URL (default `https://classifier.dev`) and an optional `CLASSIFIER_API_KEY`. Run it manually, not in normal tests. It reports p50/p95 latency and development-only request observability; provider latency/token estimates remain empty because the evaluator stops before making provider calls.
+- The manual workflow `.github/workflows/triage-live.yml` records live evaluation output without placing credentials in the repository.

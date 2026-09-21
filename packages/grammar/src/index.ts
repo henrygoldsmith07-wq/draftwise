@@ -123,7 +123,14 @@ ability able absence absolute absolutely abstract abundant accelerate acceptable
 const SPELLING_COMMON = `
 above across again against almost already always among another anyone anything appear around ask away become before behind below between both call called country customer enough event example effect experience family far few final find following full future great help has history important including interface interfaces later least loose lunch main matter matters message much must need never next note often once open original others own plan possible practical probably question rather reason real recent right same saw send several something sometimes specific step still sure task team tell than though through today under user users usually value was why yet are aspects act box changer close contact being
 `.trim().split(/\s+/u);
-const SPELLING_COMMON_EXTRA = ["stay"];
+const SPELLING_COMMON_EXTRA = [
+  "stay",
+  "calm", "context", "aim", "term", "discussing", "serves", "three", "causal", "table", "participants",
+  "were", "interval", "strength", "specifies", "experimental", "held", "coverage", "here", "manager",
+  "proposal", "cost", "consultant", "approved", "analyst", "director", "approves", "log", "coordinator",
+  "participant", "site", "obsolete", "preview", "optional", "routing", "mode", "raw", "hook", "practise",
+  "eight", "map", "traveller", "season", "match", "more", "series", "merge", "acceptance",
+];
 const SPELLING_UNICODE = `
 café naïve résumé fiancée jalapeño façade coöperate déjà touché protégé über voilà mañana señor São München Zürich Łódź Αθήνα Москва 東京 北京
 `.trim().split(/\s+/u);
@@ -182,6 +189,46 @@ const DIALECT_VARIANTS: Record<string, { "en-GB": string; "en-US": string }> = {
   prioritise: { "en-GB": "prioritise", "en-US": "prioritize" },
   specialise: { "en-GB": "specialise", "en-US": "specialize" },
 };
+
+const CONTEXTUAL_DIALECT_WORDS = new Set(["license", "licence", "practice", "practise", "program", "programme"]);
+const DIALECT_VERB_CONTEXT = new Set(["i", "you", "we", "they", "he", "she", "it", "to", "will", "would", "can", "could", "may", "might", "must", "should", "shall"]);
+const DIALECT_NOUN_CONTEXT = new Set(["a", "an", "the", "my", "your", "our", "their", "this", "that", "driving", "software", "business", "professional", "commercial", "export", "operating", "training", "television", "tv", "radio", "loyalty", "rehabilitation", "education", "educational", "arts", "concert", "event"]);
+const PROGRAMME_COMPUTING_CONTEXT = new Set(["computer", "software", "code", "coding", "programming", "developer", "application", "app", "script", "source", "compile", "compiler", "debug", "debugging", "api", "machine", "algorithm", "database", "terminal", "runtime", "python", "javascript"]);
+const PROGRAMME_NON_COMPUTING_CONTEXT = new Set(["training", "television", "tv", "radio", "loyalty", "rehabilitation", "education", "educational", "arts", "concert", "event", "theatre"]);
+
+function contextualDialectReplacement(tokens: Token[], index: number, preferences: StylePreferences) {
+  const word = tokens[index]?.lower;
+  if (!word || !CONTEXTUAL_DIALECT_WORDS.has(word)) return undefined;
+  const before = tokens.slice(Math.max(0, index - 3), index).map((token) => token.lower);
+  const after = tokens.slice(index + 1, index + 3).map((token) => token.lower);
+  const immediateBefore = before.at(-1);
+  const nearby = new Set([...before, ...after]);
+  const verbUse = Boolean(immediateBefore && DIALECT_VERB_CONTEXT.has(immediateBefore));
+  const nounUse = Boolean(immediateBefore && DIALECT_NOUN_CONTEXT.has(immediateBefore))
+    || before.some((value) => DIALECT_NOUN_CONTEXT.has(value));
+
+  if (word === "license" && preferences.dialect === "en-GB") {
+    if (verbUse) return undefined;
+    return nounUse ? "licence" : undefined;
+  }
+  if (word === "licence" && preferences.dialect === "en-US") {
+    return verbUse || nounUse ? "license" : undefined;
+  }
+  if (word === "practice" && preferences.dialect === "en-GB") {
+    return verbUse ? "practise" : undefined;
+  }
+  if (word === "practise" && preferences.dialect === "en-US") {
+    return verbUse || nounUse ? "practice" : undefined;
+  }
+  if (word === "program" && preferences.dialect === "en-GB") {
+    if (nearby.has("software") || [...nearby].some((value) => PROGRAMME_COMPUTING_CONTEXT.has(value))) return undefined;
+    return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value)) || nounUse ? "programme" : undefined;
+  }
+  if (word === "programme" && preferences.dialect === "en-US") {
+    return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value) || PROGRAMME_COMPUTING_CONTEXT.has(value)) || nounUse ? "program" : undefined;
+  }
+  return undefined;
+}
 
 const FILLER_WORDS = new Set([
   "actually",
@@ -506,14 +553,17 @@ function pushIssue(target: WritingIssue[], value: WritingIssue | null) {
 
 function findSpelling(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
-  for (const token of document.tokens) {
+  for (const [tokenIndex, token] of document.tokens.entries()) {
     const typo = TYPO_FIXES[token.lower];
-    const dialect = Object.entries(DIALECT_VARIANTS).find(([, variants]) =>
-      token.lower === variants[preferences.dialect].toLocaleLowerCase() || token.lower === variants[preferences.dialect === "en-GB" ? "en-US" : "en-GB"].toLocaleLowerCase(),
-    );
-    const dialectReplacement = dialect && token.lower !== dialect[1][preferences.dialect].toLocaleLowerCase()
-      ? dialect[1][preferences.dialect]
+    const contextualReplacement = contextualDialectReplacement(document.tokens, tokenIndex, preferences);
+    const dialect = !CONTEXTUAL_DIALECT_WORDS.has(token.lower)
+      ? Object.entries(DIALECT_VARIANTS).find(([, variants]) =>
+        token.lower === variants[preferences.dialect].toLocaleLowerCase() || token.lower === variants[preferences.dialect === "en-GB" ? "en-US" : "en-GB"].toLocaleLowerCase(),
+      )
       : undefined;
+    const dialectReplacement = contextualReplacement ?? (dialect && token.lower !== dialect[1][preferences.dialect].toLocaleLowerCase()
+      ? dialect[1][preferences.dialect]
+      : undefined);
     const lexicalReplacement = !dialectReplacement && !typo ? suggestSpelling(token.value, preferences) : undefined;
     const replacement = dialectReplacement ?? typo ?? lexicalReplacement;
     if (!replacement || replacement.toLocaleLowerCase() === token.lower) continue;

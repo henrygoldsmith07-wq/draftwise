@@ -340,3 +340,24 @@ export function createAnalysisCacheKey(text: string, settingsKey: string, range:
   const rangeKey = range ? `${range.start}:${range.end}:${range.previousEnd}` : "full";
   return `${settingsKey}:${rangeKey}:${text}`;
 }
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableSerialize(item)).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .filter((key) => (value as Record<string, unknown>)[key] !== undefined && !/^(?:api[-_]?key|authorization|access[-_]?token|secret|password|token)$/iu.test(key))
+    .map((key) => `${JSON.stringify(key)}:${stableSerialize((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+}
+
+/** Deterministic, non-secret fingerprint for analysis settings. */
+export function createAnalysisSettingsFingerprint(settings: unknown): string {
+  const serialised = stableSerialize(settings);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < serialised.length; index += 1) {
+    hash ^= serialised.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `settings-${(hash >>> 0).toString(16)}-${serialised.length}`;
+}

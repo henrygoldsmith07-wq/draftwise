@@ -2,12 +2,57 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createAnalysisChunks,
+  createAnalysisCacheKey,
+  createAnalysisSettingsFingerprint,
   detectChangedRange,
   getIncrementalAnalysisRanges,
   mapChunkIssue,
   mergeAnalysisIssues,
   retainUnaffectedIssues,
 } from "../packages/analysis/src/index.ts";
+
+test("analysis cache fingerprints are deterministic and exclude raw credential text", () => {
+  const first = createAnalysisSettingsFingerprint({
+    provider: { baseUrl: "https://provider.example/v1", model: "model-a", temperature: 0.2, maxTokens: 900 },
+    classifier: { baseUrl: "https://classifier.dev", timeoutMs: 8000, maxExcerptChars: 500 },
+    triagePolicy: "provider",
+  });
+  const reordered = createAnalysisSettingsFingerprint({
+    triagePolicy: "provider",
+    classifier: { maxExcerptChars: 500, timeoutMs: 8000, baseUrl: "https://classifier.dev" },
+    provider: { maxTokens: 900, temperature: 0.2, model: "model-a", baseUrl: "https://provider.example/v1" },
+  });
+  const changed = createAnalysisSettingsFingerprint({
+    provider: { baseUrl: "https://provider.example/v1", model: "model-a", temperature: 0.7, maxTokens: 900 },
+  });
+  assert.equal(first, reordered);
+  assert.notEqual(first, changed);
+  const cacheKey = createAnalysisCacheKey("draft text", first, null);
+  assert.ok(cacheKey.includes(first));
+  assert.ok(!cacheKey.includes("sk-secret"));
+});
+
+test("analysis settings invalidate for provider, classifier, policy, goals, and style changes", () => {
+  const base = {
+    engineVersion: "analysis-engine-v3",
+    provider: { baseUrl: "https://provider.example/v1", model: "model-a", temperature: 0.2, maxTokens: 900 },
+    classifier: { baseUrl: "https://classifier.dev", timeoutMs: 8000, maxExcerptChars: 500 },
+    triagePolicy: "provider",
+    goals: { audience: "general", intent: "inform", tone: "professional" },
+    style: { dialect: "en-GB", passiveVoiceSensitivity: "normal" },
+  };
+  const fingerprint = (patch) => createAnalysisSettingsFingerprint({ ...base, ...patch });
+  assert.notEqual(fingerprint({ provider: { ...base.provider, model: "model-b" } }), fingerprint({}));
+  assert.notEqual(fingerprint({ provider: { ...base.provider, baseUrl: "https://other.example/v1" } }), fingerprint({}));
+  assert.notEqual(fingerprint({ classifier: { ...base.classifier, baseUrl: "https://other-classifier.example" } }), fingerprint({}));
+  assert.notEqual(fingerprint({ triagePolicy: "local" }), fingerprint({}));
+  assert.notEqual(fingerprint({ goals: { ...base.goals, tone: "friendly" } }), fingerprint({}));
+  assert.notEqual(fingerprint({ style: { ...base.style, dialect: "en-US" } }), fingerprint({}));
+  assert.equal(
+    fingerprint({ provider: { ...base.provider, apiKey: "first-secret" } }),
+    fingerprint({ provider: { ...base.provider, apiKey: "second-secret" } }),
+  );
+});
 
 test("changed ranges stay bounded and preserve the previous end offset", () => {
   const changed = detectChangedRange("before stable tail", "before changed stable tail");

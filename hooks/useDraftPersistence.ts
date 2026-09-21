@@ -43,6 +43,7 @@ export function readWorkspaceFromStorage(initial: DraftwiseWorkspace, storage: W
     const stored = storage.getItem(WORKSPACE_STORAGE_KEY);
     if (!stored) return readLegacyWorkspace(initial, storage);
     const parsed = JSON.parse(stored) as Partial<DraftwiseWorkspace>;
+    const storedClassifier = Object.fromEntries(Object.entries(parsed.classifier ?? {}).filter(([key]) => key !== "model"));
     return {
       ...initial,
       ...parsed,
@@ -50,7 +51,7 @@ export function readWorkspaceFromStorage(initial: DraftwiseWorkspace, storage: W
       goals: { ...initial.goals, ...(parsed.goals ?? {}) },
       style: { ...initial.style, ...(parsed.style ?? {}) },
       provider: { ...initial.provider, ...(parsed.provider ?? {}) },
-      classifier: { ...(initial.classifier ?? { baseUrl: "https://classifier.dev/v1", model: "draftwise-triage-v1", apiKey: "" }), ...(parsed.classifier ?? {}) },
+      classifier: { ...(initial.classifier ?? { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider" }), ...storedClassifier },
     };
   } catch {
     return initial;

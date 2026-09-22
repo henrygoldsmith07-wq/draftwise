@@ -6,6 +6,7 @@ import {
   mapWithConcurrency,
   PROVIDER_CONCURRENCY,
   parseAnalysisIssues,
+  parseAnalysisResponse,
   parseCustomHeaders,
   ProviderError,
   rewriteWithProvider,

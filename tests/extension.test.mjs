@@ -312,6 +312,33 @@ test("sensitive field classification uses explicit tokens without blocking norma
   for (const sensitive of [field({ type: "password" }), field({ type: "email" }), field({ type: "tel" }), field({ type: "date" }), field({ autocomplete: "street-address" }), field({ autocomplete: "cc-name" }), field({ name: "auth_token" }), field({ name: "api_key" }), field({ name: "cvv" }), field({ name: "otp" }), field({ name: "pin" }), field({ name: "email" }), field({ name: "phone_number" })]) assert.equal(classify(sensitive), true);
 });
 
+test("sensitive field classification includes associated label metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const label = { textContent: "API key" };
+  const ariaLabel = { textContent: "One time code" };
+  const ownerDocument = { getElementById(id) { return id === "secret-label" ? ariaLabel : null; } };
+  const field = ({ labels = [], labelledBy = "" } = {}) => ({
+    type: "text",
+    name: "field-123",
+    id: "field-123",
+    labels,
+    ownerDocument,
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute(key) { return key === "aria-labelledby" ? labelledBy : ""; },
+    closest(selector) { return selector === "form" ? { getAttribute: () => "" } : null; },
+  });
+
+  assert.equal(classify(field({ labels: [label] })), true);
+  assert.equal(classify(field({ labelledBy: "secret-label" })), true);
+  assert.equal(classify(field()), false);
+});
+
 test("permission helpers derive narrow site and provider origins", async () => {
   const source = await readFile(file("extension/permissions.js"), "utf8");
   const context = { URL };

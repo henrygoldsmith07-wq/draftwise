@@ -710,44 +710,125 @@ function localRewrite(text: string, instruction: string): string {
   return result || text;
 }
 
-function protectedTokenCounts(text: string) {
-  const patterns = [
-    /https?:\/\/[^\s)]+/giu,
-    /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
-    /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu,
-    /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu,
-    /\b\d[\d,.]*%/gu,
-    /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b/giu,
-    /\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/g,
-    /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu,
-    /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu,
-    /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu,
-    /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
-    /\b\d[\d,.]*\b/gu,
-  ];
+type ProtectedTokenKind =
+  | "url"
+  | "email"
+  | "date"
+  | "currency"
+  | "percentage"
+  | "identifier"
+  | "uuid"
+  | "filename"
+  | "model"
+  | "quote"
+  | "number";
+
+const PROTECTED_TOKEN_PATTERNS: Array<{ kind: Exclude<ProtectedTokenKind, "quote" | "number">; pattern: RegExp }> = [
+  { kind: "url", pattern: /https?:\/\/[^\s)]+/giu },
+  { kind: "email", pattern: /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu },
+  { kind: "date", pattern: /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu },
+  { kind: "currency", pattern: /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu },
+  { kind: "percentage", pattern: /\b\d[\d,.]*%/gu },
+  { kind: "identifier", pattern: /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b|\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/giu },
+  { kind: "uuid", pattern: /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu },
+  { kind: "filename", pattern: /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu },
+  { kind: "model", pattern: /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu },
+];
+
+const QUOTED_PASSAGE_PATTERN = /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu;
+const GENERIC_NUMBER_PATTERN = /\b\d[\d,.]*\b/gu;
+
+interface ProtectedRange {
+  start: number;
+  end: number;
+}
+
+function rangesOverlap(left: ProtectedRange, right: ProtectedRange) {
+  return left.start < right.end && left.end > right.start;
+}
+
+function protectedKindsAllowedByInstruction(instruction: string) {
+  const value = String(instruction || "");
+  const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
+  const allowed = new Set<ProtectedTokenKind>();
+  const permits = (target: string) => new RegExp(edit + target, "iu").test(value);
+  if (permits(String.raw`\bdates?\b`)) allowed.add("date");
+  if (permits(String.raw`\b(?:percentage|percent)s?\b`)) allowed.add("percentage");
+  if (permits(String.raw`\bcurrenc(?:y|ies)\b`)) allowed.add("currency");
+  if (permits(String.raw`\b(?:url|link)s?\b`)) allowed.add("url");
+  if (permits(String.raw`\bemail(?:\s+address)?s?\b`)) allowed.add("email");
+  if (permits(String.raw`\b(?:id|identifier|ticket|reference|case)s?\b`)) {
+    allowed.add("identifier");
+    allowed.add("uuid");
+  }
+  if (permits(String.raw`\b(?:quote|quotation|quoted\s+passage)s?\b`)) allowed.add("quote");
+  if (permits(String.raw`\b(?:filename|file\s+name)s?\b`)) allowed.add("filename");
+  if (permits(String.raw`\b(?:model|version)s?\b`)) allowed.add("model");
+  if (permits(String.raw`\b(?:number|value)s?\b`)) allowed.add("number");
+  return allowed;
+}
+
+function normaliseAllowedTokensInQuote(value: string, allowedKinds: Set<ProtectedTokenKind>) {
+  let result = value;
+  for (const { kind, pattern } of PROTECTED_TOKEN_PATTERNS) {
+    if (!allowedKinds.has(kind)) continue;
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, `[${kind}]`);
+  }
+  if (allowedKinds.has("number")) {
+    GENERIC_NUMBER_PATTERN.lastIndex = 0;
+    result = result.replace(GENERIC_NUMBER_PATTERN, "[number]");
+  }
+  return result;
+}
+
+function protectedTokenCounts(text: string, allowedKinds = new Set<ProtectedTokenKind>()) {
   const counts = new Map<string, number>();
-  for (const pattern of patterns) {
+  const claimed: ProtectedRange[] = [];
+  const add = (kind: ProtectedTokenKind, token: string) => {
+    if (allowedKinds.has(kind)) return;
+    const key = `${kind}\u001f${token}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  };
+
+  for (const { kind, pattern } of PROTECTED_TOKEN_PATTERNS) {
+    pattern.lastIndex = 0;
     for (const match of text.matchAll(pattern)) {
-      const token = match[0];
-      counts.set(token, (counts.get(token) ?? 0) + 1);
+      const start = match.index ?? 0;
+      const range = { start, end: start + match[0].length };
+      if (claimed.some((existing) => rangesOverlap(existing, range))) continue;
+      claimed.push(range);
+      add(kind, match[0]);
     }
+  }
+
+  const quotedRanges: ProtectedRange[] = [];
+  QUOTED_PASSAGE_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(QUOTED_PASSAGE_PATTERN)) {
+    const start = match.index ?? 0;
+    const range = { start, end: start + match[0].length };
+    quotedRanges.push(range);
+    if (!allowedKinds.has("quote")) add("quote", normaliseAllowedTokensInQuote(match[0], allowedKinds));
+  }
+
+  GENERIC_NUMBER_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(GENERIC_NUMBER_PATTERN)) {
+    const start = match.index ?? 0;
+    const range = { start, end: start + match[0].length };
+    if (claimed.some((existing) => rangesOverlap(existing, range)) || quotedRanges.some((existing) => rangesOverlap(existing, range))) continue;
+    add("number", match[0]);
   }
   return counts;
 }
 
-function hasExactProtectedTokenMultiset(original: string, replacement: string) {
-  const originalTokens = protectedTokenCounts(original);
-  const replacementTokens = protectedTokenCounts(replacement);
+function hasExactProtectedTokenMultiset(original: string, replacement: string, allowedKinds: Set<ProtectedTokenKind>) {
+  const originalTokens = protectedTokenCounts(original, allowedKinds);
+  const replacementTokens = protectedTokenCounts(replacement, allowedKinds);
   if (originalTokens.size !== replacementTokens.size) return false;
   for (const [token, count] of originalTokens) {
     if (replacementTokens.get(token) !== count) return false;
   }
   return true;
-}
-
-function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
-  if (request.allowProtectedChanges) return true;
-  return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
 }
 
 function preserveBoundaryWhitespace(original: string, replacement: string) {
@@ -756,11 +837,11 @@ function preserveBoundaryWhitespace(original: string, replacement: string) {
   return `${leading}${replacement.trim()}${trailing}`;
 }
 
-function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
+function validateRewrite(original: string, replacement: string, options: { allowAllProtectedChanges?: boolean; allowedKinds?: Set<ProtectedTokenKind> } = {}) {
   if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
   if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-  if (!allowProtectedChanges && !hasExactProtectedTokenMultiset(original, replacement)) {
-    throw new ProviderError("invalid-json", "The rewrite changed, removed, duplicated, or introduced a protected URL, value, identifier, or quoted passage. Nothing was changed.");
+  if (!options.allowAllProtectedChanges && !hasExactProtectedTokenMultiset(original, replacement, options.allowedKinds ?? new Set())) {
+    throw new ProviderError("invalid-json", "The rewrite changed, removed, duplicated, or introduced a protected URL, value, identifier, or quoted passage outside the requested change. Nothing was changed.");
   }
   return preserveBoundaryWhitespace(original, replacement);
 }
@@ -778,15 +859,18 @@ export async function rewriteWithProvider(
   const parsed = parseJsonContent(response);
   if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
   const explanation = typeof parsed.explanation === "string" ? parsed.explanation : "";
-  const allowProtectedChanges = explicitlyAllowsProtectedChanges(request);
-  const replacement = validateRewrite(request.text, parsed.replacement, allowProtectedChanges);
+  const rewriteProtection = {
+    allowAllProtectedChanges: request.allowProtectedChanges === true,
+    allowedKinds: request.allowProtectedChanges === true ? new Set<ProtectedTokenKind>() : protectedKindsAllowedByInstruction(request.instruction),
+  };
+  const replacement = validateRewrite(request.text, parsed.replacement, rewriteProtection);
   const alternatives = Array.isArray(parsed.alternatives)
     ? parsed.alternatives
       .filter((alternative): alternative is string => typeof alternative === "string" && Boolean(alternative.trim()) && alternative.trim() !== replacement)
       .slice(0, 2)
       .flatMap((alternative) => {
         try {
-          return [validateRewrite(request.text, alternative, allowProtectedChanges)];
+          return [validateRewrite(request.text, alternative, rewriteProtection)];
         } catch {
           return [];
         }

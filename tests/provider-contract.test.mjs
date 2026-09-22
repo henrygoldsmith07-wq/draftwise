@@ -300,3 +300,119 @@ test("rewrite protection keeps currencies, percentages, dates, identifiers, mode
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("AI suggestion IDs stay stable when provider issue order changes", () => {
+  const source = "repeatd and recieve";
+  const firstIssue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const secondIssue = { start: 12, end: 19, original: "recieve", replacement: "receive", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const forward = parseAnalysisIssues({ issues: [firstIssue, secondIssue] }, source, "chunk-0-19");
+  const reversed = parseAnalysisIssues({ issues: [secondIssue, firstIssue] }, source, "chunk-0-19");
+  const forwardIds = new Map(forward.map((issue) => [issue.original, issue.id]));
+  const reversedIds = new Map(reversed.map((issue) => [issue.original, issue.id]));
+  assert.equal(forwardIds.get("repeatd"), reversedIds.get("repeatd"));
+  assert.equal(forwardIds.get("recieve"), reversedIds.get("recieve"));
+});
+
+test("AI suggestion IDs change when the proposed change materially changes", () => {
+  const source = "repeatd";
+  const base = { start: 0, end: 7, original: "repeatd", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const first = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeated" }] }, source, "chunk-0-7")[0];
+  const second = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeat" }] }, source, "chunk-0-7")[0];
+  assert.ok(first);
+  assert.ok(second);
+  assert.notEqual(first.id, second.id);
+});
+
+test("local formal rewrites expand contractions without changing unrelated verbs", async () => {
+  const result = await rewriteWithProvider(
+    { text: "I get tired, but I can't rest.", instruction: "Make this formal.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.source, "local");
+  assert.equal(result.replacement, "I get tired, but I cannot rest.");
+});
+
+test("local confident rewrites do not inflate uncertainty into certainty", async () => {
+  const text = "It could rain tomorrow, and the plan might change.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Make this sound more confident.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("local concise rewrites preserve meaningful intensifiers and limiting words", async () => {
+  const text = "I just need very little time in order to finish at this point in time.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Shorten this.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, "I just need very little time to finish now.");
+});
+
+test("local rewrites preserve paragraph and line-break structure", async () => {
+  const text = "First paragraph.\n\nSecond paragraph.\n  Indented line.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Make this more confident.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("AI rewrites preserve the selected text boundary whitespace", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "\n  The draft can't ship.\n\n";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The draft cannot ship.",
+      explanation: "Expanded the contraction.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider(
+      { text, instruction: "Make this formal.", goals, allowProtectedChanges: false },
+      settings,
+    );
+    assert.equal(result.replacement, "\n  The draft cannot ship.\n\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rewrite protection rejects changed values even when the original token is reinserted elsewhere", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "The approved budget is £100 for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The approved budget is £200 for ticket ABC-123 (previously £100).",
+      explanation: "Clarified the budget.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rewrite protection rejects duplicated or newly introduced protected values", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Send report.pdf to user@example.com by 18 September 2026.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "Send report.pdf and backup.pdf to user@example.com by 18 September 2026, with a second copy on 19 September 2026.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

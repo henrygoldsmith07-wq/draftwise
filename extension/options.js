@@ -133,18 +133,32 @@ async function saveSettings() {
   const classifierBaseUrl = classifierBaseUrlEl ? classifierBaseUrlEl.value.trim().replace(/\/$/u, "") : "";
   const classifierKey = classifierKeyEl ? classifierKeyEl.value.trim() : "";
   const uncertainPolicy = get("uncertainPolicy")?.value === "local" ? "local" : "provider";
-  if (classifierBaseUrl) { try { permissionsApi.providerPattern(classifierBaseUrl); } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS classifier URL.", true); return; } }
+  let classifierPatternValue;
+  if (classifierBaseUrl) {
+    try { classifierPatternValue = permissionsApi.providerPattern(classifierBaseUrl); }
+    catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid HTTPS classifier URL.", true); return; }
+  }
   const model = get("model").value.trim();
   if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) { setStatus("Enter a valid model ID.", true); return; }
   const state = await readState();
+  const nextClassifierBaseUrl = classifierBaseUrl || state.classifier.baseUrl;
+  classifierPatternValue ??= permissionsApi.providerPattern(nextClassifierBaseUrl);
+  const previousCloudPatterns = new Set();
+  for (const value of [state.provider.baseUrl, state.classifier.baseUrl]) {
+    try { previousCloudPatterns.add(permissionsApi.providerPattern(value)); } catch { /* stale invalid configuration */ }
+  }
+  const desiredCloudPatterns = new Set([providerPatternValue, classifierPatternValue]);
   const excludedSites = get("excludedSites").value.split(/\n|,/u).map((site) => site.trim().toLowerCase().replace(/^https?:\/\//u, "").replace(/\/.*$/u, "")).filter((site) => /^[a-z0-9.-]+$/u.test(site));
   await storageSet({
     aiEnabled: toggleValue("aiEnabled"),
     provider: { ...state.provider, provider: "openai-compatible", baseUrl, model, apiKey: get("apiKey").value.trim(), temperature: 0.2, maxTokens: 900, customHeaders: "" },
-    classifier: { ...state.classifier, baseUrl: classifierBaseUrl || state.classifier.baseUrl, apiKey: classifierKey, uncertainPolicy },
+    classifier: { ...state.classifier, baseUrl: nextClassifierBaseUrl, apiKey: classifierKey, uncertainPolicy },
     style: { ...state.style, dialect: get("dialect").value, allowContractions: toggleValue("allowContractions"), passiveVoiceSensitivity: get("passiveSensitivity").value },
     excludedSites: [...new Set(excludedSites)],
   });
+  for (const pattern of previousCloudPatterns) {
+    if (!desiredCloudPatterns.has(pattern)) await permissionRemove({ origins: [pattern] });
+  }
   await renderProviderPermission();
   await renderClassifierPermission();
   setStatus(`Saved locally. Provider origin: ${providerPatternValue.replace(/\/\*$/u, "")}`);

@@ -4,11 +4,13 @@ import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
 import {
   CLASSIFIER_BATCH_SIZES,
   TRIAGE_LABEL_FORMULATIONS,
+  estimateTokens,
   mapClassifierLabel,
   triageChunks,
 } from "../packages/ai/src/index.ts";
 
 const corpus = JSON.parse(await readFile(new URL("../evaluation/triage-corpus.json", import.meta.url), "utf8"));
+const productionConfig = JSON.parse(await readFile(new URL("../evaluation/triage-label-formulations.json", import.meta.url), "utf8"));
 const classifierUrl = process.env.CLASSIFIER_BASE_URL || "https://classifier.dev";
 const classifier = {
   baseUrl: classifierUrl,
@@ -22,12 +24,19 @@ const localThresholds = [0.70, 0.75, 0.80, 0.85, 0.90];
 const metricFields = [
   "candidateChunks",
   "classifierRequests",
+  "classifierHttpRequests",
   "classifiedChunks",
   "locallySufficientChunks",
   "aiNeededChunks",
   "uncertainChunks",
   "classifierFailures",
   "omittedClassifierResults",
+  "providerRequests",
+  "providerHttpRequests",
+  "providerChunks",
+  "avoidedProviderChunks",
+  "classifierRetries",
+  "classifierRetryDelayMs",
 ];
 const limitArgument = process.argv.find((value) => value.startsWith("--limit="));
 const limit = Math.max(0, Math.min(corpus.length, Number(limitArgument?.split("=")[1] || corpus.length)));
@@ -84,8 +93,8 @@ function remapDecision(decision, labels, thresholds) {
   };
 }
 
-function providerChunkCount(decisions) {
-  return decisions.filter((decision) => decision.decision === "ai-needed" || decision.decision === "uncertain").length;
+function providerChunkCount(decisions, uncertainPolicy = "provider") {
+  return decisions.filter((decision) => decision.decision === "ai-needed" || (decision.decision === "uncertain" && uncertainPolicy === "provider")).length;
 }
 
 async function collectFormulation(formulationId, classifierBatchSize = 100) {
@@ -118,6 +127,8 @@ function scoreFormulation(observations, formulationId, thresholds) {
   const details = observations.map((observation) => {
     const decisions = observation.outcome.decisions.map((decision) => remapDecision(decision, labels, thresholds));
     const predicted = predictedDecision(decisions);
+    const providerChunkIds = new Set(decisions.filter((decision) => decision.decision === "ai-needed" || decision.decision === "uncertain").map((decision) => decision.chunkId));
+    const providerInputTokens = observation.chunks.reduce((sum, chunk) => providerChunkIds.has(chunk.id) ? sum + estimateTokens(chunk.text) + 120 : sum, 0);
     return {
       id: observation.entry.id,
       expected: observation.entry.expectedDecision,
@@ -131,6 +142,8 @@ function scoreFormulation(observations, formulationId, thresholds) {
         fallback: Boolean(decision.fallback),
       })),
       providerChunks: providerChunkCount(decisions),
+      providerInputTokens,
+      fallbackChunks: decisions.filter((decision) => decision.fallback).length,
       latencyMs: Number(observation.latencyMs.toFixed(2)),
     };
   });
@@ -151,8 +164,12 @@ function scoreFormulation(observations, formulationId, thresholds) {
     observations.reduce((sum, item) => sum + Number(item.outcome.metrics[field] || 0), 0),
   ]));
   metrics.providerRequests = providerChunks;
+  metrics.providerHttpRequests = 0;
   metrics.providerChunks = providerChunks;
   metrics.avoidedProviderChunks = Math.max(0, totalChunks - providerChunks);
+  metrics.actualProviderAvoidanceRate = totalChunks ? metrics.avoidedProviderChunks / totalChunks : 1;
+  metrics.providerInputTokens = details.reduce((sum, item) => sum + item.providerInputTokens, 0);
+  metrics.fallbackChunks = details.reduce((sum, item) => sum + item.fallbackChunks, 0);
   const expectedReviews = details.filter((item) => item.expected !== "locally-sufficient").length;
   const reviewTruePositives = details.filter((item) => item.expected !== "locally-sufficient" && item.providerChunks > 0).length;
   const reviewFalsePositives = details.filter((item) => item.expected === "locally-sufficient" && item.providerChunks > 0).length;
@@ -193,6 +210,7 @@ function scoreFormulation(observations, formulationId, thresholds) {
       providerChunksWouldBe: providerChunks,
       avoidedProviderChunks: metrics.avoidedProviderChunks,
       providerAvoidanceRate: round(totalChunks ? metrics.avoidedProviderChunks / totalChunks : 1),
+      providerInputTokensEstimate: metrics.providerInputTokens,
     },
     latencyMs: {
       p50: Number(percentile(details.map((item) => item.latencyMs), 0.5).toFixed(2)),
@@ -240,6 +258,10 @@ const selected = formulationReports
   calls: { providerAvoidanceRate: 1 },
 };
 
+const totalClassifierFailures = formulationReports.reduce((sum, report) => sum + Number(report.best.metrics.classifierFailures || 0), 0);
+const totalOmittedClassifierResults = formulationReports.reduce((sum, report) => sum + Number(report.best.metrics.omittedClassifierResults || 0), 0);
+const liveEvaluationComplete = limit === corpus.length && totalClassifierFailures === 0 && totalOmittedClassifierResults === 0;
+
 let batching = null;
 if (benchmarkBatching && limit > 0) {
   batching = [];
@@ -262,12 +284,24 @@ const report = {
   mode: "live",
   classifierUrl,
   corpusSize: limit,
+  fullCorpus: limit === corpus.length,
   fetchCalls,
   formulations: formulationReports,
   selected: {
-    formulationId: selected.formulationId,
-    thresholds: selected.thresholds,
-    rationale: "Ranked by provider-routing false-filter rate and recall first, then exact semantic decision safety, provider-call avoidance, and overall accuracy.",
+    formulationId: liveEvaluationComplete ? selected.formulationId : productionConfig.selected,
+    thresholds: liveEvaluationComplete ? selected.thresholds : productionConfig.thresholds,
+    recommended: liveEvaluationComplete ? { formulationId: selected.formulationId, thresholds: selected.thresholds } : null,
+    productionUnchanged: true,
+    promoted: false,
+    rationale: liveEvaluationComplete
+      ? "Recommendation only: ranked by provider-routing false-filter rate and recall first, then exact semantic decision safety, provider-call avoidance, and overall accuracy."
+      : "Evaluation incomplete because the full live corpus did not finish without classifier failures or omitted results; production formulation and thresholds remain unchanged.",
+  },
+  evaluation: {
+    status: liveEvaluationComplete ? "complete" : "incomplete",
+    classifierFailures: totalClassifierFailures,
+    omittedClassifierResults: totalOmittedClassifierResults,
+    productionConfig: { formulationId: productionConfig.selected, thresholds: productionConfig.thresholds },
   },
   batching: {
     tested: Boolean(batching),
@@ -288,14 +322,19 @@ const report = {
     },
     providerLatencyMs: null,
     providerTokensEstimate: null,
+    providerRequestsWouldBe: formulationReports.reduce((sum, report) => sum + Number(report.best.metrics.providerRequests || 0), 0),
   },
 };
 
-console.log(JSON.stringify(report, null, 2));
-if (process.argv.includes("--strict") && (
-  selected.providerRouting.reviewRecall < 0.75
+const strictFailure = process.argv.includes("--strict") && (
+  !liveEvaluationComplete
+  || selected.providerRouting.reviewRecall < 0.75
   || selected.providerRouting.falseFilterRate > 0.25
-)) {
-  console.error("live triage strict gate failed");
-  process.exit(1);
-}
+);
+process.stdout.write(JSON.stringify(report, null, 2) + "\n", () => {
+  if (strictFailure) {
+    console.error("live triage strict gate failed");
+    process.exit(1);
+  }
+  process.exit(0);
+});

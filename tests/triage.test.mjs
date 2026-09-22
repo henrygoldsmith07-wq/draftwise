@@ -6,16 +6,19 @@ import {
   buildClassifierExcerpt,
   CLASSIFIER_TRIAGE_LABELS,
   filterChunksForProvider,
+  hasSemanticReviewSignal,
   isChunkUnresolved,
   mapClassifierLabel,
   parseClassifierDecisions,
   redactExcerptForClassifier,
+  selectProviderWorkload,
   triageChunks,
   validateClassifierUrl,
   ClassifierError,
 } from "../packages/ai/src/index.ts";
 import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
+import { getAiReviewStatus, isAiCoverageConsistent } from "../packages/types/src/index.ts";
 
 const goals = { audience: "general", intent: "inform", tone: "neutral" };
 const provider = {
@@ -80,6 +83,7 @@ test("classifier excerpts minimise transmitted text and redact structured tokens
   assert.match(redacted, /\[identifier\]|\[uuid\]/u);
   assert.match(redacted, /\[phone\]/u);
   assert.match(redacted, /\[quoted-secret\]/u);
+  assert.equal(redactExcerptForClassifier("The account request references the previous study.").includes("[identifier]"), false);
 });
 
 test("classifier responses never rewrite: replacement fields are discarded", () => {
@@ -115,6 +119,48 @@ test("candidate selection respects writing goals for impersonal prose", () => {
   const local = analyzeLocally(text, { dialect: "en-GB" });
   assert.equal(isChunkUnresolved(text, local.issues, { audience: "academic", intent: "inform", tone: "formal" }).unresolved, false);
   assert.equal(isChunkUnresolved(text, local.issues, { audience: "general", intent: "persuade", tone: "confident" }).unresolved, true);
+});
+
+test("goal-aware triage accepts domain-aligned passive voice but escalates semantic ambiguity", () => {
+  const passive = "The methods section explains how missing observations were handled before the final analysis.";
+  const local = analyzeLocally(passive, { dialect: "en-GB" });
+  assert.equal(isChunkUnresolved(passive, local.issues, { audience: "academic", intent: "explain", tone: "formal" }).unresolved, false);
+  assert.equal(isChunkUnresolved(passive, local.issues, { audience: "general", intent: "inform", tone: "neutral" }).unresolved, true);
+  assert.equal(hasSemanticReviewSignal("The conclusion is accurate, but the key distinction is not made explicit for the reader."), true);
+  assert.equal(isChunkUnresolved("The conclusion is accurate, but the key distinction is not made explicit for the reader.", [], { audience: "academic", intent: "explain", tone: "formal" }).unresolved, true);
+  const descriptive = "The small garden looked brighter after the winter branches were trimmed.";
+  assert.equal(isChunkUnresolved(descriptive, analyzeLocally(descriptive, { dialect: "en-GB" }).issues, { audience: "general", intent: "describe", tone: "neutral" }).unresolved, false);
+  const shortCorrection = "The the draft is ready.";
+  assert.equal(isChunkUnresolved(shortCorrection, analyzeLocally(shortCorrection, { dialect: "en-GB" }).issues, goals).unresolved, false);
+});
+
+test("provider workload prioritises changed chunks, semantic decisions, and confidence", () => {
+  const chunks = [
+    { id: "chunk-a", text: "a", startOffset: 0, endOffset: 1, contentStartOffset: 0, contentEndOffset: 1 },
+    { id: "chunk-b", text: "b", startOffset: 10, endOffset: 11, contentStartOffset: 10, contentEndOffset: 11 },
+    { id: "chunk-c", text: "c", startOffset: 20, endOffset: 21, contentStartOffset: 20, contentEndOffset: 21 },
+  ];
+  const decisions = [
+    { chunkId: "chunk-a", decision: "ai-needed", categories: ["clarity"], confidence: 0.99, reason: "semantic" },
+    { chunkId: "chunk-b", decision: "uncertain", categories: ["structure"], confidence: 0.99, reason: "borderline" },
+    { chunkId: "chunk-c", decision: "ai-needed", categories: ["clarity"], confidence: 0.8, reason: "semantic" },
+  ];
+  const selected = selectProviderWorkload(chunks, { changedRange: { start: 10, end: 11 }, maxAiChunks: 1, maxAiChars: 10, triageDecisions: decisions });
+  assert.deepEqual(selected.selected.map((chunk) => chunk.id), ["chunk-b"]);
+  assert.equal(selected.skipped, 2);
+});
+
+test("triage metrics expose confidence, fallback, avoidance, and coverage invariants", async () => {
+  const text = "This thing is really useful for various aspects of the work and stuff.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  const outcome = await triageChunks(createAnalysisChunks(text), local.issues, { classifier: null, uncertainPolicy: "provider" });
+  assert.ok(outcome.metrics.fallbackRate > 0);
+  assert.equal(outcome.metrics.actualProviderAvoidanceRate, 0);
+  assert.ok(outcome.metrics.providerChunks > 0);
+  const coverage = { requestedChunks: 3, attemptedChunks: 2, successfulChunks: 1, failedChunks: 1, skippedChunks: 1 };
+  assert.equal(isAiCoverageConsistent(coverage), true);
+  assert.equal(getAiReviewStatus(coverage, true, true, "ready"), "AI review partially complete - 1/3 sections reviewed");
+  assert.equal(getAiReviewStatus({ requestedChunks: 0, attemptedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: 0 }, true, true, "ready"), "Local analysis only");
 });
 
 test("two-label classifier outcomes derive uncertainty from confidence", () => {

@@ -37,12 +37,18 @@ function diagnosticsEnabled() {
   return typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
 }
 
-export function createAnalysisDiagnostics(issueCount: number, startedAt: number, engine: AnalysisDiagnostics["engine"]): AnalysisDiagnostics | undefined {
+export function createAnalysisDiagnostics(
+  issueCount: number,
+  startedAt: number,
+  engine: AnalysisDiagnostics["engine"],
+  details: Partial<Omit<AnalysisDiagnostics, "processingMs" | "issueCount" | "engine">> = {},
+): AnalysisDiagnostics | undefined {
   if (!diagnosticsEnabled()) return undefined;
   return {
     processingMs: Math.max(0, Math.round((analysisNow() - startedAt) * 100) / 100),
     issueCount,
     engine,
+    ...details,
   };
 }
 
@@ -130,6 +136,12 @@ const SPELLING_COMMON_EXTRA = [
   "proposal", "cost", "consultant", "approved", "analyst", "director", "approves", "log", "coordinator",
   "participant", "site", "obsolete", "preview", "optional", "routing", "mode", "raw", "hook", "practise",
   "eight", "map", "traveller", "season", "match", "more", "series", "merge", "acceptance",
+  "age", "built", "cautious", "care", "circulate", "classify", "cover", "directory", "exposure", "four", "last",
+  "lake", "left", "marked", "median", "near", "nine", "old", "plain", "plate", "plot", "preserved", "product",
+  "rate", "rain", "readings", "reaction", "reproduce", "reserves", "rest", "retain", "road", "scan", "scheduler", "send",
+  "along", "began", "bell", "boat", "bread", "coat", "done", "each", "gave", "hill", "light", "list", "long", "loop", "may",
+  "became", "clean", "meal", "normal", "operator", "pace", "page", "park", "preserves", "reach", "recovery", "space", "stale", "state", "stone", "style", "train", "wall", "wind",
+  "specified", "taken", "ten", "tide", "tour", "transfer", "warm",
 ];
 const SPELLING_UNICODE = `
 café naïve résumé fiancée jalapeño façade coöperate déjà touché protégé über voilà mañana señor São München Zürich Łódź Αθήνα Москва 東京 北京

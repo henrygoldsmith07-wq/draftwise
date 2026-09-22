@@ -25,6 +25,7 @@
   let aiTimer = 0;
   let aiPending = false;
   let aiError = "";
+  let aiCoverage = null;
 
   const host = () => location.hostname.replace(/^www\./u, "");
   const siteIsDisabled = () => settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)) || settings.disabledSites.includes(host());
@@ -55,6 +56,16 @@
   function clearPanel() { while (panel?.firstChild) panel.removeChild(panel.firstChild); }
   function textNode(tag, value, className) { const element = document.createElement(tag); element.textContent = value; if (className) element.className = className; return element; }
 
+  function aiStateLabel() {
+    if (!settings.aiEnabled) return "Local";
+    if (aiError) return "AI unavailable";
+    if (aiPending) return "Checking AI...";
+    if (!aiCoverage || aiCoverage.requestedChunks === 0) return "Local";
+    if (aiCoverage.failedChunks > 0 && aiCoverage.successfulChunks === 0) return "AI unavailable";
+    if (aiCoverage.failedChunks > 0 || aiCoverage.skippedChunks > 0) return "Partial AI";
+    return aiCoverage.successfulChunks > 0 ? "Local + AI" : "Local";
+  }
+
   function render() {
     if (!root || !button || !panel) return;
     const actionable = activeIssues.filter((item) => item.replacement && item.replacement !== item.original);
@@ -62,7 +73,7 @@
     button.setAttribute("aria-label", `${activeIssues.length} writing suggestion${activeIssues.length === 1 ? "" : "s"}`);
     clearPanel();
     const header = document.createElement("div"); header.className = "dw-head";
-    header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", activeIssues.some((item) => item.source === "ai") ? "AI + local" : "Local", "dw-source"), textNode("span", `${activeIssues.length} suggestion${activeIssues.length === 1 ? "" : "s"}`, "dw-count"));
+    header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", aiStateLabel(), "dw-source"), textNode("span", String(activeIssues.length) + " suggestion" + (activeIssues.length === 1 ? "" : "s"), "dw-count"));
     if (aiPending) header.append(textNode("span", "Checking AI…", "dw-pending"));
     const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); close.addEventListener("click", () => { panel.hidden = true; }); header.append(close); panel.append(header);
     if (aiError) panel.append(textNode("div", aiError, "dw-error"));
@@ -80,7 +91,7 @@
       }
       const dismiss = textNode("button", "×", "dw-dismiss"); dismiss.type = "button"; dismiss.setAttribute("aria-label", `Dismiss ${item.title || "suggestion"}`); dismiss.addEventListener("click", () => { activeIssues = activeIssues.filter((candidate) => candidate.id !== item.id); render(); }); fix.append(dismiss); issue.append(fix); panel.append(issue);
     });
-    const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", settings.aiEnabled ? "Local checks + optional AI" : "Local checks"));
+    const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", aiStateLabel()));
     const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; chrome.storage.local.set({ disabledSites: settings.disabledSites }); panel.hidden = true; button.hidden = true; }); footer.append(disable); panel.append(footer);
     if (actionable.length) panel.setAttribute("aria-label", `${actionable.length} actionable writing suggestions`);
   }
@@ -126,7 +137,7 @@
     // NOTE: message contains text/goals/style/requestId only. Provider and
     // classifier keys stay in the service worker and never enter page context.
     const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => ({ issues: null, error: "AI analysis is unavailable; local suggestions are still active." }));
-    aiPending = false; aiError = response?.error || "";
+    aiPending = false; aiError = response?.error || ""; aiCoverage = response?.aiCoverage || null; element.__draftwiseAiCoverage = aiCoverage;
     if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
     if (Array.isArray(response.issues)) {
       const aiIssues = response.issues.filter((issue) => issue && issue.source === "ai");
@@ -142,7 +153,8 @@
     const local = localAnalysis(text, previous, previousResult);
     element.__draftwiseLocalResult = local;
     element.__draftwiseAiIssues = [];
-    activeIssues = local.issues || []; aiError = ""; aiPending = false; render(); place();
+    element.__draftwiseAiCoverage = null;
+    activeIssues = local.issues || []; aiError = ""; aiCoverage = null; aiPending = false; render(); place();
     // Cancel any pending cloud triage from rapid typing (cancellation support).
     if (aiTimer) window.clearTimeout(aiTimer);
     if (!settings.aiEnabled || !text.trim()) return;
@@ -175,7 +187,7 @@
       for (const [key, value] of Object.entries(changes)) settings[key] = value.newValue;
       cache.clear(); requestId += 1;
       if (siteIsDisabled() || (activeField && !isEditable(activeField))) {
-        activeIssues = []; aiPending = false; aiError = ""; button.hidden = true; panel.hidden = true;
+        activeIssues = []; aiPending = false; aiError = ""; aiCoverage = null; button.hidden = true; panel.hidden = true;
       } else {
         dom.bindEditableSubtree(document.documentElement, bind);
         if (activeField) void scan(activeField);

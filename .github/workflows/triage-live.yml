@@ -16,6 +16,7 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,4 +32,12 @@ jobs:
           args=""
           if [ -n "${{ inputs.limit }}" ]; then args="$args --limit=${{ inputs.limit }}"; fi
           if [ "${{ inputs.benchmark_batching }}" = "true" ]; then args="$args --benchmark-batching"; fi
-          npm run evaluate:triage:live -- $args
+          if [ -z "${{ inputs.limit }}" ]; then args="$args --strict"; fi
+          node --experimental-strip-types scripts/evaluate-triage-live.mjs $args > triage-live-report.json
+      - name: Upload live evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triage-live-report
+          path: triage-live-report.json
+          if-no-files-found: warn

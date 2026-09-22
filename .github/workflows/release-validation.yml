@@ -1,0 +1,63 @@
+name: Release validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live:
+        description: "Run the full live classifier corpus and threshold grid"
+        required: false
+        type: boolean
+        default: true
+      benchmark_batching:
+        description: "Also compare classifier batch sizes"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: mkdir -p artifacts
+      - run: npm run type-check
+      - run: npm test
+      - run: node --experimental-strip-types scripts/evaluate-rules.mjs --strict > artifacts/rules-evaluation.json
+      - run: node --experimental-strip-types scripts/evaluate-triage-offline.mjs --strict > artifacts/triage-offline.json
+      - run: node --experimental-strip-types scripts/benchmark-triage.mjs --strict > artifacts/triage-benchmark.json
+      - run: npm run benchmark > artifacts/performance-benchmark.txt
+      - run: npm run lint
+      - run: npm run extension:build
+      - run: git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
+      - run: npm run build
+      - run: git diff --exit-code
+      - name: Full live classifier evaluation
+        id: live
+        if: ${{ inputs.run_live }}
+        continue-on-error: true
+        env:
+          CLASSIFIER_API_KEY: ${{ secrets.CLASSIFIER_API_KEY }}
+          CLASSIFIER_BASE_URL: ${{ secrets.CLASSIFIER_BASE_URL }}
+        run: |
+          args="--strict"
+          if [ "${{ inputs.benchmark_batching }}" = "true" ]; then args="$args --benchmark-batching"; fi
+          node --experimental-strip-types scripts/evaluate-triage-live.mjs $args > artifacts/triage-live.json
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-reports
+          path: artifacts/
+          if-no-files-found: error
+      - name: Require live validation when requested
+        if: ${{ inputs.run_live && steps.live.outcome != 'success' }}
+        run: exit 1

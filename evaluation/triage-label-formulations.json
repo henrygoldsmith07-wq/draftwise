@@ -4,7 +4,7 @@
     "aiNeeded": 0.75,
     "locallySufficient": 0.8
   },
-  "selectionRationale": "Keep the semantic boundary explicit and use the mandated 0.75 AI-needed and 0.80 locally-sufficient confidence thresholds in production. Live evidence is recorded separately: a 20-entry classifier.dev probe ranked semantic-v2/direct-v1 ahead of the shorter alternatives on exact-label safety, but its exact AI recall was too low to promote a new threshold; provider-routing safety remained the relevant fail-safe because uncertain decisions still go to the provider.",
+  "selectionRationale": "Keep the semantic boundary explicit and use the mandated 0.75 AI-needed and 0.80 locally-sufficient confidence thresholds in production. The expanded deterministic corpus now provides an offline regression gate, while live evidence remains recorded separately: a 20-entry classifier.dev probe ranked semantic-v2/direct-v1 ahead of the shorter alternatives on exact-label safety, but its exact AI recall was too low to promote a new threshold; provider-routing safety remained the relevant fail-safe because uncertain decisions still go to the provider. No production formulation or threshold is changed without a complete live corpus/grid run.",
   "formulations": [
     {
       "id": "semantic-v2",
@@ -53,6 +53,17 @@
       "overall accuracy"
     ],
     "batchBenchmark": "Add --benchmark-batching to compare 5, 10, 25, 50, and 100 inputs per classifier request."
+  },
+  "offlineMeasurement": {
+    "date": "2026-09-22",
+    "corpusSize": 219,
+    "accuracy": 0.95,
+    "aiRecall": 0.944,
+    "falseFilterRate": 0.056,
+    "candidatePrecision": 0.933,
+    "candidateRecall": 0.946,
+    "providerAvoidanceRate": 0.658,
+    "note": "Deterministic local classifier fixture over the expanded triage corpus; this is a regression measurement, not live provider evidence."
   },
   "lastLiveMeasurement": {
     "date": "2026-09-21",

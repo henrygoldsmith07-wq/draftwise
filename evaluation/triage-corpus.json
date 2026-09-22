@@ -1,60 +1,2074 @@
 [
-  {"id":"triage-local-clean-01","text":"The writer reviews the draft and gives clear feedback.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean, short, no ambiguous signals."},
-  {"id":"triage-local-clean-02","text":"The system stores notes locally and keeps the writer in control.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean correct prose."},
-  {"id":"triage-local-clean-03","text":"The team reviews the project and shares the next steps.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean professional sentence."},
-  {"id":"triage-local-clean-04","text":"The report presents evidence from a documented sample.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean academic sentence."},
-  {"id":"triage-local-clean-05","text":"The browser stores the local result and shows the next suggestion.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical sentence."},
-  {"id":"triage-local-clean-06","text":"Thanks for the clear answer and the useful example.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean casual sentence."},
-  {"id":"triage-local-typo-01","text":"This is teh final draft.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"High-confidence typo; local fixes without AI."},
-  {"id":"triage-local-typo-02","text":"Please recieve the draft.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Common typo, locally sufficient."},
-  {"id":"triage-local-typo-03","text":"The enviroment is safe.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Single typo, no ambiguity."},
-  {"id":"triage-local-typo-04","text":"She are ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Subject-verb agreement, high confidence local."},
-  {"id":"triage-local-typo-05","text":"A example is ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Article agreement, local."},
-  {"id":"triage-local-typo-06","text":"The the draft is ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Duplicate determiner, local."},
-  {"id":"triage-local-clean-07","text":"The client receives the final report after the review.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean, no hedges."},
-  {"id":"triage-local-clean-08","text":"The function validates the input before it calls the service.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical."},
-  {"id":"triage-local-short-01","text":"Clean so far.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Too short for AI."},
-  {"id":"triage-local-short-02","text":"Ready for review.","expectedDecision":"uncertain","expectedCategories":["structure"],"notes":"Short fragment; could be intentional, borderline."},
-  {"id":"triage-ai-clarity-01","text":"This thing is really useful for various aspects of the work and stuff.","expectedDecision":"ai-needed","expectedCategories":["clarity","conciseness"],"notes":"Vague nouns + filler need semantic rewrite."},
-  {"id":"triage-ai-clarity-02","text":"The process somehow improves the system in various ways that matter.","expectedDecision":"ai-needed","expectedCategories":["clarity"],"notes":"Vague, needs specificity."},
-  {"id":"triage-ai-conciseness-01","text":"We work in order to improve the result at this point in time due to the fact that the team made a decision.","expectedDecision":"ai-needed","expectedCategories":["conciseness"],"notes":"Wordy phrases need condensing beyond local."},
-  {"id":"triage-ai-conciseness-02","text":"In the event that the result changes, we will come to a conclusion for the purpose of clarity.","expectedDecision":"ai-needed","expectedCategories":["conciseness"],"notes":"Multiple wordy constructions."},
-  {"id":"triage-ai-engagement-01","text":"The document contains information. The document contains data. The document contains results. The document contains conclusions.","expectedDecision":"ai-needed","expectedCategories":["engagement","conciseness"],"notes":"Monotonous repetition, needs engagement rewrite."},
-  {"id":"triage-ai-engagement-02","text":"This report describes the method and the results and the findings and the conclusions in a sequence that continues without variation or direct address to the reader who must follow each step.","expectedDecision":"ai-needed","expectedCategories":["engagement","structure"],"notes":"Long flat sentence, low directness."},
-  {"id":"triage-ai-tone-01","text":"This might possibly be somewhat useful, perhaps, if you sort of consider it carefully.","expectedDecision":"ai-needed","expectedCategories":["tone","clarity"],"notes":"Hedged, uncertain tone needs confident rewrite."},
-  {"id":"triage-ai-tone-02","text":"This is extremely incredibly totally absolutely the best and most highly perfect solution ever!","expectedDecision":"ai-needed","expectedCategories":["tone","style"],"notes":"Over-intensified tone needs calibration."},
-  {"id":"triage-ai-consistency-01","text":"The API returns a JSON object. The api returns a javascript object. The API returns a JSON payload for the client.","expectedDecision":"ai-needed","expectedCategories":["consistency"],"notes":"Terminology drift needs consistency check."},
-  {"id":"triage-ai-consistency-02","text":"We organise the workflow. We organize the process. We analyse the data and analyze the results in the centre and center.","expectedDecision":"ai-needed","expectedCategories":["consistency","correctness"],"notes":"Dialect inconsistency needs AI + style context."},
-  {"id":"triage-ai-structure-01","text":"This is a useful sentence with a clear result and a documented method that the reader can follow through the full report without losing the main argument or the supporting evidence because each step remains visible and the final conclusion explains the reason for the decision.","expectedDecision":"ai-needed","expectedCategories":["structure"],"notes":"Very long sentence needs splitting."},
-  {"id":"triage-ai-structure-02","text":"Clear and direct. Without a verb. For impact? Maybe.","expectedDecision":"ai-needed","expectedCategories":["structure"],"notes":"Fragments need structural judgement."},
-  {"id":"triage-ai-wordchoice-01","text":"At the end of the day, the team will think outside the box to find low-hanging fruit moving forward.","expectedDecision":"ai-needed","expectedCategories":["word-choice","style"],"notes":"Clichés need nuanced alternatives."},
-  {"id":"triage-ai-wordchoice-02","text":"The project is a game changer that will leverage synergies going forward.","expectedDecision":"ai-needed","expectedCategories":["word-choice","engagement"],"notes":"Buzzwords need concrete language."},
-  {"id":"triage-ai-style-01","text":"The draft was reviewed by the team and the results were analysed by the committee before being approved.","expectedDecision":"ai-needed","expectedCategories":["style","clarity"],"notes":"Passive chain needs active rewrite."},
-  {"id":"triage-ai-style-02","text":"It is to much work and their is a affect that will effect the result, which is better then expected.","expectedDecision":"ai-needed","expectedCategories":["correctness","clarity"],"notes":"Multiple confused words + nuance."},
-  {"id":"triage-ai-correctness-hard-01","text":"Their own work is useful, but its a issue that your welcome to review when there ready.","expectedDecision":"ai-needed","expectedCategories":["correctness"],"notes":"Several confused words in one sentence; AI helps disambiguate."},
-  {"id":"triage-ai-other-01","text":"We need to advice the team on the affect of the change, which is to late to loose.","expectedDecision":"ai-needed","expectedCategories":["correctness","other"],"notes":"Mixed confusables, fallback other."},
-  {"id":"triage-ai-clarity-03","text":"Because the implementation utilizes approximately 20% more resources, we should, in order to be safe, basically review it.","expectedDecision":"ai-needed","expectedCategories":["clarity","conciseness"],"notes":"Jargon + filler + wordiness."},
-  {"id":"triage-ai-tone-03","text":"You must immediately fix every issue without exception, or the entire project will fail completely and irreversibly.","expectedDecision":"ai-needed","expectedCategories":["tone"],"notes":"Overly alarmist tone needs softening."},
-  {"id":"triage-ai-engagement-03","text":"The system processes data. The system stores data. The system returns data. Data is processed, stored, and returned by the system.","expectedDecision":"ai-needed","expectedCategories":["engagement","style"],"notes":"Repetitive passive, low engagement."},
-  {"id":"triage-uncertain-01","text":"This is really clear.","expectedDecision":"uncertain","expectedCategories":["conciseness","other"],"notes":"Single filler; could be local or stylistic."},
-  {"id":"triage-uncertain-02","text":"The team will make a decision today.","expectedDecision":"uncertain","expectedCategories":["conciseness"],"notes":"Single wordiness; borderline."},
-  {"id":"triage-uncertain-03","text":"The draft was reviewed by the team.","expectedDecision":"uncertain","expectedCategories":["style"],"notes":"Single passive; may be intentional."},
-  {"id":"triage-uncertain-04","text":"We can send the draft when you are ready, and we can review it together.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean but slightly long; should stay local."},
-  {"id":"triage-uncertain-05","text":"The result is somewhat unclear and perhaps needs work.","expectedDecision":"ai-needed","expectedCategories":["clarity","tone"],"notes":"Hedge + vague, needs AI."},
-  {"id":"triage-uncertain-06","text":"Ready. Set. Go.","expectedDecision":"uncertain","expectedCategories":["structure","other"],"notes":"Intentional fragments, ambiguous."},
-  {"id":"triage-uncertain-07","text":"The writer uses a well-known method for the final report.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean with hyphen, no AI."},
-  {"id":"triage-uncertain-08","text":"The report includes a citation, a source, and a clear conclusion.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Oxford comma clean."},
-  {"id":"triage-ai-structure-03","text":"Although the method, which was documented in the previous section, which referenced the earlier study, which itself built on prior work, suggests the result, which remains tentative, the conclusion, which follows, is clear.","expectedDecision":"ai-needed","expectedCategories":["structure","clarity"],"notes":"Nested clauses need restructuring."},
-  {"id":"triage-ai-tone-04","text":"I might maybe perhaps suggest we could possibly consider reviewing this uncertain draft?","expectedDecision":"ai-needed","expectedCategories":["tone"],"notes":"Excessive hedging."},
-  {"id":"triage-local-clean-09","text":"The package includes the shared analysis module.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical."},
-  {"id":"triage-local-clean-10","text":"The worker rejects an invalid request and keeps the local result.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean."},
-  {"id":"triage-ai-consistency-03","text":"Please use email for contact. You can reach us at support@example.com or visit https://example.com/help for ticket ABC-123.","expectedDecision":"uncertain","expectedCategories":["other"],"notes":"Contains protected tokens; minimise transmitted text, borderline."},
-  {"id":"triage-ai-other-02","text":"The budget is £1,250.50 which is 20% for 18 September 2026, see report-v2.pdf.","expectedDecision":"uncertain","expectedCategories":["other"],"notes":"Numbers/dates should stay local; triage must redact."},
-  {"id":"triage-goal-academic-01","text":"The study evaluates the reported method across three sites and compares the measured outcome with the documented baseline for the final analysis.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"academic","intent":"inform","tone":"formal"},"notes":"Impersonal academic prose should not be penalised for avoiding direct address."},
-  {"id":"triage-goal-technical-01","text":"The service validates the input before it writes the record and returns a structured error when the request is invalid.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"technical","intent":"explain","tone":"professional"},"notes":"Technical documentation can be impersonal and still clear."},
-  {"id":"triage-formal-report-01","text":"The report presents the measured outcome, documents the sampling method, and records the limitation for future review.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"professional","intent":"inform","tone":"formal"},"notes":"Formal reporting is not automatically a low-engagement passage."},
-  {"id":"triage-professional-memo-01","text":"The team will publish the revised schedule after the finance review and will notify each project owner before the change takes effect.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"professional","intent":"inform","tone":"professional"},"notes":"Direct operational prose should stay local."},
-  {"id":"triage-legal-style-01","text":"Subject to the approval recorded in the attached schedule, the supplier shall deliver the requested materials within the agreed period and retain evidence of each transfer.","expectedDecision":"uncertain","expectedCategories":["structure"],"goals":{"audience":"professional","intent":"inform","tone":"formal"},"notes":"Long legal-style syntax may need semantic review without assuming it is wrong."},
-  {"id":"triage-narrative-01","text":"Rain softened the streetlights while Mira carried the unfinished letter through the quiet station and waited for the last train home.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"general","intent":"story","tone":"friendly"},"notes":"Narrative prose can be vivid without direct address."},
-  {"id":"triage-marketing-01","text":"This truly remarkable solution is absolutely the best way to unlock amazing results and transform your journey forever.","expectedDecision":"ai-needed","expectedCategories":["tone","word-choice"],"goals":{"audience":"general","intent":"persuade","tone":"confident"},"notes":"Marketing hype and intensifiers justify semantic review."}
+{"id":"triage-local-clean-01","text":"The writer reviews the draft and gives clear feedback.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean, short, no ambiguous signals.","rationale":"Clean, short, no ambiguous signals.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-02","text":"The system stores notes locally and keeps the writer in control.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean correct prose.","rationale":"Clean correct prose.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-03","text":"The team reviews the project and shares the next steps.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean professional sentence.","rationale":"Clean professional sentence.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-04","text":"The report presents evidence from a documented sample.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean academic sentence.","rationale":"Clean academic sentence.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-05","text":"The browser stores the local result and shows the next suggestion.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical sentence.","rationale":"Clean technical sentence.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-06","text":"Thanks for the clear answer and the useful example.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean casual sentence.","rationale":"Clean casual sentence.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-01","text":"This is teh final draft.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"High-confidence typo; local fixes without AI.","rationale":"High-confidence typo; local fixes without AI.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-02","text":"Please recieve the draft.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Common typo, locally sufficient.","rationale":"Common typo, locally sufficient.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-03","text":"The enviroment is safe.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Single typo, no ambiguity.","rationale":"Single typo, no ambiguity.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-04","text":"She are ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Subject-verb agreement, high confidence local.","rationale":"Subject-verb agreement, high confidence local.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-05","text":"A example is ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Article agreement, local.","rationale":"Article agreement, local.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-typo-06","text":"The the draft is ready.","expectedDecision":"locally-sufficient","expectedCategories":["correctness"],"notes":"Duplicate determiner, local.","rationale":"Duplicate determiner, local.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-07","text":"The client receives the final report after the review.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean, no hedges.","rationale":"Clean, no hedges.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-08","text":"The function validates the input before it calls the service.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical.","rationale":"Clean technical.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-short-01","text":"Clean so far.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Too short for AI.","rationale":"Too short for AI.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-short-02","text":"Ready for review.","expectedDecision":"uncertain","expectedCategories":["structure"],"notes":"Short fragment; could be intentional, borderline.","rationale":"Short fragment; could be intentional, borderline.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-clarity-01","text":"This thing is really useful for various aspects of the work and stuff.","expectedDecision":"ai-needed","expectedCategories":["clarity","conciseness"],"notes":"Vague nouns + filler need semantic rewrite.","rationale":"Vague nouns + filler need semantic rewrite.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-clarity-02","text":"The process somehow improves the system in various ways that matter.","expectedDecision":"ai-needed","expectedCategories":["clarity"],"notes":"Vague, needs specificity.","rationale":"Vague, needs specificity.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-conciseness-01","text":"We work in order to improve the result at this point in time due to the fact that the team made a decision.","expectedDecision":"ai-needed","expectedCategories":["conciseness"],"notes":"Wordy phrases need condensing beyond local.","rationale":"Wordy phrases need condensing beyond local.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-conciseness-02","text":"In the event that the result changes, we will come to a conclusion for the purpose of clarity.","expectedDecision":"ai-needed","expectedCategories":["conciseness"],"notes":"Multiple wordy constructions.","rationale":"Multiple wordy constructions.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-engagement-01","text":"The document contains information. The document contains data. The document contains results. The document contains conclusions.","expectedDecision":"ai-needed","expectedCategories":["engagement","conciseness"],"notes":"Monotonous repetition, needs engagement rewrite.","rationale":"Monotonous repetition, needs engagement rewrite.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-engagement-02","text":"This report describes the method and the results and the findings and the conclusions in a sequence that continues without variation or direct address to the reader who must follow each step.","expectedDecision":"ai-needed","expectedCategories":["engagement","structure"],"notes":"Long flat sentence, low directness.","rationale":"Long flat sentence, low directness.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-tone-01","text":"This might possibly be somewhat useful, perhaps, if you sort of consider it carefully.","expectedDecision":"ai-needed","expectedCategories":["tone","clarity"],"notes":"Hedged, uncertain tone needs confident rewrite.","rationale":"Hedged, uncertain tone needs confident rewrite.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-tone-02","text":"This is extremely incredibly totally absolutely the best and most highly perfect solution ever!","expectedDecision":"ai-needed","expectedCategories":["tone","style"],"notes":"Over-intensified tone needs calibration.","rationale":"Over-intensified tone needs calibration.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-consistency-01","text":"The API returns a JSON object. The api returns a javascript object. The API returns a JSON payload for the client.","expectedDecision":"ai-needed","expectedCategories":["consistency"],"notes":"Terminology drift needs consistency check.","rationale":"Terminology drift needs consistency check.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-consistency-02","text":"We organise the workflow. We organize the process. We analyse the data and analyze the results in the centre and center.","expectedDecision":"ai-needed","expectedCategories":["consistency","correctness"],"notes":"Dialect inconsistency needs AI + style context.","rationale":"Dialect inconsistency needs AI + style context.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-structure-01","text":"This is a useful sentence with a clear result and a documented method that the reader can follow through the full report without losing the main argument or the supporting evidence because each step remains visible and the final conclusion explains the reason for the decision.","expectedDecision":"ai-needed","expectedCategories":["structure"],"notes":"Very long sentence needs splitting.","rationale":"Very long sentence needs splitting.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-structure-02","text":"Clear and direct. Without a verb. For impact? Maybe.","expectedDecision":"ai-needed","expectedCategories":["structure"],"notes":"Fragments need structural judgement.","rationale":"Fragments need structural judgement.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-wordchoice-01","text":"At the end of the day, the team will think outside the box to find low-hanging fruit moving forward.","expectedDecision":"ai-needed","expectedCategories":["word-choice","style"],"notes":"Clichés need nuanced alternatives.","rationale":"Clichés need nuanced alternatives.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-wordchoice-02","text":"The project is a game changer that will leverage synergies going forward.","expectedDecision":"ai-needed","expectedCategories":["word-choice","engagement"],"notes":"Buzzwords need concrete language.","rationale":"Buzzwords need concrete language.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-style-01","text":"The draft was reviewed by the team and the results were analysed by the committee before being approved.","expectedDecision":"ai-needed","expectedCategories":["style","clarity"],"notes":"Passive chain needs active rewrite.","rationale":"Passive chain needs active rewrite.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-style-02","text":"It is to much work and their is a affect that will effect the result, which is better then expected.","expectedDecision":"ai-needed","expectedCategories":["correctness","clarity"],"notes":"Multiple confused words + nuance.","rationale":"Multiple confused words + nuance.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-correctness-hard-01","text":"Their own work is useful, but its a issue that your welcome to review when there ready.","expectedDecision":"ai-needed","expectedCategories":["correctness"],"notes":"Several confused words in one sentence; AI helps disambiguate.","rationale":"Several confused words in one sentence; AI helps disambiguate.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-other-01","text":"We need to advice the team on the affect of the change, which is to late to loose.","expectedDecision":"ai-needed","expectedCategories":["correctness","other"],"notes":"Mixed confusables, fallback other.","rationale":"Mixed confusables, fallback other.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-clarity-03","text":"Because the implementation utilizes approximately 20% more resources, we should, in order to be safe, basically review it.","expectedDecision":"ai-needed","expectedCategories":["clarity","conciseness"],"notes":"Jargon + filler + wordiness.","rationale":"Jargon + filler + wordiness.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-tone-03","text":"You must immediately fix every issue without exception, or the entire project will fail completely and irreversibly.","expectedDecision":"ai-needed","expectedCategories":["tone"],"notes":"Overly alarmist tone needs softening.","rationale":"Overly alarmist tone needs softening.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-engagement-03","text":"The system processes data. The system stores data. The system returns data. Data is processed, stored, and returned by the system.","expectedDecision":"ai-needed","expectedCategories":["engagement","style"],"notes":"Repetitive passive, low engagement.","rationale":"Repetitive passive, low engagement.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-01","text":"This is really clear.","expectedDecision":"uncertain","expectedCategories":["conciseness","other"],"notes":"Single filler; could be local or stylistic.","rationale":"Single filler; could be local or stylistic.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-02","text":"The team will make a decision today.","expectedDecision":"uncertain","expectedCategories":["conciseness"],"notes":"Single wordiness; borderline.","rationale":"Single wordiness; borderline.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-03","text":"The draft was reviewed by the team.","expectedDecision":"uncertain","expectedCategories":["style"],"notes":"Single passive; may be intentional.","rationale":"Single passive; may be intentional.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-04","text":"We can send the draft when you are ready, and we can review it together.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean but slightly long; should stay local.","rationale":"Clean but slightly long; should stay local.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-05","text":"The result is somewhat unclear and perhaps needs work.","expectedDecision":"ai-needed","expectedCategories":["clarity","tone"],"notes":"Hedge + vague, needs AI.","rationale":"Hedge + vague, needs AI.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-06","text":"Ready. Set. Go.","expectedDecision":"uncertain","expectedCategories":["structure","other"],"notes":"Intentional fragments, ambiguous.","rationale":"Intentional fragments, ambiguous.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-07","text":"The writer uses a well-known method for the final report.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean with hyphen, no AI.","rationale":"Clean with hyphen, no AI.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-uncertain-08","text":"The report includes a citation, a source, and a clear conclusion.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Oxford comma clean.","rationale":"Oxford comma clean.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-structure-03","text":"Although the method, which was documented in the previous section, which referenced the earlier study, which itself built on prior work, suggests the result, which remains tentative, the conclusion, which follows, is clear.","expectedDecision":"ai-needed","expectedCategories":["structure","clarity"],"notes":"Nested clauses need restructuring.","rationale":"Nested clauses need restructuring.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-tone-04","text":"I might maybe perhaps suggest we could possibly consider reviewing this uncertain draft?","expectedDecision":"ai-needed","expectedCategories":["tone"],"notes":"Excessive hedging.","rationale":"Excessive hedging.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-09","text":"The package includes the shared analysis module.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean technical.","rationale":"Clean technical.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-local-clean-10","text":"The worker rejects an invalid request and keeps the local result.","expectedDecision":"locally-sufficient","expectedCategories":[],"notes":"Clean.","rationale":"Clean.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-consistency-03","text":"Please use email for contact. You can reach us at support@example.com or visit https://example.com/help for ticket ABC-123.","expectedDecision":"uncertain","expectedCategories":["other"],"notes":"Contains protected tokens; minimise transmitted text, borderline.","rationale":"Contains protected tokens; minimise transmitted text, borderline.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-ai-other-02","text":"The budget is £1,250.50 which is 20% for 18 September 2026, see report-v2.pdf.","expectedDecision":"uncertain","expectedCategories":["other"],"notes":"Numbers/dates should stay local; triage must redact.","rationale":"Numbers/dates should stay local; triage must redact.","goals":{"audience":"general","intent":"inform","tone":"neutral"}},
+{"id":"triage-goal-academic-01","text":"The study evaluates the reported method across three sites and compares the measured outcome with the documented baseline for the final analysis.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"academic","intent":"inform","tone":"formal"},"notes":"Impersonal academic prose should not be penalised for avoiding direct address.","rationale":"Impersonal academic prose should not be penalised for avoiding direct address."},
+{"id":"triage-goal-technical-01","text":"The service validates the input before it writes the record and returns a structured error when the request is invalid.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"technical","intent":"explain","tone":"professional"},"notes":"Technical documentation can be impersonal and still clear.","rationale":"Technical documentation can be impersonal and still clear."},
+{"id":"triage-formal-report-01","text":"The report presents the measured outcome, documents the sampling method, and records the limitation for future review.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"professional","intent":"inform","tone":"formal"},"notes":"Formal reporting is not automatically a low-engagement passage.","rationale":"Formal reporting is not automatically a low-engagement passage."},
+{"id":"triage-professional-memo-01","text":"The team will publish the revised schedule after the finance review and will notify each project owner before the change takes effect.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"professional","intent":"inform","tone":"professional"},"notes":"Direct operational prose should stay local.","rationale":"Direct operational prose should stay local."},
+{"id":"triage-legal-style-01","text":"Subject to the approval recorded in the attached schedule, the supplier shall deliver the requested materials within the agreed period and retain evidence of each transfer.","expectedDecision":"uncertain","expectedCategories":["structure"],"goals":{"audience":"professional","intent":"inform","tone":"formal"},"notes":"Long legal-style syntax may need semantic review without assuming it is wrong.","rationale":"Long legal-style syntax may need semantic review without assuming it is wrong."},
+{"id":"triage-narrative-01","text":"Rain softened the streetlights while Mira carried the unfinished letter through the quiet station and waited for the last train home.","expectedDecision":"locally-sufficient","expectedCategories":[],"goals":{"audience":"general","intent":"story","tone":"friendly"},"notes":"Narrative prose can be vivid without direct address.","rationale":"Narrative prose can be vivid without direct address."},
+{"id":"triage-marketing-01","text":"This truly remarkable solution is absolutely the best way to unlock amazing results and transform your journey forever.","expectedDecision":"ai-needed","expectedCategories":["tone","word-choice"],"goals":{"audience":"general","intent":"persuade","tone":"confident"},"notes":"Marketing hype and intensifiers justify semantic review.","rationale":"Marketing hype and intensifiers justify semantic review."},
+  {
+    "id": "triage-expanded-academic-001",
+    "text": "The article compares two sampling methods and reports similar results across the three participating departments.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-002",
+    "text": "The authors describe the interview protocol before discussing the themes identified in the transcripts.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-003",
+    "text": "The chapter places the proposed model within the history of community-based research.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-004",
+    "text": "The dissertation separates the literature review from the analysis of the primary evidence.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-005",
+    "text": "The researchers collected responses during the spring term and documented each exclusion.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-006",
+    "text": "The paper presents a cautious interpretation of the association between sleep and memory.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-007",
+    "text": "The methods section defines the variables and explains how missing observations were handled.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-008",
+    "text": "The results support the first hypothesis but offer limited support for the second.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-009",
+    "text": "The authors compare the observed pattern with findings reported in earlier studies.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-010",
+    "text": "The study examines how local policy shaped access to public transport.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-011",
+    "text": "The conclusion distinguishes the evidence from the broader implications for future research.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-012",
+    "text": "The survey included participants from four regions and used the same questions in each.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-013",
+    "text": "The analysis treats age as a continuous measure rather than a set of fixed groups.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-014",
+    "text": "The report acknowledges the small sample and avoids extending the claim beyond the data.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-015",
+    "text": "The paper explains why the comparison group was selected before presenting the main result.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-016",
+    "text": "The authors identify two limitations that could affect the transfer of the findings.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-017",
+    "text": "The discussion links the result to existing theory without claiming that the evidence proves causation.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-018",
+    "text": "The appendix lists the coding decisions used to classify the interview material.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-019",
+    "text": "The study follows the same measurement schedule at each participating site.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-academic-020",
+    "text": "The final section proposes a narrower question for subsequent work.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean academic prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "persuade",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-021",
+    "text": "The experiment measures the reaction rate at three temperatures and records the uncertainty for each reading.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-022",
+    "text": "The microscope images show a clear boundary between the treated and untreated samples.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "describe",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-023",
+    "text": "The protocol uses sterile containers and labels every sample before storage.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-024",
+    "text": "The model predicts a small increase in conductivity when the solution is warmed.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-025",
+    "text": "The control group received the same handling except for the active compound.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-026",
+    "text": "The field team recorded rainfall, soil moisture, and canopy cover at each plot.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-027",
+    "text": "The result remained stable after the calculation was repeated with the second instrument.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-028",
+    "text": "The researchers compared the measured value with the reference range supplied by the laboratory.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-029",
+    "text": "The sample was mixed before the aliquots were transferred to the analysis plate.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-030",
+    "text": "The figure shows how the signal changes during the first ten minutes of exposure.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "describe",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-031",
+    "text": "The study separates the observation period from the later follow-up measurement.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-032",
+    "text": "The authors report the median alongside the range so the distribution remains visible.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-033",
+    "text": "The instrument was calibrated before the first run and checked again at the end.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-034",
+    "text": "The analysis excludes readings taken after the sensor exceeded its specified operating range.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-035",
+    "text": "The cultures grew at similar rates under the two nutrient conditions.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-036",
+    "text": "The table lists the replicate count and the confidence interval for every treatment.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-037",
+    "text": "The proposed mechanism is consistent with the observed change in pressure.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-038",
+    "text": "The trial compares the intervention with standard care over a twelve-week period.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-039",
+    "text": "The researchers preserved the original units when converting the measurements for the plot.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-scientific-040",
+    "text": "The conclusion limits the claim to the population represented in the sample.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean scientific prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-041",
+    "text": "The parser validates the header before it reads the records from the input stream.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-042",
+    "text": "The service stores a checksum with each upload and reports the result after verification.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-043",
+    "text": "The deployment guide lists the required environment variables near the beginning.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-044",
+    "text": "The worker retries a transient request and records the final response code.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-045",
+    "text": "The command prints a short summary after it finishes processing the directory.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-046",
+    "text": "The API returns a structured error when the request does not satisfy the schema.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-047",
+    "text": "The cache is invalidated when the configuration version changes.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-048",
+    "text": "The test fixture contains one valid record and one deliberately rejected record.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-049",
+    "text": "The client preserves the original order when it combines the paginated responses.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-050",
+    "text": "The extension requests access only after the user selects a site.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-051",
+    "text": "The build step copies the manifest and the generated shared modules into the release folder.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-052",
+    "text": "The database migration adds the index after the existing rows have been checked.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-053",
+    "text": "The logger omits credentials while retaining enough context to reproduce a failed request.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-054",
+    "text": "The endpoint accepts JSON and rejects a body with an unsupported content type.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-055",
+    "text": "The editor maps a selected range back to the corresponding text node.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-056",
+    "text": "The scheduler keeps completed jobs separate from jobs that require another attempt.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-057",
+    "text": "The response parser accepts an empty issue list as a valid analysis.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-058",
+    "text": "The worker limits concurrent requests so a large document does not create an unbounded queue.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-059",
+    "text": "The test compares the generated file with the committed artifact before the release is published.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-technical-060",
+    "text": "The configuration loader uses the default timeout when no override is supplied.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean technical prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-061",
+    "text": "The finance team will circulate the revised forecast after the monthly review.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-062",
+    "text": "Please attach the signed form before the procurement meeting on Thursday.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-063",
+    "text": "The project owner approved the revised milestones and assigned a contact for each workstream.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-064",
+    "text": "The support team recorded the incident and sent the customer a clear update.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-065",
+    "text": "The meeting note separates decisions from actions and names an owner for each action.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-066",
+    "text": "The client requested a shorter summary for the next steering group meeting.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-067",
+    "text": "The team will review the draft contract after the legal comments arrive.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-068",
+    "text": "The operations lead confirmed the handover date and shared the checklist.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-069",
+    "text": "The revised policy gives managers a simple process for escalating a concern.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-070",
+    "text": "The agenda reserves time for questions before the group agrees the next step.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-071",
+    "text": "The analyst prepared a comparison of the two suppliers and highlighted the main difference.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-072",
+    "text": "The department publishes a short progress note at the end of each quarter.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-073",
+    "text": "The coordinator will confirm attendance and send the room details tomorrow.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-074",
+    "text": "The team agreed to review the accessibility checklist before the public launch.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-075",
+    "text": "The manager thanked the volunteers and explained how their feedback would be used.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-076",
+    "text": "The response includes the requested figures and identifies the source for each figure.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-077",
+    "text": "The project brief states the decision to be made and the evidence needed to make it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-078",
+    "text": "The office will close for maintenance while the network equipment is replaced.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-079",
+    "text": "The reviewer returned the proposal with two focused questions about scope.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-professional-080",
+    "text": "The team recorded the decision in the shared workspace so that absent colleagues could follow it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean professional prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-081",
+    "text": "The quarterly report compares actual expenditure with the approved budget.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-082",
+    "text": "The summary identifies the three measures that changed most during the period.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-083",
+    "text": "The board paper describes the risk, its current owner, and the proposed response.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-084",
+    "text": "The audit note records the evidence reviewed and the date of the follow-up.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-085",
+    "text": "The findings are grouped by region so the difference between sites is easy to inspect.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-086",
+    "text": "The monitoring report includes a short explanation for each missed target.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-087",
+    "text": "The evaluation compares the pilot results with the baseline collected in January.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-088",
+    "text": "The dashboard separates completed work from items that remain under review.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-089",
+    "text": "The incident report lists the sequence of events and the controls added afterward.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-090",
+    "text": "The annual review describes progress against the plan and notes two open dependencies.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-091",
+    "text": "The table presents the count, rate, and denominator for every service area.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-092",
+    "text": "The committee considered four options before selecting the smallest viable change.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-093",
+    "text": "The performance note explains why response time improved in the second half.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-094",
+    "text": "The report records the assumptions used in the estimate and the date they were approved.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-095",
+    "text": "The summary gives readers a clear route from the evidence to the recommendation.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-096",
+    "text": "The review covers delivery, quality, and customer feedback in separate sections.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-097",
+    "text": "The results table retains the original categories so the comparison remains transparent.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-098",
+    "text": "The paper notes that the sample is smaller than planned and adjusts the interpretation.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-099",
+    "text": "The closeout report confirms which actions are complete and which require an owner.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-report-100",
+    "text": "The outcome is consistent with the early signal but does not settle the wider question.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean report prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-101",
+    "text": "Maya left the library before the rain reached the station.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-102",
+    "text": "The old bridge crossed the narrow river behind the village.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "describe",
+      "tone": "neutral"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-103",
+    "text": "We packed lunch and followed the marked path to the lake.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-104",
+    "text": "The neighbour returned the borrowed book with a note inside the cover.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-105",
+    "text": "The small garden looked brighter after the winter branches were trimmed.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "describe",
+      "tone": "neutral"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-106",
+    "text": "I kept the receipt beside the keys so I would remember it later.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-107",
+    "text": "The children built a shelter from driftwood while the tide moved inland.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-108",
+    "text": "The recipe begins with warm water and finishes with a short rest.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-109",
+    "text": "The museum opens at nine and closes one hour after the final tour.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "neutral"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-110",
+    "text": "A clear subject line helps a busy reader understand the purpose of a message.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-111",
+    "text": "The campaign explains the benefit in plain language and shows the evidence behind it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-112",
+    "text": "The product page describes the material, delivery window, and return process.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-113",
+    "text": "The invitation uses a warm tone and gives guests the information they need.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-114",
+    "text": "The story moves from the crowded platform to the quiet road beyond it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-115",
+    "text": "The guide gives new volunteers a simple route through the first afternoon.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-116",
+    "text": "The message is direct, respectful, and easy to scan on a phone.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-117",
+    "text": "The letter explains the change without blaming the people affected by it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-118",
+    "text": "The article opens with a concrete example before it introduces the wider question.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-119",
+    "text": "The speaker paused after the final sentence and let the room consider it.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "neutral"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-clean-120",
+    "text": "The polished draft keeps the central idea visible from the opening paragraph to the close.",
+    "expectedDecision": "locally-sufficient",
+    "rationale": "Clean clean prose with a complete local signal and no need for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": []
+  },
+  {
+    "id": "triage-expanded-ai-academic-001",
+    "text": "The argument moves through several theoretical layers and appears to connect the historical account with the survey result, but the relationship between those claims is not made explicit for the reader.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A long academic passage with an implicit connection that benefits from semantic review.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-academic-002",
+    "text": "The evidence is presented as broadly supportive of the intervention even though the comparison uses different measures at different stages and the practical meaning of that difference is left for the reader to infer.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A subtle evidence and interpretation problem that local rules cannot settle.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-academic-003",
+    "text": "The discussion returns to the same conclusion in different language, which makes the central contribution harder to distinguish from the background literature.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A structural repetition issue requiring context.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-academic-004",
+    "text": "The paper places a qualification near the end of the paragraph after a strong claim, so the reader may not know whether the conclusion applies to the full sample or only to the observed subgroup.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A scope ambiguity that is not a simple grammar error.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-scientific-005",
+    "text": "The measured signal rises during the first interval and then settles near the earlier baseline, which might indicate a temporary response, a calibration effect, or a change in the sample that the current experiment cannot distinguish.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A scientific interpretation with competing explanations.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-scientific-006",
+    "text": "The description of the mechanism uses the same term for the initial process and the later outcome, making it difficult to tell whether the text describes a cause, a measurement, or a consequence.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A semantic terminology ambiguity.",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-scientific-007",
+    "text": "The result looks robust when the averages are compared, although the individual observations vary in a way that could change the practical conclusion for a small subgroup.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A nuance about aggregation and audience impact.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-technical-008",
+    "text": "This component is responsible for preparing the request, checking the response, and updating the cache, which makes the example easy to follow at first but leaves the boundary between the three responsibilities unclear.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A design explanation with a responsibility boundary issue.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-technical-009",
+    "text": "The service may return a successful response before the downstream record is available, so a reader could interpret the status as completion even though the next operation can still fail.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A state and expectation ambiguity.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-technical-010",
+    "text": "The guide explains the normal path in detail but gives no indication of how the operator should recover when the first step succeeds and the second step does not.",
+    "expectedDecision": "ai-needed",
+    "rationale": "An operational gap requiring semantic review.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-technical-011",
+    "text": "The two examples use similar names for different values, and a reader who copies the pattern could reasonably assume that the values have the same lifetime.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A subtle terminology and lifecycle problem.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-professional-012",
+    "text": "I wanted to share a few thoughts about the schedule because there are various things that might be useful to consider before we make a decision about the next phase.",
+    "expectedDecision": "ai-needed",
+    "rationale": "Wordiness and hedging in a professional message.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-professional-013",
+    "text": "The note is polite, but the request appears near the end after several background paragraphs, so the recipient may not know what action is needed or when it is needed.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A request-structure problem rather than a local typo.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-professional-014",
+    "text": "The update describes the delay as unexpected without saying which dependency changed, which leaves the recipient uncertain about whether the date or only the sequence has moved.",
+    "expectedDecision": "ai-needed",
+    "rationale": "An ambiguity about scope of a project change.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-professional-015",
+    "text": "The message uses a confident opening and a cautious closing, but it does not explain what evidence supports the change in recommendation.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A tone and evidence alignment issue.",
+    "goals": {
+      "audience": "professional",
+      "intent": "persuade",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-report-016",
+    "text": "The report lists several indicators that improved and then describes the overall result as positive, although the indicators use different denominators and their combined meaning is not explained.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A report-level aggregation ambiguity.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-report-017",
+    "text": "The recommendation is repeated in the summary, findings, and conclusion with slightly different conditions, so the reader must decide which version governs the decision.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A consistency and decision clarity issue.",
+    "goals": {
+      "audience": "professional",
+      "intent": "persuade",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-report-018",
+    "text": "The table is easy to scan, but the prose around it treats the smallest change as the most important result without explaining the decision rule used to rank the changes.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A prioritisation rationale gap.",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-report-019",
+    "text": "The incident narrative identifies the first visible symptom but does not distinguish it from the underlying cause, which could send a future reviewer toward the wrong corrective action.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A causal distinction that needs semantic review.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-casual-020",
+    "text": "I had a really good time at the market and there were lots of things to see, although I am not sure what made the afternoon feel so memorable.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A casual passage where the emotion and focus are vague.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-casual-021",
+    "text": "The message says the plan is fine but then adds several qualifications that might make the recipient wonder whether any part of the plan has actually been agreed.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A conversational contradiction.",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-narrative-022",
+    "text": "The station was almost empty, and the announcement echoed through the hall while the traveller held the letter and tried to decide what the silence meant.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A narrative sentence whose interpretation and pacing benefit from semantic review.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-narrative-023",
+    "text": "The house seemed familiar from the road, yet each room changed the memory slightly, leaving the narrator unsure whether the visit was a return or a beginning.",
+    "expectedDecision": "ai-needed",
+    "rationale": "Intentional ambiguity that should not be resolved mechanically.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "neutral"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-persuasive-024",
+    "text": "This solution is built to transform the way teams work and unlock meaningful results, but the promise is broad enough that a reader cannot tell which outcome is actually being offered.",
+    "expectedDecision": "ai-needed",
+    "rationale": "Marketing language needs audience-aware tightening.",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-persuasive-025",
+    "text": "The proposal asks the reader to support the plan because it is clearly the right direction, while the trade-off with the cheaper option is only mentioned in passing.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A persuasive evidence and trade-off gap.",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-long-form-026",
+    "text": "The introduction begins with a useful observation, moves through a history of related projects, pauses for a qualification, and eventually reaches the question that the next section is meant to answer, which makes the paragraph informative but difficult to navigate.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A clean-looking long paragraph with structural load.",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-long-form-027",
+    "text": "The chapter describes the same decision from the perspective of the team, the customer, and the reviewer, but it does not tell the reader whether these are three stages of one process or three competing accounts.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A multi-perspective structure ambiguity.",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-long-form-028",
+    "text": "The explanation is technically accurate and each sentence is grammatical, yet the key distinction arrives after several examples and the reader may form the wrong mental model before reaching it.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A semantic ordering problem not captured by local correctness rules.",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-ai-long-form-029",
+    "text": "The conclusion sounds measured and avoids obvious errors, but it combines a recommendation, a limitation, and a future question in one final movement without signalling how they relate.",
+    "expectedDecision": "ai-needed",
+    "rationale": "A conclusion structure issue in otherwise polished prose.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "clarity"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-001",
+    "text": "The plan was reviewed.",
+    "expectedDecision": "uncertain",
+    "rationale": "Valid passive voice with little context; do not automatically route it as an AI need.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-002",
+    "text": "The result was recorded.",
+    "expectedDecision": "uncertain",
+    "rationale": "A valid passive construction may be intentional in a report.",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-003",
+    "text": "Ready for review.",
+    "expectedDecision": "uncertain",
+    "rationale": "An intentional status fragment whose usefulness depends on context.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-004",
+    "text": "Maybe later.",
+    "expectedDecision": "uncertain",
+    "rationale": "A valid conversational fragment that should remain uncertain.",
+    "goals": {
+      "audience": "casual",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-005",
+    "text": "Set. Go.",
+    "expectedDecision": "uncertain",
+    "rationale": "Intentional fragments in narrative or dialogue.",
+    "goals": {
+      "audience": "general",
+      "intent": "story",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-006",
+    "text": "The work was completed.",
+    "expectedDecision": "uncertain",
+    "rationale": "A valid passive statement with no local correction required.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-007",
+    "text": "The sample was stored.",
+    "expectedDecision": "uncertain",
+    "rationale": "A concise technical passive that may be appropriate.",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-008",
+    "text": "The door was open.",
+    "expectedDecision": "uncertain",
+    "rationale": "A short complete description with insufficient context for semantic routing.",
+    "goals": {
+      "audience": "general",
+      "intent": "describe",
+      "tone": "neutral"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-009",
+    "text": "The report was clear.",
+    "expectedDecision": "uncertain",
+    "rationale": "A short evaluative statement that depends on surrounding text.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-010",
+    "text": "The draft was approved.",
+    "expectedDecision": "uncertain",
+    "rationale": "A valid workflow status statement.",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-011",
+    "text": "Good. Keep going.",
+    "expectedDecision": "uncertain",
+    "rationale": "Intentional conversational fragments.",
+    "goals": {
+      "audience": "casual",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  },
+  {
+    "id": "triage-expanded-uncertain-012",
+    "text": "Not yet. Soon.",
+    "expectedDecision": "uncertain",
+    "rationale": "Intentional short dialogue rather than an error.",
+    "goals": {
+      "audience": "casual",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "expectedCategories": [
+      "structure"
+    ]
+  }
 ]

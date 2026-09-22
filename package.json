@@ -16,6 +16,7 @@
     "test:extension": "node --test tests/extension.test.mjs",
     "extension:build": "node scripts/build-extension.mjs",
     "benchmark": "node --experimental-strip-types scripts/benchmark.mjs",
+    "benchmark:triage": "node --experimental-strip-types scripts/benchmark-triage.mjs",
     "evaluate": "node --experimental-strip-types scripts/evaluate-rules.mjs",
     "evaluate:triage": "npm run evaluate:triage:offline",
     "evaluate:triage:offline": "node --experimental-strip-types scripts/evaluate-triage-offline.mjs",

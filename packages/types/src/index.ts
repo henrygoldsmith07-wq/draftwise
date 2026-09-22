@@ -98,6 +98,15 @@ export interface AnalysisDiagnostics {
   processingMs: number;
   issueCount: number;
   engine: AnalysisEngine;
+  /** Development-only provider/classifier counters. Never persisted or sent as telemetry. */
+  providerRequests?: number;
+  providerHttpRequests?: number;
+  estimatedProviderInputTokens?: number;
+  estimatedProviderOutputTokens?: number;
+  classifierRetries?: number;
+  providerRetries?: number;
+  classifierRetryDelayMs?: number;
+  providerRetryDelayMs?: number;
 }
 
 export interface TriageCoverage {
@@ -108,9 +117,41 @@ export interface TriageCoverage {
 
 export interface AiCoverage {
   requestedChunks: number;
+  attemptedChunks: number;
   successfulChunks: number;
   failedChunks: number;
   skippedChunks: number;
+}
+
+export function isAiCoverageConsistent(coverage: AiCoverage | undefined) {
+  if (!coverage) return true;
+  const values = [coverage.requestedChunks, coverage.attemptedChunks, coverage.successfulChunks, coverage.failedChunks, coverage.skippedChunks];
+  if (values.some((value) => !Number.isInteger(value) || value < 0)) return false;
+  return coverage.requestedChunks === coverage.attemptedChunks + coverage.skippedChunks
+    && coverage.attemptedChunks === coverage.successfulChunks + coverage.failedChunks;
+}
+
+export type AiReviewPhase = "local" | "analysing" | "ready" | "error";
+
+export function getAiReviewStatus(
+  coverage: AiCoverage | undefined,
+  aiEnabled: boolean,
+  providerConfigured: boolean,
+  phase: AiReviewPhase,
+) {
+  if (!aiEnabled || !providerConfigured || !coverage || coverage.requestedChunks === 0) return "Local analysis only";
+  if (phase === "error") return "AI review encountered errors";
+  if (coverage.failedChunks > 0 && coverage.successfulChunks === 0) {
+    return `AI review encountered errors - ${coverage.failedChunks} section${coverage.failedChunks === 1 ? "" : "s"} failed`;
+  }
+  if (coverage.failedChunks > 0) {
+    return `AI review partially complete - ${coverage.successfulChunks}/${coverage.requestedChunks} sections reviewed`;
+  }
+  if (coverage.skippedChunks > 0) {
+    return `AI review limited - ${coverage.skippedChunks} section${coverage.skippedChunks === 1 ? "" : "s"} skipped`;
+  }
+  if (coverage.successfulChunks === coverage.requestedChunks) return "AI review complete";
+  return `AI review partially complete - ${coverage.successfulChunks}/${coverage.requestedChunks} sections reviewed`;
 }
 
 export interface AnalysisResult {
@@ -254,6 +295,7 @@ export interface ClassifierChunkDecision {
 export interface TriageMetrics {
   candidateChunks: number;
   classifierRequests: number;
+  classifierHttpRequests: number;
   classifiedChunks: number;
   locallySufficientChunks: number;
   aiNeededChunks: number;
@@ -261,8 +303,16 @@ export interface TriageMetrics {
   classifierFailures: number;
   omittedClassifierResults: number;
   providerRequests: number;
+  providerHttpRequests: number;
   providerChunks: number;
   avoidedProviderChunks: number;
+  confidentLocalRate: number;
+  confidentAiRate: number;
+  uncertainRate: number;
+  fallbackRate: number;
+  actualProviderAvoidanceRate: number;
+  classifierRetries: number;
+  classifierRetryDelayMs: number;
 }
 
 export interface DraftwiseWorkspace {

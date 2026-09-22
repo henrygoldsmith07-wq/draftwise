@@ -86,6 +86,10 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(content, /textContent/iu);
   assert.match(content, /analyzeLocallyIncremental/iu);
   assert.match(content, /__draftwiseAiIssues/iu);
+  assert.match(content, /__draftwiseAiCoverage/iu);
+  assert.match(content, /Partial AI/iu);
+  assert.match(content, /AI unavailable/iu);
+  assert.match(content, /Checking AI\.\.\./iu);
   assert.match(content, /filter\(\(issue\) => issue && issue\.source === "ai"\)/iu);
   assert.doesNotMatch(content, /__draftwiseLocalResult\s*=\s*\{\s*\.\.\.local,\s*issues:\s*response\.issues/iu);
   const background = await readFile(file("extension/background.js"), "utf8");
@@ -93,6 +97,7 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(background, /shared-provider/iu);
   assert.match(background, /registerContentScripts/iu);
   assert.match(background, /providerPattern/iu);
+  assert.match(background, /aiCoverage/iu);
   assert.match(background, /clear-ai-cache/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");

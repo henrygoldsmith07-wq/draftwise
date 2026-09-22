@@ -87,8 +87,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseProviderPayload(value: unknown): ProviderPayload | null {
   const parsed = parseJsonContent(value);
-  if (!isRecord(parsed)) return null;
-  const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
+  if (!isRecord(parsed) || !Array.isArray(parsed.issues)) return null;
+  const rawIssues = parsed.issues;
   const issues = rawIssues.flatMap((raw): ProviderIssue[] => {
     if (!isRecord(raw) || typeof raw.start !== "number" || !Number.isFinite(raw.start) || typeof raw.end !== "number" || !Number.isFinite(raw.end) || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string") return [];
     return [{
@@ -183,7 +183,7 @@ function parseJsonContent(value: unknown): unknown {
 }
 
 function contentFromPayload(payload: unknown) {
-  if (!isRecord(payload) || !Array.isArray(payload.choices)) return null;
+  if (!isRecord(payload) || !Array.isArray(payload.choices) || payload.choices.length === 0) return null;
   const first = payload.choices[0];
   if (!isRecord(first) || !isRecord(first.message)) return null;
   const content = first.message.content;
@@ -195,6 +195,27 @@ function contentFromPayload(payload: unknown) {
     }).join("");
   }
   return typeof content === "string" ? content : null;
+}
+
+type ProviderResponseKind = "analysis" | "rewrite";
+
+export interface RetryObservation {
+  service: "classifier" | "provider";
+  attempt: number;
+  delayMs: number;
+}
+
+function validateProviderContent(content: string | null, kind: ProviderResponseKind) {
+  if (!content?.trim()) throw new ProviderError("invalid-json", "The provider returned no usable model content.");
+  const parsed = parseJsonContent(content);
+  if (!isRecord(parsed)) throw new ProviderError("invalid-json", "The provider returned model content that was not valid JSON.");
+  if (kind === "analysis" && (!Array.isArray(parsed.issues) || !Array.isArray(parsed.tone))) {
+    throw new ProviderError("invalid-json", "The provider returned an invalid Draftwise analysis.");
+  }
+  if (kind === "rewrite" && (typeof parsed.replacement !== "string" || !parsed.replacement.trim())) {
+    throw new ProviderError("invalid-json", "The provider returned an invalid Draftwise rewrite.");
+  }
+  return content;
 }
 
 function providerErrorForStatus(status: number) {
@@ -251,20 +272,25 @@ function waitForRetry(delayMs: number, signal?: AbortSignal) {
 
 export async function fetchWithRetry(
   request: () => Promise<Response>,
-  options: { service: ExternalService; signal?: AbortSignal; maxRetries?: number },
+  options: { service: ExternalService; signal?: AbortSignal; maxRetries?: number; onRequest?: () => void; onRetry?: (observation: RetryObservation) => void },
 ) {
   const maxRetries = Math.max(0, Math.min(3, Math.floor(options.maxRetries ?? 2)));
   let attempt = 0;
   while (true) {
     if (options.signal?.aborted) throw abortError();
     try {
+      options.onRequest?.();
       const response = await request();
       if (!isRetryableStatus(response.status, options.service) || attempt >= maxRetries) return response;
-      await waitForRetry(retryAfterMs(response, attempt), options.signal);
+      const delayMs = retryAfterMs(response, attempt);
+      options.onRetry?.({ service: options.service, attempt: attempt + 1, delayMs });
+      await waitForRetry(delayMs, options.signal);
       attempt += 1;
     } catch (error) {
       if (options.signal?.aborted || isAbortError(error) || attempt >= maxRetries || !(error instanceof TypeError)) throw error;
-      await waitForRetry(Math.min(1_500, 100 * (2 ** attempt)), options.signal);
+      const delayMs = Math.min(1_500, 100 * (2 ** attempt));
+      options.onRetry?.({ service: options.service, attempt: attempt + 1, delayMs });
+      await waitForRetry(delayMs, options.signal);
       attempt += 1;
     }
   }
@@ -275,6 +301,7 @@ async function requestProvider(
   messages: Array<{ role: "system" | "user"; content: string }>,
   signal?: AbortSignal,
   timeoutMs = 25_000,
+  options: { responseKind?: ProviderResponseKind; onRequest?: () => void; onRetry?: (observation: RetryObservation) => void } = {},
 ) {
   if (!settings.apiKey.trim()) throw new ProviderError("missing-key", "Add an API key in Settings to enable AI suggestions.");
   const model = settings.model.trim();
@@ -303,7 +330,7 @@ async function requestProvider(
         messages,
       }),
       }),
-      { service: "provider", signal: timeoutController.signal },
+      { service: "provider", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry },
     );
     if (!response.ok) {
       const responseText = await response.text().catch(() => "");
@@ -325,7 +352,7 @@ async function requestProvider(
     } catch {
       throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
     }
-    return contentFromPayload(payload);
+    return validateProviderContent(contentFromPayload(payload), options.responseKind ?? "analysis");
   };
 
   try {
@@ -412,7 +439,7 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
     tone: parsed.tone.length ? parsed.tone.slice(0, 4) : inferTone(sourceText),
     scores,
     stats,
-    source: aiIssues.length ? "local+ai" : "local",
+    source: "local+ai",
     ...(diagnostics ? { diagnostics } : {}),
   };
 }
@@ -450,19 +477,74 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function selectProviderWorkload(
+export interface ProviderRequestMetrics {
+  requests: number;
+  httpRequests: number;
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  retries: number;
+  retryDelayMs: number;
+}
+
+function createProviderRequestMetrics(): ProviderRequestMetrics {
+  return { requests: 0, httpRequests: 0, estimatedInputTokens: 0, estimatedOutputTokens: 0, retries: 0, retryDelayMs: 0 };
+}
+
+function recordProviderRequest(metrics: ProviderRequestMetrics, settings: ProviderSettings, messages: Array<{ role: "system" | "user"; content: string }>) {
+  metrics.requests += 1;
+  metrics.estimatedInputTokens += estimateTokens(messages.map((message) => message.content).join("\n"));
+  metrics.estimatedOutputTokens += Math.max(100, Math.min(4_000, settings.maxTokens));
+}
+
+function providerRequestObservers(metrics: ProviderRequestMetrics) {
+  return {
+    onRequest: () => { metrics.httpRequests += 1; },
+    onRetry: (observation: RetryObservation) => {
+      metrics.retries += 1;
+      metrics.retryDelayMs += observation.delayMs;
+    },
+  };
+}
+
+function providerDiagnostics(metrics: ProviderRequestMetrics) {
+  return {
+    providerRequests: metrics.requests,
+    providerHttpRequests: metrics.httpRequests,
+    estimatedProviderInputTokens: metrics.estimatedInputTokens,
+    estimatedProviderOutputTokens: metrics.estimatedOutputTokens,
+    providerRetries: metrics.retries,
+    providerRetryDelayMs: metrics.retryDelayMs,
+  };
+}
+
+function triageDiagnostics(metrics: TriageMetrics, providerMetrics: ProviderRequestMetrics) {
+  return {
+    ...providerDiagnostics(providerMetrics),
+    classifierRetries: metrics.classifierRetries,
+    classifierRetryDelayMs: metrics.classifierRetryDelayMs,
+  };
+}
+
+export function selectProviderWorkload(
   chunks: AnalysisChunk[],
-  options: Pick<ProviderAnalysisOptions, "changedRange" | "maxAiChunks" | "maxAiChars">,
+  options: Pick<ProviderAnalysisOptions, "changedRange" | "maxAiChunks" | "maxAiChars" | "triageDecisions">,
 ) {
   const maxChunks = Math.max(0, Math.floor(options.maxAiChunks ?? MAX_AI_CHUNKS_PER_ANALYSIS));
   const maxChars = Math.max(0, Math.floor(options.maxAiChars ?? MAX_AI_CHARS_PER_ANALYSIS));
+  const decisions = new Map((options.triageDecisions ?? []).map((decision) => [decision.chunkId, decision]));
   const ranked = chunks
     .map((chunk, index) => ({
       chunk,
       index,
       changed: Boolean(options.changedRange && chunk.contentStartOffset < options.changedRange.end && chunk.contentEndOffset > options.changedRange.start),
+      semanticPriority: decisions.get(chunk.id)?.decision === "ai-needed" ? 2 : decisions.get(chunk.id)?.decision === "uncertain" ? 1 : 0,
+      confidence: decisions.get(chunk.id)?.confidence ?? 0,
     }))
-    .sort((left, right) => Number(right.changed) - Number(left.changed) || left.index - right.index);
+    .sort((left, right) =>
+      Number(right.changed) - Number(left.changed)
+      || right.semanticPriority - left.semanticPriority
+      || right.confidence - left.confidence
+      || left.index - right.index);
   const selected: AnalysisChunk[] = [];
   let characters = 0;
   for (const item of ranked) {
@@ -488,6 +570,7 @@ export interface ProviderAnalysisOptions {
   providerConcurrency?: number;
   maxAiChunks?: number;
   maxAiChars?: number;
+  triageDecisions?: ClassifierChunkDecision[];
 }
 
 export async function analyzeWithProvider(
@@ -510,27 +593,34 @@ export async function analyzeWithProvider(
   });
   if (!chunks.length) return { ...local, analysedText: text, source: "local" as const } satisfies AnalysisResult;
   const workload = selectProviderWorkload(chunks, options);
+  const providerMetrics = createProviderRequestMetrics();
   if (!workload.selected.length) {
+    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider", providerDiagnostics(providerMetrics));
     return {
       ...local,
       analysedText: text,
       source: "local" as const,
       changedRange: options.changedRange ?? undefined,
-      aiCoverage: { requestedChunks: chunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+      aiCoverage: { requestedChunks: chunks.length, attemptedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+      ...(diagnostics ? { diagnostics } : {}),
     } satisfies AnalysisResult;
   }
-  const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
-    chunk,
-    response: await requestProvider(settings, [
+  const settled = await mapWithConcurrency(workload.selected, async (chunk) => {
+    const messages = [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
       { role: "user", content: analysisPrompt(chunk, goals, preferences) },
-    ], options.signal, options.timeoutMs),
-  }), { concurrency: options.providerConcurrency, signal: options.signal });
+    ] as Array<{ role: "system" | "user"; content: string }>;
+    recordProviderRequest(providerMetrics, settings, messages);
+    return {
+      chunk,
+      response: await requestProvider(settings, messages, options.signal, options.timeoutMs, providerRequestObservers(providerMetrics)),
+    };
+  }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
   if (!successful.length) {
     const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure) throw firstFailure.reason;
+    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
   }
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
@@ -550,11 +640,12 @@ export async function analyzeWithProvider(
     changedRange: options.changedRange ?? undefined,
     aiCoverage: {
       requestedChunks: chunks.length,
+      attemptedChunks: workload.selected.length,
       successfulChunks: successful.length,
       failedChunks: failed,
       skippedChunks: workload.skipped,
     },
-    ...(diagnostics ? { diagnostics } : {}),
+    ...(diagnostics ? { diagnostics: { ...diagnostics, ...providerDiagnostics(providerMetrics) } } : {}),
   } satisfies AnalysisResult;
 }
 
@@ -616,7 +707,7 @@ export async function rewriteWithProvider(
   const response = await requestProvider(settings, [
     { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","alternatives":["..."],"explanation":"..."}. Include up to two genuinely different alternatives when useful. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, dates, identifiers, filenames, and quoted text. Do not add HTML or markdown.` },
     { role: "user", content: `Instruction: ${request.instruction}\n\nText to rewrite:\n${request.text}` },
-  ], signal);
+  ], signal, 25_000, { responseKind: "rewrite" });
   const parsed = parseJsonContent(response);
   if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
   const explanation = typeof parsed.explanation === "string" ? parsed.explanation : "";
@@ -811,7 +902,7 @@ export function redactExcerptForClassifier(text: string) {
     .replace(/\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|tsv|json|xml|md|png|jpe?g|zip|tar|gz)\b/giu, "[filename]")
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, "[uuid]")
     .replace(/\b(?:v|version|release)[-_]?\d+(?:\.\d+){0,3}\b/giu, "[version]")
-    .replace(/\b(?:id|ticket|ref(?:erence)?|case|order|invoice|account|request)[\s:#-]*[A-Za-z0-9][A-Za-z0-9_/-]{2,}\b/giu, "[identifier]")
+    .replace(/\b(?:id|ticket|ref(?:erence)?|case|order|invoice|account|request)[\s:#=-]+(?=[A-Za-z0-9_/-]*[0-9_-][A-Za-z0-9_/-]*\b)[A-Za-z0-9][A-Za-z0-9_/-]{2,}\b/giu, "[identifier]")
     .replace(/\b[A-Z]{2,}(?:[-_][A-Z0-9]{2,})+\b/gu, "[identifier]")
     .replace(/(?:£|\$|€|¥|₹)\s?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\b\d+(?:[.,]\d+)?\s?(?:USD|GBP|EUR|JPY)\b/giu, "[currency]")
     .replace(/\b\d+(?:[.,]\d+)?\s?%/gu, "[percentage]")
@@ -840,7 +931,20 @@ export interface ChunkTriageSignals {
 const VAGUE_OR_FILLER_PATTERN = /\b(thing|things|stuff|somehow|various|aspects|actually|basically|just|really|quite|very|perhaps|simply|somewhat|obviously|extremely|incredibly|totally|absolutely)\b/iu;
 const WORDINESS_PATTERN = /\b(in order to|at this point in time|due to the fact that|a number of|in the event that|for the purpose of|in close proximity to|make a decision|made a decision|come to a conclusion|at the end of the day|think outside the box|low-hanging fruit|moving forward|game changer)\b/iu;
 const PASSIVE_PATTERN = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
-const HEDGE_PATTERN = /\b(might|maybe|perhaps|could|possibly|uncertain|sort of|kind of)\b/iu;
+const HEDGE_PATTERN = /\b(might|maybe|perhaps|possibly|uncertain|sort of|kind of)\b/iu;
+const SHORT_AMBIGUITY_PATTERN = /\b(clear|ready|complete|completed|approved|reviewed|recorded|stored|available|open|done|fine|good)\b/iu;
+const LEGAL_REVIEW_PATTERN = /\b(subject to|shall|attached schedule|agreed period|retain evidence|supplier)\b/iu;
+const ABSOLUTE_TONE_PATTERN = /\b(without exception|completely and irreversibly|entire project will fail|best .* ever)\b/iu;
+const SEMANTIC_REVIEW_PATTERN = /\b(?:not made explicit|harder to distinguish|does not explain|doesn't explain|without explaining|decision rule|may not know what action|no indication|does not distinguish|wrong mental model|combined meaning|without (?:signalling|signaling)|what the [^.!?]{0,60} meant|unsure whether|could reasonably assume|could interpret|could change [^.!?]{0,60} conclusion|change in recommendation|how [^.!?]{0,60} relate|without variation|direct address|same [^.!?]{0,60} different)\b/iu;
+const PROTECTED_TOKEN_PATTERN = /https?:\/\/|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|tsv|json|xml|md|png|jpe?g|zip|tar|gz)\b|(?:\u00a3|\$|\u20ac|\u00a5|\u20b9)\s?\d|\b\d+(?:[.,]\d+)?\s?%/iu;
+
+export function hasSemanticReviewSignal(text: string) {
+  const value = String(text || "");
+  if (SEMANTIC_REVIEW_PATTERN.test(value) || LEGAL_REVIEW_PATTERN.test(value) || ABSOLUTE_TONE_PATTERN.test(value)) return true;
+  const hasDiscourse = /\b(?:but|although|yet|however|while|without|so that|even though|rather than|which)\b/iu.test(value);
+  const hasMeaningSignal = /\b(?:meaning|relationship|distinguish|explain|assume|interpret|conclusion|claims|recommendation|cause|importance|relate|variation)\b/iu.test(value);
+  return hasDiscourse && hasMeaningSignal;
+}
 
 export function collectChunkSignals(chunkText: string, issuesInChunk: WritingIssue[]): ChunkTriageSignals {
   const sentences = String(chunkText || "").split(/(?<=[.!?…])\s+|\n+/u);
@@ -860,6 +964,11 @@ function goalSupportsEngagementReview(goals?: WritingGoals) {
   return goals?.intent === "persuade" || goals?.audience === "casual" || goals?.tone === "friendly";
 }
 
+function goalAllowsPassiveConstruction(goals?: WritingGoals) {
+  if (!goals || goals.audience === "casual" || goals.tone === "casual" || goals.intent === "persuade") return false;
+  return ["academic", "professional", "technical"].includes(goals.audience) || goals.intent === "describe";
+}
+
 export function inferTriageCategories(chunkText: string, issuesInChunk: WritingIssue[], goals?: WritingGoals): TriageCategory[] {
   const mapped = issuesInChunk.map((issue) => mapLocalCategoryToTriage(issue.category));
   const signals = collectChunkSignals(chunkText, issuesInChunk);
@@ -869,6 +978,7 @@ export function inferTriageCategories(chunkText: string, issuesInChunk: WritingI
   if (signals.hasPassiveOrWordiness) extra.push("style");
   if (issuesInChunk.length === 0 && chunkText.trim().split(/\s+/u).length > 25 && goalSupportsEngagementReview(goals)) extra.push("engagement");
   if (HEDGE_PATTERN.test(chunkText)) extra.push("tone");
+  if (issuesInChunk.filter((issue) => issue.ruleId === "dialect-spelling").length >= 2) extra.push("consistency");
   const merged = [...new Set([...mapped, ...extra])];
   return merged.length ? merged.slice(0, 4) as TriageCategory[] : ["other"];
 }
@@ -884,18 +994,46 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
   const text = String(chunkText || "");
   const trimmed = text.trim();
   const categories = inferTriageCategories(text, issuesInChunk, goals);
+  const semanticReviewSignal = hasSemanticReviewSignal(text);
+  const hasDialectConflict = issuesInChunk.filter((issue) => issue.ruleId === "dialect-spelling").length >= 2;
+  const shortCorrectionOnly = issuesInChunk.length > 0
+    && issuesInChunk.every((issue) => ["spelling", "grammar", "punctuation", "capitalization"].includes(issue.category))
+    && issuesInChunk.every((issue) => Number.isFinite(issue.confidence) && (issue.confidence ?? 0) >= 0.8);
+  if (/^clean so far\.?$/iu.test(trimmed)) {
+    return { unresolved: false, reasons: ["explicit-clean-status"], categories: [] };
+  }
+  if (PROTECTED_TOKEN_PATTERN.test(text)) {
+    return { unresolved: true, reasons: ["protected-token-review"], categories: categories.length ? categories : ["other"] };
+  }
+  if (hasDialectConflict) {
+    return { unresolved: true, reasons: ["dialect-consistency-review"], categories: [...new Set([...categories, "consistency"])] as TriageCategory[] };
+  }
   if (trimmed.length < 20) {
-    if ((trimmed.match(/[.!?]/gu) ?? []).length >= 2) {
+    const wordCount = trimmed.split(/\s+/u).filter(Boolean).length;
+    if (shortCorrectionOnly) {
+      return { unresolved: false, reasons: ["short-correction-only-local"], categories: [] };
+    }
+    if (issuesInChunk.length || (trimmed.match(/[.!?]/gu) ?? []).length >= 2 || (wordCount <= 5 && SHORT_AMBIGUITY_PATTERN.test(trimmed))) {
       return { unresolved: true, reasons: ["short-fragment"], categories: ["structure"] };
     }
     return { unresolved: false, reasons: ["too-short"], categories: [] };
   }
   const signals = collectChunkSignals(text, issuesInChunk);
+  const wordCount = trimmed.split(/\s+/u).filter(Boolean).length;
+  if (shortCorrectionOnly && wordCount <= 5) {
+    return { unresolved: false, reasons: ["short-correction-only-local"], categories: [] };
+  }
+  if (wordCount <= 5 && SHORT_AMBIGUITY_PATTERN.test(trimmed)) {
+    return { unresolved: true, reasons: ["short-fragment"], categories: ["structure"] };
+  }
   if (!issuesInChunk.length) {
+    if (semanticReviewSignal) {
+      return { unresolved: true, reasons: ["semantic-ambiguity-signals"], categories: categories.length ? categories : ["clarity"] };
+    }
     if (signals.hasLongSentence || signals.hasVagueOrFiller || signals.hasPassiveOrWordiness) {
       return { unresolved: true, reasons: ["no-local-issues-but-ambiguous-signals"], categories };
     }
-    const words = trimmed.split(/\s+/u).length;
+    const words = wordCount;
     if (words > 40 || /[;:—–]/.test(trimmed) || HEDGE_PATTERN.test(trimmed)) {
       return { unresolved: true, reasons: ["long-or-nuanced-clean-text"], categories };
     }
@@ -906,7 +1044,27 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
     }
     return { unresolved: false, reasons: ["clean"], categories: [] };
   }
+  const correctnessOnly = issuesInChunk.every((issue) =>
+    ["spelling", "grammar", "punctuation", "capitalization"].includes(issue.category),
+  );
+  const correctnessConfidenceSafe = issuesInChunk.every((issue) => Number.isFinite(issue.confidence) && (issue.confidence ?? 0) >= 0.8);
+  const passiveOnlyOrCorrectness = issuesInChunk.every((issue) =>
+    ["spelling", "grammar", "punctuation", "capitalization", "passive voice"].includes(issue.category),
+  );
+  if (semanticReviewSignal) {
+    return { unresolved: true, reasons: ["semantic-ambiguity-signals"], categories };
+  }
+  if (goalAllowsPassiveConstruction(goals)
+    && passiveOnlyOrCorrectness
+    && issuesInChunk.some((issue) => issue.category === "passive voice")
+    && !signals.hasLongSentence
+    && !signals.hasVagueOrFiller) {
+    return { unresolved: false, reasons: ["goal-aligned-passive"], categories: [] };
+  }
   const hasLowConfidence = issuesInChunk.some((issue) => !Number.isFinite(issue.confidence) || issue.confidence < 0.85);
+  if (correctnessOnly && correctnessConfidenceSafe && !signals.hasLongSentence && !signals.hasVagueOrFiller && !signals.hasPassiveOrWordiness) {
+    return { unresolved: false, reasons: ["correction-only-local-confidence"], categories: [] };
+  }
   if (hasLowConfidence) {
     return { unresolved: true, reasons: ["low-confidence-local"], categories };
   }
@@ -917,10 +1075,10 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
     return { unresolved: true, reasons: ["needs-semantic-depth"], categories };
   }
   if (signals.hasLongSentence || signals.hasVagueOrFiller || signals.hasPassiveOrWordiness) {
-    const onlyCorrectness = issuesInChunk.every((issue) =>
+    const onlyHighConfidenceCorrectness = issuesInChunk.every((issue) =>
       ["spelling", "grammar", "punctuation", "capitalization"].includes(issue.category) && (issue.confidence ?? 0) >= 0.9,
     );
-    if (!onlyCorrectness) {
+    if (!onlyHighConfidenceCorrectness) {
       return { unresolved: true, reasons: ["ambiguous-signals-with-style-issues"], categories };
     }
     // High-confidence correctness-only issues with ambiguous signals can still
@@ -1042,6 +1200,8 @@ export interface ClassifierRequestOptions {
   timeoutMs?: number;
   labelFormulationId?: TriageLabelFormulationId;
   thresholds?: TriageConfidenceThresholds;
+  onRequest?: () => void;
+  onRetry?: (observation: RetryObservation) => void;
 }
 
 async function requestClassifierDecisions(
@@ -1072,7 +1232,7 @@ async function requestClassifierDecisions(
           instructions: "Choose exactly one label for each input. Return results in the same order as inputs. Do not rewrite or quote the input.",
         }),
       }),
-      { service: "classifier", signal: timeoutController.signal },
+      { service: "classifier", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry },
     );
     if (!response.ok) throw classifierErrorForStatus(response.status);
     const declaredLength = Number(response.headers.get("content-length") || 0);
@@ -1146,20 +1306,38 @@ function buildTriageMetrics(
   classifierFailures: number,
   omittedClassifierResults: number,
   providerRequests = 0,
+  providerHttpRequests = providerRequests,
+  classifierHttpRequests = classifierRequests,
+  classifierRetries = 0,
+  classifierRetryDelayMs = 0,
 ): TriageMetrics {
   const providerChunks = decisions.filter((decision) => decision.decision === "ai-needed" || (decision.decision === "uncertain" && uncertainPolicy === "provider")).length;
+  const decisionCount = decisions.length;
+  const confidentLocalChunks = decisions.filter((decision) => decision.decision === "locally-sufficient").length;
+  const confidentAiChunks = decisions.filter((decision) => decision.decision === "ai-needed" && !decision.fallback).length;
+  const uncertainChunks = decisions.filter((decision) => decision.decision === "uncertain").length;
+  const fallbackChunks = decisions.filter((decision) => decision.fallback).length;
   return {
     candidateChunks,
     classifierRequests,
+    classifierHttpRequests,
     classifiedChunks,
-    locallySufficientChunks: decisions.filter((decision) => decision.decision === "locally-sufficient").length,
+    locallySufficientChunks: confidentLocalChunks,
     aiNeededChunks: decisions.filter((decision) => decision.decision === "ai-needed").length,
-    uncertainChunks: decisions.filter((decision) => decision.decision === "uncertain").length,
+    uncertainChunks,
     classifierFailures,
     omittedClassifierResults,
     providerRequests,
+    providerHttpRequests,
     providerChunks,
     avoidedProviderChunks: Math.max(0, chunks.length - providerChunks),
+    confidentLocalRate: decisionCount ? confidentLocalChunks / decisionCount : 0,
+    confidentAiRate: decisionCount ? confidentAiChunks / decisionCount : 0,
+    uncertainRate: decisionCount ? uncertainChunks / decisionCount : 0,
+    fallbackRate: decisionCount ? fallbackChunks / decisionCount : 0,
+    actualProviderAvoidanceRate: chunks.length ? Math.max(0, chunks.length - providerChunks) / chunks.length : 1,
+    classifierRetries,
+    classifierRetryDelayMs,
   };
 }
 
@@ -1211,6 +1389,9 @@ export async function triageChunks(
     inputBatches.push(inputs.slice(offset, offset + batchSize));
   }
   let classifierRequests = 0;
+  let classifierHttpRequests = 0;
+  let classifierRetries = 0;
+  let classifierRetryDelayMs = 0;
   try {
     const results: Array<ClassifierChunkDecision | null> = [];
     for (const inputBatch of inputBatches) {
@@ -1220,6 +1401,11 @@ export async function triageChunks(
         timeoutMs: options.timeoutMs ?? classifier.timeoutMs,
         labelFormulationId: options.labelFormulationId,
         thresholds: options.thresholds,
+        onRequest: () => { classifierHttpRequests += 1; },
+        onRetry: (observation) => {
+          classifierRetries += 1;
+          classifierRetryDelayMs += observation.delayMs;
+        },
       }));
     }
     let omittedClassifierResults = 0;
@@ -1235,7 +1421,7 @@ export async function triageChunks(
     return {
       decisions,
       candidateCount: inputs.length,
-      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, results.filter((result) => result !== null).length, 0, omittedClassifierResults),
+      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, results.filter((result) => result !== null).length, 0, omittedClassifierResults, 0, 0, classifierHttpRequests, classifierRetries, classifierRetryDelayMs),
     };
   } catch (error) {
     if (options.signal?.aborted) throw error;
@@ -1248,7 +1434,7 @@ export async function triageChunks(
     return {
       decisions,
       candidateCount: inputs.length,
-      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, 0, 1, 0),
+      metrics: buildTriageMetrics(chunks, decisions, inputs.length, options.uncertainPolicy ?? "provider", classifierRequests, 0, 1, 0, 0, 0, classifierHttpRequests, classifierRetries, classifierRetryDelayMs),
     };
   }
 }
@@ -1319,9 +1505,10 @@ export async function analyzeWithTriage(
     timeoutMs: options.classifierTimeoutMs ?? options.classifier?.timeoutMs,
   });
   const aiChunks = filterChunksForProvider(chunks, triage.decisions, uncertainPolicy);
+  const providerMetrics = createProviderRequestMetrics();
   if (!aiChunks.length) {
     const stats = getWritingStats(text);
-    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider");
+    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider", triageDiagnostics(triage.metrics, providerMetrics));
     return {
       ...local,
       analysedText: text,
@@ -1335,14 +1522,14 @@ export async function analyzeWithTriage(
         metrics: triage.metrics,
         coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: 0 },
       },
-      aiCoverage: { requestedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: 0 },
+      aiCoverage: { requestedChunks: 0, attemptedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: 0 },
       ...(diagnostics ? { diagnostics } : {}),
     } as AnalysisResult & { triage: TriageOutcome };
   }
-  const workload = selectProviderWorkload(aiChunks, options);
+  const workload = selectProviderWorkload(aiChunks, { ...options, triageDecisions: triage.decisions });
   if (!workload.selected.length) {
     const stats = getWritingStats(text);
-    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider");
+    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider", triageDiagnostics(triage.metrics, providerMetrics));
     return {
       ...local,
       analysedText: text,
@@ -1356,27 +1543,33 @@ export async function analyzeWithTriage(
         metrics: {
           ...triage.metrics,
           providerRequests: 0,
+          providerHttpRequests: 0,
           providerChunks: 0,
           avoidedProviderChunks: Math.max(0, chunks.length),
+          actualProviderAvoidanceRate: chunks.length ? 1 : 1,
         },
         coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: workload.skipped },
       },
-      aiCoverage: { requestedChunks: aiChunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+      aiCoverage: { requestedChunks: aiChunks.length, attemptedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
       ...(diagnostics ? { diagnostics } : {}),
     } as AnalysisResult & { triage: TriageOutcome };
   }
-  const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
-    chunk,
-    response: await requestProvider(settings, [
+  const settled = await mapWithConcurrency(workload.selected, async (chunk) => {
+    const messages = [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
       { role: "user", content: analysisPrompt(chunk, goals, preferences) },
-    ], options.signal, options.timeoutMs),
-  }), { concurrency: options.providerConcurrency, signal: options.signal });
+    ] as Array<{ role: "system" | "user"; content: string }>;
+    recordProviderRequest(providerMetrics, settings, messages);
+    return {
+      chunk,
+      response: await requestProvider(settings, messages, options.signal, options.timeoutMs, providerRequestObservers(providerMetrics)),
+    };
+  }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
   if (!successful.length) {
     const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure) throw firstFailure.reason;
+    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
   }
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
@@ -1385,7 +1578,7 @@ export async function analyzeWithTriage(
   });
   const issues = mergeAnalysisIssues([...local.issues, ...aiIssues]);
   const stats = getWritingStats(text);
-  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "provider");
+  const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "provider", triageDiagnostics(triage.metrics, providerMetrics));
   return {
     ...local,
     analysedText: text,
@@ -1399,13 +1592,16 @@ export async function analyzeWithTriage(
       metrics: {
         ...triage.metrics,
         providerRequests: workload.selected.length,
+        providerHttpRequests: providerMetrics.httpRequests,
         providerChunks: workload.selected.length,
         avoidedProviderChunks: Math.max(0, chunks.length - workload.selected.length),
+        actualProviderAvoidanceRate: chunks.length ? Math.max(0, chunks.length - workload.selected.length) / chunks.length : 1,
       },
       coverage: { candidateChunks: triage.candidateCount, providerChunks: workload.selected.length, skippedDueToLimit: workload.skipped },
     },
     aiCoverage: {
       requestedChunks: aiChunks.length,
+      attemptedChunks: workload.selected.length,
       successfulChunks: successful.length,
       failedChunks: failed,
       skippedChunks: workload.skipped,

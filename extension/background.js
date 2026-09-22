@@ -223,7 +223,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       const cached = analysisCache.get(cacheKey);
       if (cached) {
-        if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: cached.issues, triage: cached.triage });
+        if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: cached.issues, triage: cached.triage, aiCoverage: cached.aiCoverage || null });
         return;
       }
       const triageFn = globalThis.DraftwiseProvider.analyzeWithTriage || globalThis.DraftwiseProvider.analyzeWithProvider;
@@ -234,9 +234,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: classifier?.uncertainPolicy === "local" ? "local" : "provider", labelFormulationId: "semantic-v2", classifierBatchSize: 100, providerConcurrency: 3, maxAiChunks: 10, maxAiChars: 50000 },
       );
       if (!controller.signal.aborted) {
-        analysisCache.set(cacheKey, { issues: result.issues, triage: result.triage || null });
+        analysisCache.set(cacheKey, { issues: result.issues, triage: result.triage || null, aiCoverage: result.aiCoverage || null });
         while (analysisCache.size > ANALYSIS_CACHE_LIMIT) analysisCache.delete(analysisCache.keys().next().value);
-        sendResponse({ requestId: message.requestId, issues: result.issues, triage: result.triage || null });
+        sendResponse({ requestId: message.requestId, issues: result.issues, triage: result.triage || null, aiCoverage: result.aiCoverage || null });
       }
     } catch (error) {
       if (!controller.signal.aborted) sendResponse({ requestId: message.requestId, issues: null, error: error instanceof Error ? error.message : "AI analysis failed." });

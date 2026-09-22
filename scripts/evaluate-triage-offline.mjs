@@ -18,6 +18,7 @@ const classifier = {
 const metricFields = [
   "candidateChunks",
   "classifierRequests",
+  "classifierHttpRequests",
   "classifiedChunks",
   "locallySufficientChunks",
   "aiNeededChunks",
@@ -25,8 +26,11 @@ const metricFields = [
   "classifierFailures",
   "omittedClassifierResults",
   "providerRequests",
+  "providerHttpRequests",
   "providerChunks",
   "avoidedProviderChunks",
+  "classifierRetries",
+  "classifierRetryDelayMs",
 ];
 const totals = Object.fromEntries(metricFields.map((field) => [field, 0]));
 const requestLog = [];
@@ -57,7 +61,10 @@ function predictedDecision(decisions) {
 
 function deterministicLabel(excerpt, labels = CLASSIFIER_TRIAGE_LABELS) {
   const lower = excerpt.toLocaleLowerCase();
-  const borderline = excerpt.length < 80 && /(really clear|make a decision|was reviewed|ready(?: for review)?|ready\.|set\.|go\.)/u.test(lower);
+  const short = lower.trim().split(/\s+/u).filter(Boolean).length <= 5;
+  const protectedTokens = /\[(?:url|email|filename|identifier|token|secret|model|uuid|phone)\]/u.test(lower);
+  const legalStyle = /\b(subject to|shall|attached schedule|agreed period|retain evidence|supplier)\b/u.test(lower);
+  const borderline = short || protectedTokens || legalStyle || (excerpt.length < 80 && /(really clear|make a decision|was reviewed|ready(?: for review)?|ready\.|set\.|go\.)/u.test(lower));
   const semanticSignals = /(thing|stuff|various|somehow|in order to|at the end of the day|game changer|leverage synergies|without a verb|nested|might|possibly|perhaps|extremely|passive)/u.test(lower);
   if (borderline) return { label: labels[0], confidence: 0.55 };
   return { label: labels[1], confidence: semanticSignals ? 0.88 : 0.82 };
@@ -108,6 +115,7 @@ for (const entry of corpus) {
     correct: predicted === entry.expectedDecision,
     expectedCategories: entry.expectedCategories,
     predictedCategories: [...new Set(outcome.decisions.flatMap((decision) => decision.categories))],
+    fallbackChunks: outcome.decisions.filter((decision) => decision.fallback).length,
     triggerReasons: [...new Set(assessments.flatMap((assessment) => assessment.assessment.reasons))],
     latencyMs: Number(latencyMs.toFixed(2)),
   });
@@ -210,10 +218,20 @@ const redactionProbes = [
   "token \"sk-test-123456789\"",
 ];
 const redactionPassed = redactionProbes.every((probe) => !redactExcerptForClassifier(probe).includes(probe));
+const decisionCount = totals.locallySufficientChunks + totals.aiNeededChunks + totals.uncertainChunks;
+const confidentAiChunks = totals.aiNeededChunks;
+const fallbackChunks = details.reduce((sum, item) => sum + item.fallbackChunks, 0);
 const report = {
   mode: "offline",
   corpusSize: corpus.length,
   metrics: totals,
+  metricRates: {
+    confidentLocalRate: Number((decisionCount ? totals.locallySufficientChunks / decisionCount : 0).toFixed(3)),
+    confidentAiRate: Number((decisionCount ? confidentAiChunks / decisionCount : 0).toFixed(3)),
+    uncertainRate: Number((decisionCount ? totals.uncertainChunks / decisionCount : 0).toFixed(3)),
+    fallbackRate: Number((decisionCount ? fallbackChunks / decisionCount : 0).toFixed(3)),
+    actualProviderAvoidanceRate: Number((totals.providerChunks + totals.avoidedProviderChunks ? totals.avoidedProviderChunks / (totals.providerChunks + totals.avoidedProviderChunks) : 1).toFixed(3)),
+  },
   classification: {
     accuracy: Number(accuracy.toFixed(3)),
     aiPrecision: Number(aiPrecision.toFixed(3)),

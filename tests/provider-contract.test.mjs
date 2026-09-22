@@ -12,6 +12,7 @@ import {
   validateProviderUrl,
 } from "../packages/ai/src/index.ts";
 import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
+import { isAiCoverageConsistent } from "../packages/types/src/index.ts";
 
 const settings = {
   provider: "openai-compatible",
@@ -99,6 +100,7 @@ test("long-document provider calls keep the full analysed text", async () => {
 test("partial chunk failures preserve the original chunk pairing", async () => {
   for (const mode of ["middle", "first", "final", "multiple"]) {
     const { result, calls } = await runChunkFailureCase(mode);
+    assert.ok(isAiCoverageConsistent(result.aiCoverage));
     const successfulMarkers = calls.filter((call) => !call.failed && call.marker).map((call) => call.marker);
     for (const marker of successfulMarkers) assert.ok(result.issues.some((issue) => issue.source === "ai" && issue.original === marker), `${mode} lost ${marker}`);
   }
@@ -114,6 +116,32 @@ test("malformed content arrays and huge responses stay safe while local analysis
   try {
     const result = await analyzeWithProvider("This is repeatd.", goals, settings);
     assert.ok(result.issues.some((issue) => issue.source === "local" && issue.original === "repeatd"));
+    assert.equal(result.aiCoverage?.failedChunks, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("HTTP 200 response semantics distinguish missing content from valid zero-issue analysis", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: {} }] }), { status: 200 });
+  try {
+    const failed = await analyzeWithProvider("This is repeatd.", goals, settings);
+    assert.equal(failed.source, "local");
+    assert.deepEqual(failed.aiCoverage, { requestedChunks: 1, attemptedChunks: 1, successfulChunks: 0, failedChunks: 1, skippedChunks: 0 });
+    assert.ok(isAiCoverageConsistent(failed.aiCoverage));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
+  try {
+    const successful = await analyzeWithProvider("This is repeatd.", goals, settings);
+    assert.equal(successful.source, "local+ai");
+    assert.deepEqual(successful.aiCoverage, { requestedChunks: 1, attemptedChunks: 1, successfulChunks: 1, failedChunks: 0, skippedChunks: 0 });
+    assert.equal(successful.diagnostics?.providerRequests, 1);
+    assert.equal(successful.diagnostics?.providerHttpRequests, 1);
+    assert.ok(isAiCoverageConsistent(successful.aiCoverage));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -205,12 +233,17 @@ test("provider workload limits expose skipped AI coverage", async () => {
 
 test("transient external failures retry with bounded attempts while client errors do not", async () => {
   let calls = 0;
+  let requests = 0;
+  const retries = [];
   const recovered = await fetchWithRetry(async () => {
     calls += 1;
     return calls === 1 ? new Response("busy", { status: 503, headers: { "retry-after": "0" } }) : new Response("ok", { status: 200 });
-  }, { service: "provider", maxRetries: 2 });
+  }, { service: "provider", maxRetries: 2, onRequest: () => { requests += 1; }, onRetry: (observation) => retries.push(observation) });
   assert.equal(recovered.status, 200);
   assert.equal(calls, 2);
+  assert.equal(requests, 2);
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].service, "provider");
   calls = 0;
   const rejected = await fetchWithRetry(async () => {
     calls += 1;

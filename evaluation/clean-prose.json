@@ -1,0 +1,752 @@
+[
+  {
+    "id": "academic-001",
+    "style": "academic",
+    "text": "The study compares reported outcomes across three regions and records the limits of each sample."
+  },
+  {
+    "id": "academic-002",
+    "style": "academic",
+    "text": "Researchers measure the response before they compare the result with the documented baseline."
+  },
+  {
+    "id": "academic-003",
+    "style": "academic",
+    "text": "The paper explains the method, the evidence, and the reason for each choice."
+  },
+  {
+    "id": "academic-004",
+    "style": "academic",
+    "text": "The analysis uses the same question set across every group in the sample."
+  },
+  {
+    "id": "academic-005",
+    "style": "academic",
+    "text": "The authors describe the result with a clear account of its scope and limits."
+  },
+  {
+    "id": "academic-006",
+    "style": "academic",
+    "text": "The survey records age, region, and prior experience for every participant."
+  },
+  {
+    "id": "academic-007",
+    "style": "academic",
+    "text": "The discussion connects the reported finding with the evidence from the wider study."
+  },
+  {
+    "id": "academic-008",
+    "style": "academic",
+    "text": "The model estimates the change after the team adjusts for the documented factors."
+  },
+  {
+    "id": "academic-009",
+    "style": "academic",
+    "text": "The paper separates the main result from the supporting observation."
+  },
+  {
+    "id": "academic-010",
+    "style": "academic",
+    "text": "The researchers compare two measures and report the difference with the same unit."
+  },
+  {
+    "id": "academic-011",
+    "style": "academic",
+    "text": "The introduction defines the question before it presents the method."
+  },
+  {
+    "id": "academic-012",
+    "style": "academic",
+    "text": "The authors use a consistent term for the result throughout the paper."
+  },
+  {
+    "id": "academic-013",
+    "style": "academic",
+    "text": "The sample includes participants from four regions and three age groups."
+  },
+  {
+    "id": "academic-014",
+    "style": "academic",
+    "text": "The results section reports the count, range, and median for each measure."
+  },
+  {
+    "id": "academic-015",
+    "style": "academic",
+    "text": "The study describes a careful process for recording and checking each observation."
+  },
+  {
+    "id": "academic-016",
+    "style": "academic",
+    "text": "The conclusion links the evidence to the question without extending the claim."
+  },
+  {
+    "id": "academic-017",
+    "style": "academic",
+    "text": "The table presents the result in the same order as the discussion."
+  },
+  {
+    "id": "academic-018",
+    "style": "academic",
+    "text": "The authors state the assumption before they explain the calculation."
+  },
+  {
+    "id": "academic-019",
+    "style": "academic",
+    "text": "The paper gives readers enough context to follow the comparison."
+  },
+  {
+    "id": "academic-020",
+    "style": "academic",
+    "text": "The analysis keeps the original units when it converts the measurements."
+  },
+  {
+    "id": "academic-021",
+    "style": "academic",
+    "text": "The method supports a direct comparison between the first and second sample."
+  },
+  {
+    "id": "academic-022",
+    "style": "academic",
+    "text": "The study reports both the average and the spread of the observations."
+  },
+  {
+    "id": "academic-023",
+    "style": "academic",
+    "text": "The authors identify two limits that may affect the transfer of the finding."
+  },
+  {
+    "id": "academic-024",
+    "style": "academic",
+    "text": "The appendix lists the coding choices used for the interview material."
+  },
+  {
+    "id": "academic-025",
+    "style": "academic",
+    "text": "The report distinguishes the measured result from the interpretation that follows, then explains how the evidence supports the narrower claim without adding a conclusion that the sample cannot support."
+  },
+  {
+    "id": "professional-001",
+    "style": "professional",
+    "text": "The team reviews the plan and shares the next step with the client."
+  },
+  {
+    "id": "professional-002",
+    "style": "professional",
+    "text": "The manager records the decision in the shared workspace for the whole group."
+  },
+  {
+    "id": "professional-003",
+    "style": "professional",
+    "text": "The finance team sends the revised forecast after the monthly review."
+  },
+  {
+    "id": "professional-004",
+    "style": "professional",
+    "text": "The agenda leaves time for questions before the group agrees the next step."
+  },
+  {
+    "id": "professional-005",
+    "style": "professional",
+    "text": "The support team records the incident and sends a clear update."
+  },
+  {
+    "id": "professional-006",
+    "style": "professional",
+    "text": "The project lead explains the reason for the change in a short note."
+  },
+  {
+    "id": "professional-007",
+    "style": "professional",
+    "text": "The client receives the final report after the team checks the figures."
+  },
+  {
+    "id": "professional-008",
+    "style": "professional",
+    "text": "The meeting covers the open issue, the owner, and the expected date."
+  },
+  {
+    "id": "professional-009",
+    "style": "professional",
+    "text": "The office shares a concise summary with colleagues who missed the call."
+  },
+  {
+    "id": "professional-010",
+    "style": "professional",
+    "text": "The brief sets out the decision, the risk, and the proposed action."
+  },
+  {
+    "id": "professional-011",
+    "style": "professional",
+    "text": "The team tracks each task in the same project view."
+  },
+  {
+    "id": "professional-012",
+    "style": "professional",
+    "text": "The coordinator confirms the room, the time, and the list of attendees."
+  },
+  {
+    "id": "professional-013",
+    "style": "professional",
+    "text": "The proposal explains the cost and the value of the work."
+  },
+  {
+    "id": "professional-014",
+    "style": "professional",
+    "text": "The account team prepares a clear response before the customer meeting."
+  },
+  {
+    "id": "professional-015",
+    "style": "professional",
+    "text": "The director reviews the evidence and approves the final recommendation."
+  },
+  {
+    "id": "professional-016",
+    "style": "professional",
+    "text": "The group keeps the record short so that readers can scan it quickly."
+  },
+  {
+    "id": "professional-017",
+    "style": "professional",
+    "text": "The update names the owner for every action and includes the due date."
+  },
+  {
+    "id": "professional-018",
+    "style": "professional",
+    "text": "The team compares the new schedule with the original delivery plan."
+  },
+  {
+    "id": "professional-019",
+    "style": "professional",
+    "text": "The note gives a useful summary of the current project status."
+  },
+  {
+    "id": "professional-020",
+    "style": "professional",
+    "text": "The office keeps a copy of the signed form with the project record."
+  },
+  {
+    "id": "professional-021",
+    "style": "professional",
+    "text": "The lead asks for feedback before the team closes the issue."
+  },
+  {
+    "id": "professional-022",
+    "style": "professional",
+    "text": "The report presents the count, rate, and total for each service area."
+  },
+  {
+    "id": "professional-023",
+    "style": "professional",
+    "text": "The group records the assumption behind the estimate and the date of approval."
+  },
+  {
+    "id": "professional-024",
+    "style": "professional",
+    "text": "The customer receives a direct answer and a link to the next step."
+  },
+  {
+    "id": "professional-025",
+    "style": "professional",
+    "text": "The team uses the same terminology in the plan, the note, and the report so that a reader can follow the decision from the first discussion through the final action."
+  },
+  {
+    "id": "technical-001",
+    "style": "technical",
+    "text": "The function validates the input before it calls the service."
+  },
+  {
+    "id": "technical-002",
+    "style": "technical",
+    "text": "The command prints a short summary after it processes the directory."
+  },
+  {
+    "id": "technical-003",
+    "style": "technical",
+    "text": "The cache keeps completed results separate from pending work."
+  },
+  {
+    "id": "technical-004",
+    "style": "technical",
+    "text": "The configuration loader uses the default timeout when no override exists."
+  },
+  {
+    "id": "technical-005",
+    "style": "technical",
+    "text": "The test compares the generated file with the committed artifact."
+  },
+  {
+    "id": "technical-006",
+    "style": "technical",
+    "text": "The logger omits credentials while it retains enough context for a replay."
+  },
+  {
+    "id": "technical-007",
+    "style": "technical",
+    "text": "The deployment guide lists each required environment variable near the start."
+  },
+  {
+    "id": "technical-008",
+    "style": "technical",
+    "text": "The worker reads one queue item and records the result in the log."
+  },
+  {
+    "id": "technical-009",
+    "style": "technical",
+    "text": "The browser stores the local result and shows the next suggestion."
+  },
+  {
+    "id": "technical-010",
+    "style": "technical",
+    "text": "The build checks the package version before it creates the release artifact."
+  },
+  {
+    "id": "technical-011",
+    "style": "technical",
+    "text": "The API returns a clear error when the request lacks a required field."
+  },
+  {
+    "id": "technical-012",
+    "style": "technical",
+    "text": "The service keeps the response shape stable across the supported versions."
+  },
+  {
+    "id": "technical-013",
+    "style": "technical",
+    "text": "The script writes the report to a new file in the output directory."
+  },
+  {
+    "id": "technical-014",
+    "style": "technical",
+    "text": "The database job checks the index before it starts the migration."
+  },
+  {
+    "id": "technical-015",
+    "style": "technical",
+    "text": "The worker retries a request after a temporary network error."
+  },
+  {
+    "id": "technical-016",
+    "style": "technical",
+    "text": "The test covers the normal path and the expected failure path."
+  },
+  {
+    "id": "technical-017",
+    "style": "technical",
+    "text": "The package stores its configuration in one documented location."
+  },
+  {
+    "id": "technical-018",
+    "style": "technical",
+    "text": "The extension keeps provider credentials in the service worker."
+  },
+  {
+    "id": "technical-019",
+    "style": "technical",
+    "text": "The command accepts a file name and prints the matching records."
+  },
+  {
+    "id": "technical-020",
+    "style": "technical",
+    "text": "The service records a request identifier for every provider call."
+  },
+  {
+    "id": "technical-021",
+    "style": "technical",
+    "text": "The parser keeps quoted text and identifiers unchanged."
+  },
+  {
+    "id": "technical-022",
+    "style": "technical",
+    "text": "The release script builds the shared bundle before it checks the diff."
+  },
+  {
+    "id": "technical-023",
+    "style": "technical",
+    "text": "The monitor reports latency, error count, and request volume together."
+  },
+  {
+    "id": "technical-024",
+    "style": "technical",
+    "text": "The client cancels stale work before it starts another analysis."
+  },
+  {
+    "id": "technical-025",
+    "style": "technical",
+    "text": "The guide explains the setup, the test command, and the recovery path in one sequence. An operator can move from a clean installation to a checked result without guessing at the next command."
+  },
+  {
+    "id": "narrative-001",
+    "style": "narrative",
+    "text": "Maya carried the unfinished letter through the quiet station before the last train."
+  },
+  {
+    "id": "narrative-002",
+    "style": "narrative",
+    "text": "Rain softened the streetlights while the evening crowd crossed the square."
+  },
+  {
+    "id": "narrative-003",
+    "style": "narrative",
+    "text": "The old bridge crossed the narrow river behind the village."
+  },
+  {
+    "id": "narrative-004",
+    "style": "narrative",
+    "text": "We packed lunch and followed the marked path to the lake."
+  },
+  {
+    "id": "narrative-005",
+    "style": "narrative",
+    "text": "The children built a shelter from driftwood while the tide moved inland."
+  },
+  {
+    "id": "narrative-006",
+    "style": "narrative",
+    "text": "The recipe began with warm water and ended with a short rest."
+  },
+  {
+    "id": "narrative-007",
+    "style": "narrative",
+    "text": "The museum opened at nine and closed after the final tour."
+  },
+  {
+    "id": "narrative-008",
+    "style": "narrative",
+    "text": "A small bird crossed the garden and vanished behind the wall."
+  },
+  {
+    "id": "narrative-009",
+    "style": "narrative",
+    "text": "The traveller folded the map and waited beside the quiet road."
+  },
+  {
+    "id": "narrative-010",
+    "style": "narrative",
+    "text": "The dog followed the narrow path until the trees opened to the field."
+  },
+  {
+    "id": "narrative-011",
+    "style": "narrative",
+    "text": "Mira found the key beneath the book and placed it on the table."
+  },
+  {
+    "id": "narrative-012",
+    "style": "narrative",
+    "text": "The boat left the harbour as the first light reached the water."
+  },
+  {
+    "id": "narrative-013",
+    "style": "narrative",
+    "text": "The room grew quiet after the visitors closed the door."
+  },
+  {
+    "id": "narrative-014",
+    "style": "narrative",
+    "text": "He read the note twice and kept it inside his coat."
+  },
+  {
+    "id": "narrative-015",
+    "style": "narrative",
+    "text": "The market filled the street with music, colour, and the smell of bread."
+  },
+  {
+    "id": "narrative-016",
+    "style": "narrative",
+    "text": "A clear moon appeared above the hill after the rain."
+  },
+  {
+    "id": "narrative-017",
+    "style": "narrative",
+    "text": "The child placed each stone along the edge of the path."
+  },
+  {
+    "id": "narrative-018",
+    "style": "narrative",
+    "text": "The train slowed near the station and opened its doors."
+  },
+  {
+    "id": "narrative-019",
+    "style": "narrative",
+    "text": "She turned the page and found a familiar name in the margin."
+  },
+  {
+    "id": "narrative-020",
+    "style": "narrative",
+    "text": "The family shared a meal before they walked home through the park."
+  },
+  {
+    "id": "narrative-021",
+    "style": "narrative",
+    "text": "The wind moved across the field and carried the sound of a bell."
+  },
+  {
+    "id": "narrative-022",
+    "style": "narrative",
+    "text": "The writer watched the lamp and finished the final paragraph."
+  },
+  {
+    "id": "narrative-023",
+    "style": "narrative",
+    "text": "The neighbour returned the borrowed book with a note inside the cover."
+  },
+  {
+    "id": "narrative-024",
+    "style": "narrative",
+    "text": "The garden looked brighter after the winter branches left the path open."
+  },
+  {
+    "id": "narrative-025",
+    "style": "narrative",
+    "text": "The story moved from the crowded platform to the quiet road beyond it, following the traveller through each small choice until the familiar station became a place for a different beginning."
+  },
+  {
+    "id": "casual-001",
+    "style": "casual",
+    "text": "Thanks for the clear answer and the useful example."
+  },
+  {
+    "id": "casual-002",
+    "style": "casual",
+    "text": "We can review the draft after lunch."
+  },
+  {
+    "id": "casual-003",
+    "style": "casual",
+    "text": "The new note is easy to scan on a phone."
+  },
+  {
+    "id": "casual-004",
+    "style": "casual",
+    "text": "I will send the link when the file is ready."
+  },
+  {
+    "id": "casual-005",
+    "style": "casual",
+    "text": "You can add a comment beside the next step."
+  },
+  {
+    "id": "casual-006",
+    "style": "casual",
+    "text": "The plan looks good, and the timing works for me."
+  },
+  {
+    "id": "casual-007",
+    "style": "casual",
+    "text": "We should keep the message short and friendly."
+  },
+  {
+    "id": "casual-008",
+    "style": "casual",
+    "text": "Please share the photo when you have a moment."
+  },
+  {
+    "id": "casual-009",
+    "style": "casual",
+    "text": "The team found a simple way to solve the problem."
+  },
+  {
+    "id": "casual-010",
+    "style": "casual",
+    "text": "I like the direct opening and the calm ending."
+  },
+  {
+    "id": "casual-011",
+    "style": "casual",
+    "text": "We can meet near the station after work."
+  },
+  {
+    "id": "casual-012",
+    "style": "casual",
+    "text": "The example makes the main idea much easier to follow."
+  },
+  {
+    "id": "casual-013",
+    "style": "casual",
+    "text": "You gave a helpful answer to a tricky question."
+  },
+  {
+    "id": "casual-014",
+    "style": "casual",
+    "text": "The message feels clear without losing your voice."
+  },
+  {
+    "id": "casual-015",
+    "style": "casual",
+    "text": "I will check the numbers and reply this afternoon."
+  },
+  {
+    "id": "casual-016",
+    "style": "casual",
+    "text": "The group shared a useful suggestion during the call."
+  },
+  {
+    "id": "casual-017",
+    "style": "casual",
+    "text": "We have enough time to make one careful change."
+  },
+  {
+    "id": "casual-018",
+    "style": "casual",
+    "text": "The draft is nearly done, so we can read it once more."
+  },
+  {
+    "id": "casual-019",
+    "style": "casual",
+    "text": "That short example explains the choice well."
+  },
+  {
+    "id": "casual-020",
+    "style": "casual",
+    "text": "You can keep the heading and remove the extra line."
+  },
+  {
+    "id": "casual-021",
+    "style": "casual",
+    "text": "The note gives everyone a clear place to start."
+  },
+  {
+    "id": "casual-022",
+    "style": "casual",
+    "text": "We found the missing file in the shared folder."
+  },
+  {
+    "id": "casual-023",
+    "style": "casual",
+    "text": "The new version reads well and keeps the useful detail."
+  },
+  {
+    "id": "casual-024",
+    "style": "casual",
+    "text": "Please tell me if the next step needs more detail."
+  },
+  {
+    "id": "casual-025",
+    "style": "casual",
+    "text": "The final answer is direct, kind, and easy to use. It gives a new reader enough detail to start confidently and an experienced reader enough space to skip to the next step."
+  },
+  {
+    "id": "marketing-001",
+    "style": "marketing",
+    "text": "The product gives small teams a clear way to plan the week."
+  },
+  {
+    "id": "marketing-002",
+    "style": "marketing",
+    "text": "The service keeps every task in one simple view."
+  },
+  {
+    "id": "marketing-003",
+    "style": "marketing",
+    "text": "The guide helps new users reach a useful result quickly."
+  },
+  {
+    "id": "marketing-004",
+    "style": "marketing",
+    "text": "The platform brings the key details together without extra work."
+  },
+  {
+    "id": "marketing-005",
+    "style": "marketing",
+    "text": "The campaign explains the benefit in plain language."
+  },
+  {
+    "id": "marketing-006",
+    "style": "marketing",
+    "text": "The new tool gives readers a faster path from idea to draft."
+  },
+  {
+    "id": "marketing-007",
+    "style": "marketing",
+    "text": "The page shows the feature, the price, and the next step."
+  },
+  {
+    "id": "marketing-008",
+    "style": "marketing",
+    "text": "The message puts a practical benefit before the product detail."
+  },
+  {
+    "id": "marketing-009",
+    "style": "marketing",
+    "text": "The service supports a calm writing loop for busy teams."
+  },
+  {
+    "id": "marketing-010",
+    "style": "marketing",
+    "text": "The product turns a long review into a short useful action."
+  },
+  {
+    "id": "marketing-011",
+    "style": "marketing",
+    "text": "The launch note tells customers what changed and why it matters."
+  },
+  {
+    "id": "marketing-012",
+    "style": "marketing",
+    "text": "The tool helps a team keep its work clear and consistent."
+  },
+  {
+    "id": "marketing-013",
+    "style": "marketing",
+    "text": "The page answers the main question before it asks for a decision."
+  },
+  {
+    "id": "marketing-014",
+    "style": "marketing",
+    "text": "The offer includes a simple setup and a clear support path."
+  },
+  {
+    "id": "marketing-015",
+    "style": "marketing",
+    "text": "The feature gives each reader a useful next move."
+  },
+  {
+    "id": "marketing-016",
+    "style": "marketing",
+    "text": "The campaign uses direct language and shows the evidence behind the claim."
+  },
+  {
+    "id": "marketing-017",
+    "style": "marketing",
+    "text": "The service makes a complex process easier to understand."
+  },
+  {
+    "id": "marketing-018",
+    "style": "marketing",
+    "text": "The product keeps the important work close at hand."
+  },
+  {
+    "id": "marketing-019",
+    "style": "marketing",
+    "text": "The page connects the problem with a practical solution."
+  },
+  {
+    "id": "marketing-020",
+    "style": "marketing",
+    "text": "The message invites readers to explore the result at their own pace."
+  },
+  {
+    "id": "marketing-021",
+    "style": "marketing",
+    "text": "The tool brings a clear structure to every new project."
+  },
+  {
+    "id": "marketing-022",
+    "style": "marketing",
+    "text": "The campaign gives customers a reason to try the service today."
+  },
+  {
+    "id": "marketing-023",
+    "style": "marketing",
+    "text": "The guide shows how a small change can improve the daily workflow."
+  },
+  {
+    "id": "marketing-024",
+    "style": "marketing",
+    "text": "The product supports a direct, respectful, and useful customer experience."
+  },
+  {
+    "id": "marketing-025",
+    "style": "marketing",
+    "text": "The page helps teams choose a simple next step by showing the practical benefit first, explaining the setup clearly, and ending with one useful action."
+  }
+]

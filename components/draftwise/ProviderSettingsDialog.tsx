@@ -47,7 +47,7 @@ export function ProviderSettingsDialog({
     onOpenChange(false);
   };
   const forget = () => {
-    onSettingsChange({ ...settings, apiKey: "" });
+    onSettingsChange({ ...settings, apiKey: "", customHeaders: "" });
     onClassifierChange?.({ ...classifierValue, apiKey: "" });
     onAiEnabledChange(false);
     onForgetKeys?.();
@@ -180,7 +180,7 @@ export function ProviderSettingsDialog({
         </div>
 
         <DialogFooter className="settings-footer">
-          <Button variant="ghost" onClick={forget}><Trash2 size={14} /> Forget keys</Button>
+          <Button variant="ghost" onClick={forget}><Trash2 size={14} /> Forget cloud credentials</Button>
           <Button variant="ghost" onClick={onClearData}>Clear local data</Button>
           <Button onClick={save}><ShieldCheck size={14} /> Save & close</Button>
         </DialogFooter>

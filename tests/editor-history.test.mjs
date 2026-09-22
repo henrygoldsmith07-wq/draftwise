@@ -26,6 +26,18 @@ test("history limits retain the newest states and valid index", () => {
   assert.deepEqual(state, { values: ["c", "d"], index: 1 });
 });
 
+test("large string histories stay within the character budget", () => {
+  let state = { values: ["aaaa"], index: 0 };
+  state = commitHistory(state, "bbbbb", 80, 12);
+  state = commitHistory(state, "cccccc", 80, 12);
+  assert.deepEqual(state, { values: ["bbbbb", "cccccc"], index: 1 });
+});
+
+test("history always retains the newest draft when it alone exceeds the budget", () => {
+  const state = commitHistory({ values: ["small"], index: 0 }, "x".repeat(20), 80, 10);
+  assert.deepEqual(state, { values: ["x".repeat(20)], index: 0 });
+});
+
 test("selection ranges clamp to the current document length", () => {
   assert.deepEqual(clampSelection({ start: 8, end: 20 }, 10), { start: 8, end: 10 });
   assert.deepEqual(clampSelection({ start: 20, end: 30 }, 10), { start: 10, end: 10 });

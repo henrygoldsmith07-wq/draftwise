@@ -34,6 +34,7 @@ interface EditorWorkspaceProps {
   goals: WritingGoals;
   style: StylePreferences;
   analysis: AnalysisResult;
+  openIssues: WritingIssue[];
   visibleIssues: WritingIssue[];
   activeIssueId: string | null;
   filter: IssueFilter;
@@ -205,9 +206,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="issue-tabs">
             <Tabs value={props.filter} onValueChange={(value) => props.onFilterChange(value as IssueFilter)}>
               <TabsList variant="line">
-                <TabsTrigger value="all">All <span>{props.analysis.issues.length}</span></TabsTrigger>
-                <TabsTrigger value="grammar">Correctness <span>{props.analysis.issues.filter((item) => categoryMatches(item, "grammar")).length}</span></TabsTrigger>
-                <TabsTrigger value="style">Style <span>{props.analysis.issues.filter((item) => categoryMatches(item, "style")).length}</span></TabsTrigger>
+                <TabsTrigger value="all">All <span>{props.openIssues.length}</span></TabsTrigger>
+                <TabsTrigger value="grammar">Correctness <span>{props.openIssues.filter((item) => categoryMatches(item, "grammar")).length}</span></TabsTrigger>
+                <TabsTrigger value="style">Style <span>{props.openIssues.filter((item) => categoryMatches(item, "style")).length}</span></TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

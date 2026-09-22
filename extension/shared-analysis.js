@@ -566,6 +566,17 @@ function preserveCase(original, replacement) {
         return replacement[0].toUpperCase() + replacement.slice(1);
     return replacement;
 }
+function issueTextFingerprint(text) {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
+function createIssueId(ruleId, start, end, original) {
+    return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+}
 function boundedEditDistance(left, right, limit = 2) {
     if (Math.abs(left.length - right.length) > limit)
         return limit + 1;
@@ -784,7 +795,7 @@ function makeIssue(ruleId, start, end, original, replacement, category, severity
     if (!original || end <= start || shouldIgnore(ruleId, original, preferences))
         return null;
     return {
-        id: `${ruleId}-${start}-${end}`,
+        id: createIssueId(ruleId, start, end, original),
         ruleId,
         start,
         end,
@@ -1292,7 +1303,7 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
     const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
     const recalculated = region.issues.map((issue) => ({
         ...issue,
-        id: `${issue.ruleId}-${issue.start + nextRegion.start}-${issue.end + nextRegion.start}`,
+        id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
         start: issue.start + nextRegion.start,
         end: issue.end + nextRegion.start,
     }));

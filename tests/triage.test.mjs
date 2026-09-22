@@ -379,3 +379,31 @@ test("background keeps provider and classifier keys in the service worker", asyn
   assert.match(background, /classifier/iu);
   assert.match(background, /providerPattern/);
 });
+
+
+test("AI review status prioritises active and failed phases before coverage exists", () => {
+  assert.equal(getAiReviewStatus(undefined, true, true, "analysing"), "AI review in progress");
+  assert.equal(getAiReviewStatus(undefined, true, true, "error"), "AI review encountered errors");
+  assert.equal(getAiReviewStatus(undefined, false, true, "analysing"), "Local analysis only");
+  assert.equal(getAiReviewStatus(undefined, true, false, "analysing"), "Local analysis only");
+});
+
+test("AI review status reports progress when coverage exists during analysis", () => {
+  const coverage = { requestedChunks: 4, attemptedChunks: 4, successfulChunks: 2, failedChunks: 2, skippedChunks: 0 };
+  assert.equal(getAiReviewStatus(coverage, true, true, "analysing"), "AI review in progress - 2/4 sections reviewed");
+});
+
+test("classifier excerpts redact common bearer and API credential formats", () => {
+  const secrets = [
+    "Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signatureABCDE",
+    "AKIAABCDEFGHIJKLMNOP",
+    "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+    "github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "npm_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "Authorization=abcdefghijklmnopqrstuvwxyz123456",
+  ];
+  const redacted = redactExcerptForClassifier(`Credentials: ${secrets.join(" | ")}`);
+  for (const secret of secrets) assert.equal(redacted.includes(secret), false, secret);
+  assert.match(redacted, /\[(?:bearer-token|jwt|token|secret)\]/u);
+});

@@ -97,6 +97,16 @@ export default function Home() {
     updateWorkspace((current) => ({ ...current, goals: { ...current.goals, ...patch } }));
   }, [updateWorkspace]);
 
+  const updateProvider = useCallback((provider: typeof workspace.provider) => {
+    cancelRewrite();
+    updateWorkspace({ provider });
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateAiEnabled = useCallback((aiEnabled: boolean) => {
+    if (!aiEnabled) cancelRewrite();
+    updateWorkspace({ aiEnabled });
+  }, [cancelRewrite, updateWorkspace]);
+
   const openIssues = useMemo(
     () => getOpenIssues(issues, dismissedIssueIds),
     [issues, dismissedIssueIds],
@@ -249,7 +259,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </main>
   );

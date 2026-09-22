@@ -139,8 +139,13 @@ export function getAiReviewStatus(
   providerConfigured: boolean,
   phase: AiReviewPhase,
 ) {
-  if (!aiEnabled || !providerConfigured || !coverage || coverage.requestedChunks === 0) return "Local analysis only";
+  if (!aiEnabled || !providerConfigured) return "Local analysis only";
   if (phase === "error") return "AI review encountered errors";
+  if (phase === "analysing") {
+    if (!coverage || coverage.requestedChunks === 0) return "AI review in progress";
+    return `AI review in progress - ${coverage.successfulChunks}/${coverage.requestedChunks} sections reviewed`;
+  }
+  if (!coverage || coverage.requestedChunks === 0) return "Local analysis only";
   if (coverage.failedChunks > 0 && coverage.successfulChunks === 0) {
     return `AI review encountered errors - ${coverage.failedChunks} section${coverage.failedChunks === 1 ? "" : "s"} failed`;
   }

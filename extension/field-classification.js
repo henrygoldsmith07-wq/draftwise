@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const sensitiveTypes = new Set(["password", "hidden", "file", "checkbox", "radio", "submit", "button"]);
+  const sensitiveTypes = new Set(["password", "hidden", "file", "checkbox", "radio", "submit", "button", "email", "tel", "number", "date", "datetime-local", "month", "week", "time", "url", "range", "color"]);
   const sensitiveAutocomplete = new Set([
     "current-password",
     "new-password",
@@ -12,6 +12,23 @@
     "cc-exp-year",
     "cc-csc",
     "security-code",
+    "email",
+    "tel",
+    "name",
+    "given-name",
+    "additional-name",
+    "family-name",
+    "street-address",
+    "address-line1",
+    "address-line2",
+    "address-line3",
+    "postal-code",
+    "country",
+    "country-name",
+    "cc-name",
+    "cc-given-name",
+    "cc-additional-name",
+    "cc-family-name",
   ]);
 
   function metadataTokens(element) {
@@ -38,6 +55,9 @@
     if (sensitiveAutocomplete.has(autocomplete)) return true;
     const tokens = metadataTokens(element);
     if (hasAny(tokens, ["password", "passwd", "passcode", "credential", "username", "login", "pin", "otp", "cvv", "cvc", "ssn", "secret"])) return true;
+    if (hasAny(tokens, ["email", "phone", "telephone", "mobile", "postcode", "zipcode"])) return true;
+    if (tokens.includes("postal") && hasAny(tokens, ["code", "address"])) return true;
+    if (tokens.includes("street") && tokens.includes("address")) return true;
     if (tokens.includes("api") && tokens.includes("key")) return true;
     if (tokens.includes("access") && tokens.includes("token")) return true;
     if (tokens.includes("auth") && hasAny(tokens, ["token", "code", "key", "secret", "credential"])) return true;

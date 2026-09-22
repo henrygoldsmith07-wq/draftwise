@@ -38,6 +38,7 @@
   let button = null;
   let panel = null;
   let cache = new Map();
+  let fieldState = new WeakMap();
   let observer = null;
   const boundElements = new WeakSet();
   let aiTimer = 0;
@@ -120,10 +121,7 @@
     aiPending = false;
     aiError = "";
     aiCoverage = null;
-    if (activeField) {
-      activeField.__draftwiseAiIssues = [];
-      activeField.__draftwiseAiCoverage = null;
-    }
+    fieldState = new WeakMap();
     activeField = null;
     if (button) button.hidden = true;
     if (panel) panel.hidden = true;
@@ -214,7 +212,8 @@
     aiPending = false;
     aiError = response?.error || "";
     aiCoverage = response?.aiCoverage || null;
-    element.__draftwiseAiCoverage = aiCoverage;
+    const currentState = fieldState.get(element) || {};
+    fieldState.set(element, { ...currentState, aiCoverage });
     if (!response) {
       aiError = "AI analysis is unavailable; local suggestions are still active.";
       render();
@@ -223,7 +222,7 @@
     }
     if (Array.isArray(response.issues)) {
       const aiIssues = response.issues.filter((issue) => issue && issue.source === "ai");
-      element.__draftwiseAiIssues = aiIssues;
+      fieldState.set(element, { ...(fieldState.get(element) || {}), aiIssues });
       activeIssues = [...(local.issues || []), ...aiIssues];
     }
     render(); place();
@@ -231,11 +230,13 @@
 
   async function scan(element) {
     if (!isEditable(element) || siteIsDisabled()) return;
-    const text = textOf(element); const previous = element.__draftwiseText || ""; const previousResult = element.__draftwiseLocalResult || null; element.__draftwiseText = text; activeField = element;
+    const text = textOf(element);
+    const previousState = fieldState.get(element) || {};
+    const previous = previousState.text || "";
+    const previousResult = previousState.localResult || null;
+    activeField = element;
     const local = localAnalysis(text, previous, previousResult);
-    element.__draftwiseLocalResult = local;
-    element.__draftwiseAiIssues = [];
-    element.__draftwiseAiCoverage = null;
+    fieldState.set(element, { text, localResult: local, aiIssues: [], aiCoverage: null });
     activeIssues = local.issues || []; aiError = ""; aiCoverage = null; aiPending = false; render(); place();
     // Cancel any pending cloud triage from rapid typing (cancellation support).
     if (aiTimer) window.clearTimeout(aiTimer);

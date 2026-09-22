@@ -336,6 +336,19 @@ function preserveCase(original: string, replacement: string) {
   if (original[0] === original[0]?.toUpperCase()) return replacement[0].toUpperCase() + replacement.slice(1);
   return replacement;
 }
+function issueTextFingerprint(text: string) {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function createIssueId(ruleId: string, start: number, end: number, original: string) {
+  return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+}
+
 
 function boundedEditDistance(left: string, right: string, limit = 2) {
   if (Math.abs(left.length - right.length) > limit) return limit + 1;
@@ -544,7 +557,7 @@ function makeIssue(
 ): WritingIssue | null {
   if (!original || end <= start || shouldIgnore(ruleId, original, preferences)) return null;
   return {
-    id: `${ruleId}-${start}-${end}`,
+    id: createIssueId(ruleId, start, end, original),
     ruleId,
     start,
     end,
@@ -1065,7 +1078,7 @@ export function analyzeLocallyIncremental(
   const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
   const recalculated = region.issues.map((issue) => ({
     ...issue,
-    id: `${issue.ruleId}-${issue.start + nextRegion.start}-${issue.end + nextRegion.start}`,
+    id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
     start: issue.start + nextRegion.start,
     end: issue.end + nextRegion.start,
   }));

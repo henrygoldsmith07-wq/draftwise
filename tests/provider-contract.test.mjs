@@ -339,3 +339,37 @@ test("local concise rewrites preserve meaningful intensifiers and limiting words
   );
   assert.equal(result.replacement, "I just need very little time to finish now.");
 });
+
+test("local rewrites preserve paragraph and line-break structure", async () => {
+  const text = "First paragraph.\n\nSecond paragraph.\n  Indented line.";
+  const result = await rewriteWithProvider(
+    {
+      text,
+      instruction: "Make this more confident.",
+      goals,
+    },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("AI rewrites preserve the selected text boundary whitespace", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "\n  The draft can't ship.\n\n";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The draft cannot ship.",
+      explanation: "Expanded the contraction.",
+    }) } }],
+  }), { status: 200 });
+
+  try {
+    const result = await rewriteWithProvider(
+      { text, instruction: "Make this formal.", goals, allowProtectedChanges: false },
+      settings,
+    );
+    assert.equal(result.replacement, "\n  The draft cannot ship.\n\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -162,6 +162,10 @@ export default function Home() {
     [openIssues, filter],
   );
 
+  useEffect(() => {
+    if (activeIssueId && !openIssues.some((issue) => issue.id === activeIssueId)) setActiveIssueId(null);
+  }, [activeIssueId, openIssues]);
+
   const acceptIssue = useCallback((issue: WritingIssue) => {
     if (!issue.replacement || issue.replacement === issue.original || workspace.draft.slice(issue.start, issue.end) !== issue.original) return;
     updateDraft(`${workspace.draft.slice(0, issue.start)}${issue.replacement}${workspace.draft.slice(issue.end)}`);

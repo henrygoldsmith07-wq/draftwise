@@ -35,13 +35,23 @@
     "transaction-amount",
   ]);
 
+  const MAX_METADATA_PART_CHARS = 512;
+  const MAX_ASSOCIATED_LABELS = 8;
+
+  function metadataPart(value) {
+    return String(value || "").slice(0, MAX_METADATA_PART_CHARS);
+  }
+
   function associatedLabelText(element) {
-    const explicitLabels = Array.from(element?.labels || []).map((label) => label?.textContent || "");
-    const wrappingLabel = element?.closest?.("label")?.textContent || "";
-    const labelledBy = String(element?.getAttribute?.("aria-labelledby") || "")
+    const explicitLabels = Array.from(element?.labels || [])
+      .slice(0, MAX_ASSOCIATED_LABELS)
+      .map((label) => metadataPart(label?.textContent));
+    const wrappingLabel = metadataPart(element?.closest?.("label")?.textContent);
+    const labelledBy = metadataPart(element?.getAttribute?.("aria-labelledby"))
       .split(/\s+/u)
       .filter(Boolean)
-      .map((id) => element?.ownerDocument?.getElementById?.(id)?.textContent || "");
+      .slice(0, MAX_ASSOCIATED_LABELS)
+      .map((id) => metadataPart(element?.ownerDocument?.getElementById?.(id)?.textContent));
     return [...explicitLabels, wrappingLabel, ...labelledBy].filter(Boolean).join(" ");
   }
 
@@ -59,7 +69,7 @@
       form?.id,
       form?.getAttribute?.("aria-label"),
       form?.getAttribute?.("autocomplete"),
-    ].filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+    ].map(metadataPart).filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
   }
 
   function hasAny(tokens, values) {

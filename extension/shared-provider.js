@@ -2600,18 +2600,18 @@ async function requestClassifierDecisions(inputs, settings, options = {}) {
         }), { service: "classifier", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry });
         if (!response.ok)
             throw classifierErrorForStatus(response.status);
-        const declaredLength = Number(response.headers.get("content-length") || 0);
-        if (declaredLength > 500_000)
-            throw new ClassifierError("invalid-json", "The classifier response was too large.");
         let responseText;
         try {
-            responseText = await response.text();
+            const body = await readResponseTextLimited(response, 500_000);
+            if (body.truncated)
+                throw new ClassifierError("invalid-json", "The classifier response was too large.");
+            responseText = body.text;
         }
-        catch {
+        catch (error) {
+            if (error instanceof ClassifierError)
+                throw error;
             throw new ClassifierError("invalid-json", "The classifier returned an unreadable response.");
         }
-        if (responseText.length > 500_000)
-            throw new ClassifierError("invalid-json", "The classifier response was too large.");
         let payload;
         try {
             payload = JSON.parse(responseText);

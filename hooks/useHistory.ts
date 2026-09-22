@@ -1,38 +1,62 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+
+export interface HistoryState<T> {
+  values: T[];
+  index: number;
+}
+
+export function commitHistory<T>(current: HistoryState<T>, value: T, limit = 80): HistoryState<T> {
+  if (Object.is(current.values[current.index], value)) return current;
+  const boundedLimit = Math.max(1, Math.floor(limit));
+  const values = [...current.values.slice(0, current.index + 1), value].slice(-boundedLimit);
+  return { values, index: values.length - 1 };
+}
+
+export function stepHistory<T>(current: HistoryState<T>, direction: -1 | 1) {
+  const index = Math.max(0, Math.min(current.values.length - 1, current.index + direction));
+  const state = index === current.index ? current : { ...current, index };
+  return { state, value: state.values[state.index] };
+}
 
 export function useHistory<T>(initial: T, limit = 80) {
-  const [values, setValues] = useState<T[]>([initial]);
-  const [index, setIndex] = useState(0);
+  const [history, setHistory] = useState<HistoryState<T>>({ values: [initial], index: 0 });
+  const historyRef = useRef(history);
 
-  const commit = useCallback((value: T) => {
-    setValues((current) => {
-      if (Object.is(current[index], value)) return current;
-      const next = [...current.slice(0, index + 1), value].slice(-limit);
-      setIndex(next.length - 1);
-      return next;
-    });
-  }, [index, limit]);
-
-  const undo = useCallback(() => {
-    if (index === 0) return values[0];
-    const next = index - 1;
-    setIndex(next);
-    return values[next];
-  }, [index, values]);
-
-  const redo = useCallback(() => {
-    if (index >= values.length - 1) return values[index];
-    const next = index + 1;
-    setIndex(next);
-    return values[next];
-  }, [index, values]);
-
-  const reset = useCallback((value: T) => {
-    setValues([value]);
-    setIndex(0);
+  const publish = useCallback((next: HistoryState<T>) => {
+    historyRef.current = next;
+    setHistory(next);
   }, []);
 
-  return { value: values[index], commit, undo, redo, reset, canUndo: index > 0, canRedo: index < values.length - 1 };
+  const commit = useCallback((value: T) => {
+    const next = commitHistory(historyRef.current, value, limit);
+    if (next !== historyRef.current) publish(next);
+  }, [limit, publish]);
+
+  const undo = useCallback(() => {
+    const result = stepHistory(historyRef.current, -1);
+    if (result.state !== historyRef.current) publish(result.state);
+    return result.value;
+  }, [publish]);
+
+  const redo = useCallback(() => {
+    const result = stepHistory(historyRef.current, 1);
+    if (result.state !== historyRef.current) publish(result.state);
+    return result.value;
+  }, [publish]);
+
+  const reset = useCallback((value: T) => {
+    publish({ values: [value], index: 0 });
+  }, [publish]);
+
+  return {
+    value: history.values[history.index],
+    commit,
+    undo,
+    redo,
+    reset,
+    canUndo: history.index > 0,
+    canRedo: history.index < history.values.length - 1,
+  };
 }

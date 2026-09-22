@@ -417,6 +417,30 @@ test("dynamic site script IDs stay distinct for long similar hostnames", async (
   assert.equal(firstId, permissions.siteScriptId(first));
 });
 
+test("field privacy classification bounds untrusted metadata size", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classifier = context.DraftwiseFieldClassifier;
+  const huge = "x".repeat(100_000);
+  const labels = Array.from({ length: 100 }, (_, index) => ({ textContent: index === 0 ? "API key" + huge : huge }));
+  const field = {
+    type: "text",
+    name: huge,
+    id: huge,
+    labels,
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute(key) { return key === "placeholder" ? huge : ""; },
+    closest() { return null; },
+  };
+  assert.equal(classifier.isSensitiveField(field), true);
+  const tokens = Array.from(classifier.metadataTokens(field));
+  assert.ok(tokens.length < 100);
+  assert.ok(tokens.every((token) => token.length <= 512));
+});
+
 test("permission helpers derive narrow site and provider origins", async () => {
   const source = await readFile(file("extension/permissions.js"), "utf8");
   const context = { URL };

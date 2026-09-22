@@ -297,6 +297,26 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
     setWorkspace((current) => typeof patch === "function" ? patch(current) : { ...current, ...patch });
   }, []);
 
+  const saveNow = useCallback(() => {
+    if (!hydrated) {
+      const error = "Draft is still loading.";
+      setSaveStatus("error");
+      setSaveError(error);
+      return { ok: false as const, error };
+    }
+    setSaveStatus("saving");
+    setSaveError(null);
+    const result = writeWorkspaceToStorage(workspace, window.localStorage);
+    if (result.ok) {
+      setLastSavedAt(Date.now());
+      setSaveStatus("saved");
+    } else {
+      setSaveStatus("error");
+      setSaveError(result.error);
+    }
+    return result;
+  }, [hydrated, workspace]);
+
   const clearLocalData = useCallback(() => {
     try {
       window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
@@ -319,6 +339,7 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
     saveStatus,
     lastSavedAt,
     saveError,
+    saveNow,
     clearLocalData,
   };
 }

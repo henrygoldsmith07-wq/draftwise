@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_CLASSIFIER_SETTINGS,
   DEFAULT_GOALS,
@@ -244,12 +244,29 @@ export function writeWorkspaceToStorage(workspace: DraftwiseWorkspace, storage: 
   }
 }
 
+export function clearWorkspaceStorage(storage: WorkspaceStorage) {
+  let firstError: string | null = null;
+  for (const key of [WORKSPACE_STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) {
+    try {
+      storage.removeItem(key);
+    } catch (error) {
+      firstError ??= storageErrorMessage(error);
+    }
+  }
+  return firstError ? { ok: false as const, error: firstError } : { ok: true as const };
+}
+
+export function shouldSkipAutosave(workspace: DraftwiseWorkspace, clearedWorkspace: DraftwiseWorkspace | null) {
+  return clearedWorkspace !== null && Object.is(workspace, clearedWorkspace);
+}
+
 export function useDraftPersistence(initial: DraftwiseWorkspace) {
   const [workspace, setWorkspace] = useState(initial);
   const [hydrated, setHydrated] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const clearedWorkspaceRef = useRef<DraftwiseWorkspace | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -269,6 +286,8 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
 
   useEffect(() => {
     if (!hydrated) return;
+    if (shouldSkipAutosave(workspace, clearedWorkspaceRef.current)) return;
+    clearedWorkspaceRef.current = null;
     let active = true;
     const timer = window.setTimeout(() => {
       if (!active) return;
@@ -298,15 +317,15 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
   }, []);
 
   const clearLocalData = useCallback(() => {
-    try {
-      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
-      for (const key of LEGACY_STORAGE_KEYS) window.localStorage.removeItem(key);
-      setLastSavedAt(null);
+    clearedWorkspaceRef.current = initial;
+    const result = clearWorkspaceStorage(window.localStorage);
+    setLastSavedAt(null);
+    if (result.ok) {
       setSaveError(null);
       setSaveStatus("idle");
-    } catch (error) {
+    } else {
       setSaveStatus("error");
-      setSaveError(storageErrorMessage(error));
+      setSaveError(result.error);
     }
     setWorkspace(initial);
   }, [initial]);

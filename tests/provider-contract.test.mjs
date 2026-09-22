@@ -470,3 +470,44 @@ test("date edits inside quotes preserve the rest of the quoted passage", async (
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("negated protected-value instructions remain protected", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "The deadline is 18 September 2026.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ replacement: "The deadline is 19 September 2026." }) } }],
+  }), { status: 200 });
+  try {
+    for (const instruction of [
+      "Do not change the date; just make this clearer.",
+      "Don't change the date. Improve the wording.",
+      "Rewrite this without changing the date.",
+    ]) {
+      await assert.rejects(
+        () => rewriteWithProvider({ text, instruction, goals, allowProtectedChanges: false }, settings),
+        (error) => error instanceof ProviderError && error.code === "invalid-json",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("negating one protected kind does not authorize it when another kind is changed", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com.";
+  const replacement = "Meet on 2026-09-18 at https://example.org.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ replacement }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider(
+      { text, instruction: "Do not change the date; change the URL to https://example.org.", goals },
+      settings,
+    );
+    assert.equal(result.replacement, replacement);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

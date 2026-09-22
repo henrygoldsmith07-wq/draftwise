@@ -246,13 +246,15 @@ export function writeWorkspaceToStorage(workspace: DraftwiseWorkspace, storage: 
 }
 
 export function clearWorkspaceStorage(storage: WorkspaceStorage) {
-  try {
-    storage.removeItem(WORKSPACE_STORAGE_KEY);
-    for (const key of LEGACY_STORAGE_KEYS) storage.removeItem(key);
-    return { ok: true as const };
-  } catch (error) {
-    return { ok: false as const, error: storageErrorMessage(error) };
+  let firstError: string | null = null;
+  for (const key of [WORKSPACE_STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) {
+    try {
+      storage.removeItem(key);
+    } catch (error) {
+      firstError ??= storageErrorMessage(error);
+    }
   }
+  return firstError ? { ok: false as const, error: firstError } : { ok: true as const };
 }
 
 export function useDraftPersistence(initial: DraftwiseWorkspace) {
@@ -361,11 +363,11 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
       saveTimerRef.current = null;
     }
     const result = clearWorkspaceStorage(window.localStorage);
+    workspaceRef.current = initial;
+    dirtyRef.current = false;
+    setWorkspaceState(initial);
+    setLastSavedAt(null);
     if (result.ok) {
-      workspaceRef.current = initial;
-      dirtyRef.current = false;
-      setWorkspaceState(initial);
-      setLastSavedAt(null);
       setSaveError(null);
       setSaveStatus("idle");
     } else {

@@ -257,9 +257,19 @@ class LruCache {
         return this.values.size;
     }
 }
+function fingerprintText(text) {
+    let first = 2_166_136_261;
+    let second = 2_654_435_761;
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        first = Math.imul(first ^ code, 16_777_619);
+        second = Math.imul(second ^ (code + ((index & 255) << 8)), 2_246_822_519);
+    }
+    return `${text.length}-${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
+}
 function createAnalysisCacheKey(text, settingsKey, range) {
     const rangeKey = range ? `${range.start}:${range.end}:${range.previousEnd}` : "full";
-    return `${settingsKey}:${rangeKey}:${text}`;
+    return `${settingsKey}:${rangeKey}:text-${fingerprintText(text)}`;
 }
 function stableSerialize(value) {
     if (value === null || typeof value !== "object")

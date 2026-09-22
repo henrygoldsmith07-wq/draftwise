@@ -11,6 +11,7 @@ import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
 import { categoryMatches } from "@/components/draftwise/EditorPrimitives";
 import { applyIssueReplacements, getOpenIssues } from "@/lib/issue-actions";
+import { canApplyRewrite } from "@/lib/rewrite-state";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { useHistory } from "@/hooks/useHistory";
@@ -134,7 +135,7 @@ export default function Home() {
   }, [requestRewrite, selectedText, selection, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
 
   const applyRewrite = useCallback((insert: boolean) => {
-    if (!rewritePreview || rewritePreview.loading) return;
+    if (!canApplyRewrite(rewritePreview)) return;
     const { start, end } = rewritePreview.selection;
     if (workspace.draft.slice(start, end) !== rewritePreview.original) { cancelRewrite(); return; }
     const next = insert ? `${workspace.draft.slice(0, end)}\n${rewritePreview.replacement}${workspace.draft.slice(end)}` : `${workspace.draft.slice(0, start)}${rewritePreview.replacement}${workspace.draft.slice(end)}`;

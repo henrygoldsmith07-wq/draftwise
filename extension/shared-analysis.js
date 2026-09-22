@@ -570,7 +570,7 @@ function issueTextFingerprint(text) {
     let hash = 2_166_136_261;
     for (let index = 0; index < text.length; index += 1) {
         hash ^= text.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
+        hash = Math.imul(hash, 16_777_619);
     }
     return (hash >>> 0).toString(36);
 }

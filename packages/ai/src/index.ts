@@ -107,8 +107,15 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
     }];
   });
   const rawScores = isRecord(parsed.scores) ? parsed.scores : {};
-  const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number" && Number.isFinite(score))) as ProviderPayload["scores"];
-  return { issues, tone: Array.isArray(parsed.tone) ? parsed.tone.filter((tone): tone is string => typeof tone === "string") : [], scores };
+  const scoreKeys = ["correctness", "clarity", "conciseness", "readability", "engagement", "consistency", "goalAlignment", "overall"] as const;
+  const scores = Object.fromEntries(scoreKeys.flatMap((key) => {
+    const score = rawScores[key];
+    return typeof score === "number" && Number.isFinite(score) ? [[key, score] as const] : [];
+  })) as ProviderPayload["scores"];
+  const tone = Array.isArray(parsed.tone)
+    ? parsed.tone.filter((item): item is string => typeof item === "string").slice(0, 8)
+    : [];
+  return { issues, tone, scores };
 }
 
 export class ProviderError extends Error {

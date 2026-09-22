@@ -4,6 +4,7 @@ import test from "node:test";
 
 const pageUrl = new URL("../app/page.tsx", import.meta.url);
 const rewriteUrl = new URL("../hooks/useRewrite.ts", import.meta.url);
+const settingsUrl = new URL("../components/draftwise/ProviderSettingsDialog.tsx", import.meta.url);
 
 test("new drafts require confirmation and preserve the previous text in session history", async () => {
   const page = await readFile(pageUrl, "utf8");
@@ -32,4 +33,18 @@ test("rewrite-context changes cancel stale previews and requests", async () => {
   const rewrite = await readFile(rewriteUrl, "utf8");
   assert.match(rewrite, /replacement: "", explanation:/u);
   assert.match(rewrite, /useEffect\(\(\) => \(\) => abort\.current\?\.abort\(\), \[\]\)/u);
+});
+
+
+test("forgetting cloud credentials clears custom headers too", async () => {
+  const settings = await readFile(settingsUrl, "utf8");
+  assert.match(settings, /onSettingsChange\(\{ \.\.\.settings, apiKey: "", customHeaders: "" \}\)/u);
+  assert.match(settings, /Forget cloud credentials/u);
+});
+
+test("Save & close remains open when immediate persistence fails", async () => {
+  const settings = await readFile(settingsUrl, "utf8");
+  assert.match(settings, /const result = onSave\?\.\(\);/u);
+  assert.match(settings, /if \(result && !result\.ok\) return;/u);
+  assert.match(settings, /onOpenChange\(false\);/u);
 });

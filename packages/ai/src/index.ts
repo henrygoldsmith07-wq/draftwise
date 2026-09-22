@@ -662,7 +662,7 @@ function localRewrite(text: string, instruction: string): string {
   return result || text;
 }
 
-function protectedTokens(text: string) {
+function protectedTokenCounts(text: string) {
   const patterns = [
     /https?:\/\/[^\s)]+/giu,
     /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
@@ -677,7 +677,24 @@ function protectedTokens(text: string) {
     /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
     /\b\d[\d,.]*\b/gu,
   ];
-  return [...new Set(patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0])))];
+  const counts = new Map<string, number>();
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0];
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function hasExactProtectedTokenMultiset(original: string, replacement: string) {
+  const originalTokens = protectedTokenCounts(original);
+  const replacementTokens = protectedTokenCounts(replacement);
+  if (originalTokens.size !== replacementTokens.size) return false;
+  for (const [token, count] of originalTokens) {
+    if (replacementTokens.get(token) !== count) return false;
+  }
+  return true;
 }
 
 function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
@@ -688,12 +705,8 @@ function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
 function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
   if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
   if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-  if (!allowProtectedChanges) {
-    for (const token of protectedTokens(original)) {
-      const originalCount = original.split(token).length - 1;
-      const replacementCount = replacement.split(token).length - 1;
-      if (replacementCount < originalCount) throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
-    }
+  if (!allowProtectedChanges && !hasExactProtectedTokenMultiset(original, replacement)) {
+    throw new ProviderError("invalid-json", "The rewrite changed, removed, duplicated, or introduced a protected URL, value, identifier, or quoted passage. Nothing was changed.");
   }
   return replacement.trim();
 }

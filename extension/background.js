@@ -72,6 +72,23 @@ const storageGet = (keys) => chromeCall(chrome.storage.local.get.bind(chrome.sto
 const storageSet = (value) => chromeCall(chrome.storage.local.set.bind(chrome.storage.local), [value]);
 const permissionsContains = (value) => chromeCall(chrome.permissions.contains.bind(chrome.permissions), [value]);
 
+async function reconcileSiteAccessWithPermissions() {
+  const stored = await storageGet(["siteAccess"]);
+  const sites = Array.isArray(stored.siteAccess) ? stored.siteAccess : [];
+  const allowed = [];
+  for (const site of sites) {
+    try {
+      const normalised = globalThis.DraftwisePermissions.normaliseHostname(site);
+      if (await permissionsContains({ origins: globalThis.DraftwisePermissions.sitePatterns(normalised) })) allowed.push(normalised);
+    } catch {
+      // Invalid or revoked sites are removed from the stored allow-list.
+    }
+  }
+  const changed = allowed.length !== sites.length || allowed.some((site, index) => site !== sites[index]);
+  if (changed) await storageSet({ siteAccess: allowed });
+  return changed;
+}
+
 function cancelActiveAiWork() {
   for (const controller of activeRequests.values()) controller.abort();
   activeRequests.clear();
@@ -166,7 +183,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 chrome.permissions.onRemoved.addListener(() => {
   cancelActiveAiWork();
-  void syncRegisteredSites();
+  void reconcileSiteAccessWithPermissions()
+    .then((changed) => { if (!changed) return syncRegisteredSites(); })
+    .catch(() => syncRegisteredSites());
 });
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
@@ -226,7 +245,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
       const cacheKey = JSON.stringify({
-        text,
+        textFingerprint: settingsFingerprint(text),
+        textLength: text.length,
         goals: message.goals,
         style: message.style,
         range: message.changedRange,

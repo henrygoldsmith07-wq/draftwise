@@ -253,6 +253,32 @@ test("transient external failures retry with bounded attempts while client error
   assert.equal(calls, 1);
 });
 
+test("provider response bodies are bounded before full buffering", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("x".repeat(2_050_000), { status: 200 });
+  try {
+    await assert.rejects(
+      () => analyzeWithProvider("A short sentence.", goals, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json" && /too large/iu.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("oversized provider error bodies keep the HTTP failure classification", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("bad request ".repeat(10_000), { status: 400 });
+  try {
+    await assert.rejects(
+      () => analyzeWithProvider("A short sentence.", goals, settings),
+      (error) => error instanceof ProviderError && error.code === "unknown" && error.status === 400,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("provider timeout and invalid model are explicit failures", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));

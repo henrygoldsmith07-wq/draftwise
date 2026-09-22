@@ -46,6 +46,7 @@
   }
 
   function metadataTokens(element) {
+    const form = element?.closest?.("form");
     return [
       element?.name,
       element?.id,
@@ -54,7 +55,10 @@
       element?.getAttribute?.("aria-label"),
       element?.getAttribute?.("placeholder"),
       associatedLabelText(element),
-      element?.closest?.("form")?.getAttribute?.("autocomplete"),
+      form?.name,
+      form?.id,
+      form?.getAttribute?.("aria-label"),
+      form?.getAttribute?.("autocomplete"),
     ].filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
   }
 
@@ -70,7 +74,7 @@
     const autocompleteTokens = autocomplete.split(/\s+/u).filter(Boolean);
     if (autocompleteTokens.some((token) => sensitiveAutocomplete.has(token))) return true;
     const tokens = metadataTokens(element);
-    if (hasAny(tokens, ["password", "passwd", "passcode", "credential", "username", "login", "pin", "otp", "cvv", "cvc", "ssn", "secret"])) return true;
+    if (hasAny(tokens, ["password", "passwd", "passcode", "credential", "username", "login", "signin", "payment", "checkout", "banking", "pin", "otp", "cvv", "cvc", "ssn", "secret"])) return true;
     if (hasAny(tokens, ["email", "phone", "telephone", "mobile", "postcode", "zipcode"])) return true;
     if (tokens.includes("postal") && hasAny(tokens, ["code", "address"])) return true;
     if (tokens.includes("street") && tokens.includes("address")) return true;

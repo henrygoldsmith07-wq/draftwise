@@ -23,3 +23,11 @@ test("provider failure state uses an empty replacement and explicit error flag",
   assert.match(source, /replacement: "", explanation:/u);
   assert.match(source, /error: true/u);
 });
+
+test("turning off or changing the provider cancels the active rewrite", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /const updateProvider = useCallback[\s\S]*cancelRewrite\(\);[\s\S]*updateWorkspace\(\{ provider \}\)/u);
+  assert.match(source, /const updateAiEnabled = useCallback[\s\S]*if \(!aiEnabled\) cancelRewrite\(\);[\s\S]*updateWorkspace\(\{ aiEnabled \}\)/u);
+  assert.match(source, /onSettingsChange=\{updateProvider\}/u);
+  assert.match(source, /onAiEnabledChange=\{updateAiEnabled\}/u);
+});

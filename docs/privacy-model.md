@@ -24,6 +24,7 @@ The web app has no account flow, analytics, telemetry, remote draft database, or
 - `Clear local data` removes the versioned workspace, migrated legacy keys, credentials, and local caches.
 - The extension grants site, provider, and classifier origins separately.
 - Extension revocation is live: disabling AI, changing cloud configuration, revoking permissions, excluding a site, or clearing extension data cancels in-flight cloud work and invalidates the extension AI cache.
+- Web and extension analysis caches use bounded text fingerprints in cache identifiers rather than retaining raw draft text inside cache keys.
 - Open pages observe site-access changes immediately; removed or excluded sites hide Draftwise in the current page, and stale dynamically registered content scripts are unregistered.
 - Local checks remain available when AI is disabled or a provider is unavailable.
 

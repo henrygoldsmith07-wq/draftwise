@@ -58,6 +58,7 @@ const CATEGORY_ALIASES: Record<string, IssueCategory> = {
 
 const VALID_SEVERITIES = new Set<IssueSeverity>(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
+const MAX_PROVIDER_ERROR_RESPONSE_BYTES = 16_384;
 
 function providerAnalysisNow() {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -218,6 +219,40 @@ function validateProviderContent(content: string | null, kind: ProviderResponseK
   return content;
 }
 
+async function readResponseTextLimited(response: Response, maxBytes: number) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    return { text: "", truncated: true };
+  }
+
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const text = await response.text();
+    return { text: text.slice(0, maxBytes), truncated: text.length > maxBytes };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { text, truncated: true };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return { text, truncated: false };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 function providerErrorForStatus(status: number) {
   if (status === 401 || status === 403) return new ProviderError("unauthorized", "The provider rejected this API key.", status);
   if (status === 404) return new ProviderError("invalid-model", "The provider could not find this model or endpoint.", status);
@@ -333,19 +368,19 @@ async function requestProvider(
       { service: "provider", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry },
     );
     if (!response.ok) {
-      const responseText = await response.text().catch(() => "");
-      if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(responseText)) return call(false);
+      const errorBody = await readResponseTextLimited(response, MAX_PROVIDER_ERROR_RESPONSE_BYTES).catch(() => ({ text: "", truncated: true }));
+      if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(errorBody.text)) return call(false);
       throw providerErrorForStatus(response.status);
     }
-    const declaredLength = Number(response.headers.get("content-length") || 0);
-    if (declaredLength > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
     let responseText: string;
     try {
-      responseText = await response.text();
-    } catch {
+      const body = await readResponseTextLimited(response, MAX_PROVIDER_RESPONSE_CHARS);
+      if (body.truncated) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
+      responseText = body.text;
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
       throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
     }
-    if (responseText.length > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
     let payload: unknown;
     try {
       payload = JSON.parse(responseText);

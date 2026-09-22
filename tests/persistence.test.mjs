@@ -105,3 +105,19 @@ test("autosave delay is intentionally debounced instead of per-keystroke", () =>
   assert.ok(AUTO_SAVE_DELAY_MS >= 250);
   assert.ok(AUTO_SAVE_DELAY_MS <= 1_000);
 });
+
+
+test("clear attempts every Draftwise key even when one removal fails", () => {
+  const removed = [];
+  const target = {
+    ...storage(),
+    removeItem(key) {
+      removed.push(key);
+      if (key === LEGACY_STORAGE_KEYS[0]) throw new Error("blocked removal");
+    },
+  };
+  const result = clearWorkspaceStorage(target);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /blocked removal/u);
+  assert.deepEqual(removed, [WORKSPACE_STORAGE_KEY, ...LEGACY_STORAGE_KEYS]);
+});

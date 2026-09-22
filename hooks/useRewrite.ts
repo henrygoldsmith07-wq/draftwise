@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { rewriteWithProvider, ProviderError } from "@/packages/ai/src";
 import type { ProviderSettings, RewriteResult, StylePreferences, WritingGoals } from "@/packages/types/src";
 export { createRewriteRetryArgs } from "@/lib/rewrite-retry";
@@ -59,6 +59,8 @@ export function useRewrite() {
       return current && alternative ? { ...current, replacement: alternative } : current;
     });
   }, []);
+
+  useEffect(() => () => abort.current?.abort(), []);
 
   return { preview, run, cancel, selectAlternative };
 }

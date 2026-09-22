@@ -3,6 +3,6 @@ export interface RewriteActionState {
   error?: boolean;
 }
 
-export function canApplyRewrite(preview: RewriteActionState | null | undefined) {
+export function canApplyRewrite<T extends RewriteActionState>(preview: T | null | undefined): preview is T {
   return Boolean(preview && !preview.loading && !preview.error);
 }

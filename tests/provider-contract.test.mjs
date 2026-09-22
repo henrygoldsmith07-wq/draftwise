@@ -79,6 +79,13 @@ test("malformed provider issues are discarded while exact ranges survive", () =>
   assert.equal(source.slice(issues[0].start, issues[0].end), issues[0].original);
 });
 
+test("provider issue parsing caps valid suggestion cardinality", () => {
+  const source = "repeatd";
+  const issue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const issues = parseAnalysisIssues({ issues: Array.from({ length: 400 }, () => ({ ...issue })) }, source, "chunk-0-7");
+  assert.equal(issues.length, 250);
+});
+
 test("long-document provider calls keep the full analysed text", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

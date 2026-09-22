@@ -87,16 +87,17 @@ test("provider issue parsing caps valid suggestion cardinality", () => {
   assert.equal(issues.length, 250);
 });
 
-test("provider metadata is constrained to supported scores and bounded tone labels", () => {
+test("provider tone metadata is bounded and model score claims are ignored", () => {
   const source = "repeatd";
   const issue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", title: "Spelling", explanation: "Fix it." };
   const result = parseAnalysisResponse({
     issues: [issue],
     tone: Array.from({ length: 30 }, (_, index) => `tone-${index}`),
-    scores: { correctness: 91, overall: 88, injected: 999, nested: { bad: true } },
+    scores: { correctness: 999, overall: 999, injected: 999 },
   }, source);
   assert.ok(result);
-  assert.deepEqual(Object.keys(result.scores).filter((key) => ["correctness", "overall"].includes(key)).sort(), ["correctness", "overall"]);
+  assert.notEqual(result.scores.correctness, 999);
+  assert.notEqual(result.scores.overall, 999);
   assert.equal("injected" in result.scores, false);
   assert.ok(result.tone.length <= 4);
 });

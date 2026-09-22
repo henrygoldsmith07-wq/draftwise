@@ -210,8 +210,17 @@
     // NOTE: message contains text/goals/style/requestId only. Provider and
     // classifier keys stay in the service worker and never enter page context.
     const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => ({ issues: null, error: "AI analysis is unavailable; local suggestions are still active." }));
-    aiPending = false; aiError = response?.error || ""; aiCoverage = response?.aiCoverage || null; element.__draftwiseAiCoverage = aiCoverage;
-    if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
+    if (currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
+    aiPending = false;
+    aiError = response?.error || "";
+    aiCoverage = response?.aiCoverage || null;
+    element.__draftwiseAiCoverage = aiCoverage;
+    if (!response) {
+      aiError = "AI analysis is unavailable; local suggestions are still active.";
+      render();
+      place();
+      return;
+    }
     if (Array.isArray(response.issues)) {
       const aiIssues = response.issues.filter((issue) => issue && issue.source === "ai");
       element.__draftwiseAiIssues = aiIssues;

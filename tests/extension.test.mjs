@@ -339,6 +339,35 @@ test("sensitive field classification includes associated label metadata", async 
   assert.equal(classify(field()), false);
 });
 
+test("sensitive field classification uses surrounding form metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const fieldInForm = (form) => ({
+    type: "text",
+    name: "field-123",
+    id: "field-123",
+    labels: [],
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute() { return ""; },
+    closest(selector) { return selector === "form" ? form : null; },
+  });
+  const form = (id, name = "", aria = "") => ({
+    id,
+    name,
+    getAttribute(key) { return key === "aria-label" ? aria : ""; },
+  });
+
+  assert.equal(classify(fieldInForm(form("login-form"))), true);
+  assert.equal(classify(fieldInForm(form("generated", "checkout"))), true);
+  assert.equal(classify(fieldInForm(form("generated", "", "Payment details"))), true);
+  assert.equal(classify(fieldInForm(form("writing-form", "draft"))), false);
+});
+
 test("permission helpers derive narrow site and provider origins", async () => {
   const source = await readFile(file("extension/permissions.js"), "utf8");
   const context = { URL };

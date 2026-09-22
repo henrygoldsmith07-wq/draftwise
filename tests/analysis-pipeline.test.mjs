@@ -33,6 +33,17 @@ test("analysis cache fingerprints are deterministic and exclude raw credential t
   assert.ok(!cacheKey.includes("sk-secret"));
 });
 
+test("analysis cache keys stay bounded and do not retain raw draft text", () => {
+  const text = "private draft sentence ".repeat(2_000);
+  const first = createAnalysisCacheKey(text, "settings-test", null);
+  const second = createAnalysisCacheKey(text, "settings-test", null);
+  const changed = createAnalysisCacheKey(`${text.slice(0, -1)}!`, "settings-test", null);
+  assert.equal(first, second);
+  assert.notEqual(first, changed);
+  assert.ok(first.length < 120, `cache key unexpectedly grew to ${first.length} characters`);
+  assert.equal(first.includes("private draft sentence"), false);
+});
+
 test("analysis settings invalidate for provider, classifier, policy, goals, and style changes", () => {
   const base = {
     engineVersion: "analysis-engine-v3",

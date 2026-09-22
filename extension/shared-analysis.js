@@ -1298,7 +1298,9 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
         const shift = issue.start >= previousRegion.end ? delta : 0;
         const start = issue.start + shift;
         const end = issue.end + shift;
-        return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original ? [{ ...issue, start, end }] : [];
+        return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original
+            ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
+            : [];
     });
     const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
     const recalculated = region.issues.map((issue) => ({

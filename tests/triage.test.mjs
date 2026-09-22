@@ -91,10 +91,12 @@ test("classifier excerpts redact private keys and credential connection strings"
   const pgpKey = "-----BEGIN PGP PRIVATE KEY BLOCK-----\n" + "B".repeat(120) + "\n-----END PGP PRIVATE KEY BLOCK-----";
   const databaseUrl = "postgres://user:super-secret@example.com:5432/app";
   const redisUrl = "redis://:password@example.com:6379/0";
-  const redacted = redactExcerptForClassifier(`Secrets:\n${privateKey}\n${pgpKey}\n${databaseUrl}\n${redisUrl}`);
+  const truncatedKey = "-----BEGIN PRIVATE KEY-----\n" + "C".repeat(600);
+  const redacted = redactExcerptForClassifier(`Secrets:\n${privateKey}\n${pgpKey}\n${databaseUrl}\n${redisUrl}\n${truncatedKey}`);
 
   assert.equal(redacted.includes("BEGIN OPENSSH PRIVATE KEY"), false);
   assert.equal(redacted.includes("BEGIN PGP PRIVATE KEY BLOCK"), false);
+  assert.equal(redacted.includes("BEGIN PRIVATE KEY"), false);
   assert.equal(redacted.includes("super-secret"), false);
   assert.equal(redacted.includes("redis://"), false);
   assert.match(redacted, /\[private-key\]/u);

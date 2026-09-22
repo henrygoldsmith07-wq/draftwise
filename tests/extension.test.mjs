@@ -401,6 +401,22 @@ test("sensitive field classification covers financial and identity metadata", as
   assert.equal(classify(field("Account summary")), false);
 });
 
+test("dynamic site script IDs stay distinct for long similar hostnames", async () => {
+  const source = await readFile(file("extension/permissions.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const permissions = context.DraftwisePermissions;
+  const shared = "a".repeat(60);
+  const first = `${shared}.one.example.com`;
+  const second = `${shared}.two.example.com`;
+  const firstId = permissions.siteScriptId(first);
+  const secondId = permissions.siteScriptId(second);
+  assert.notEqual(firstId, secondId);
+  assert.ok(firstId.length <= 80);
+  assert.ok(secondId.length <= 80);
+  assert.equal(firstId, permissions.siteScriptId(first));
+});
+
 test("permission helpers derive narrow site and provider origins", async () => {
   const source = await readFile(file("extension/permissions.js"), "utf8");
   const context = { URL };

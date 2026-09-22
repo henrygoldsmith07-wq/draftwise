@@ -651,7 +651,7 @@ export async function analyzeWithProvider(
 
 function localRewrite(text: string, instruction: string): string {
   const lower = instruction.toLocaleLowerCase();
-  let result = text.replace(/\s{2,}/gu, " ").trim();
+  let result = text;
 
   if (lower.includes("shorten") || lower.includes("concise")) {
     result = result
@@ -721,6 +721,12 @@ function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
   return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
 }
 
+function preserveBoundaryWhitespace(original: string, replacement: string) {
+  const leading = original.match(/^\s*/u)?.[0] ?? "";
+  const trailing = original.match(/\s*$/u)?.[0] ?? "";
+  return `${leading}${replacement.trim()}${trailing}`;
+}
+
 function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
   if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
   if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
@@ -731,7 +737,7 @@ function validateRewrite(original: string, replacement: string, allowProtectedCh
       if (replacementCount < originalCount) throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
     }
   }
-  return replacement.trim();
+  return preserveBoundaryWhitespace(original, replacement);
 }
 
 export async function rewriteWithProvider(

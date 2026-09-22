@@ -319,3 +319,39 @@ test("permission helpers derive narrow site and provider origins", async () => {
   assert.equal(permissions.providerPattern("https://api.openai.com/v1"), "https://api.openai.com/*");
   assert.throws(() => permissions.normaliseHostname("example.com/path"));
 });
+
+
+test("sensitive autocomplete tokens remain blocked when section prefixes are present", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+  const field = (autocomplete) => ({
+    type: "text", name: "", id: "", disabled: false, readOnly: false, hidden: false,
+    getAttribute(key) { return key === "autocomplete" ? autocomplete : ""; },
+    closest() { return { getAttribute: () => "" }; },
+  });
+  for (const autocomplete of [
+    "section-checkout cc-number",
+    "shipping cc-csc",
+    "section-billing cc-name",
+    "billing transaction-amount",
+    "section-login current-password webauthn",
+    "section-auth one-time-code",
+  ]) assert.equal(classify(field(autocomplete)), true, autocomplete);
+  assert.equal(classify(field("section-profile organization-title")), false);
+});
+
+test("stale extension AI responses are rejected before shared state mutation", async () => {
+  const content = await readFile(file("extension/content.js"), "utf8");
+  const responseIndex = content.indexOf("const response = await chrome.runtime.sendMessage");
+  const staleGuardIndex = content.indexOf("if (currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;", responseIndex);
+  const pendingMutationIndex = content.indexOf("aiPending = false;", responseIndex);
+  const errorMutationIndex = content.indexOf("aiError = response?.error", responseIndex);
+  const coverageMutationIndex = content.indexOf("aiCoverage = response?.aiCoverage", responseIndex);
+  assert.ok(responseIndex >= 0);
+  assert.ok(staleGuardIndex > responseIndex);
+  assert.ok(pendingMutationIndex > staleGuardIndex);
+  assert.ok(errorMutationIndex > staleGuardIndex);
+  assert.ok(coverageMutationIndex > staleGuardIndex);
+});

@@ -14,6 +14,7 @@ export interface RewritePreviewState extends RewriteResult {
   style: StylePreferences;
   aiEnabled: boolean;
   loading?: boolean;
+  failed?: boolean;
 }
 
 export function useRewrite() {
@@ -44,7 +45,7 @@ export function useRewrite() {
       setPreview({ ...result, label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled });
     } catch (reason: unknown) {
       if (controller.signal.aborted || currentRun !== runId.current) return;
-      setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: args.text, explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local" });
+      setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: args.text, explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local", failed: true });
     }
   }, []);
 

@@ -149,6 +149,11 @@ export default function Home() {
     void requestRewrite(createRewriteRetryArgs(rewritePreview, workspace.provider));
   }, [requestRewrite, rewritePreview, workspace.provider]);
 
+  const updateAiEnabled = useCallback((aiEnabled: boolean) => {
+    if (!aiEnabled) cancelRewrite();
+    updateWorkspace({ aiEnabled });
+  }, [cancelRewrite, updateWorkspace]);
+
   const copyRewrite = useCallback(() => {
     if (rewritePreview?.replacement) void navigator.clipboard?.writeText(rewritePreview.replacement);
   }, [rewritePreview]);
@@ -248,7 +253,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </main>
   );

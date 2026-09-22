@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, CircleHelp, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
@@ -49,6 +49,25 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   );
 }
 
+function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Start a new draft?</DialogTitle>
+          <DialogDescription>
+            This replaces the current local document with a blank draft. The current text remains available through Undo during this session.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Start new draft</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
   const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
@@ -64,6 +83,7 @@ export default function Home() {
   const [dismissedIssueIds, setDismissedIssueIds] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [newDraftOpen, setNewDraftOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [customInstruction, setCustomInstruction] = useState("");
@@ -96,6 +116,16 @@ export default function Home() {
   const updateGoals = useCallback((patch: Partial<WritingGoals>) => {
     updateWorkspace((current) => ({ ...current, goals: { ...current.goals, ...patch } }));
   }, [updateWorkspace]);
+
+  const updateProvider = useCallback((provider: typeof workspace.provider) => {
+    cancelRewrite();
+    updateWorkspace({ provider });
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateAiEnabled = useCallback((aiEnabled: boolean) => {
+    if (!aiEnabled) cancelRewrite();
+    updateWorkspace({ aiEnabled });
+  }, [cancelRewrite, updateWorkspace]);
 
   const openIssues = useMemo(
     () => getOpenIssues(issues, dismissedIssueIds),
@@ -151,17 +181,25 @@ export default function Home() {
   }, [requestRewrite, rewritePreview, workspace.provider]);
 
   const copyRewrite = useCallback(() => {
-    if (rewritePreview?.replacement) void navigator.clipboard?.writeText(rewritePreview.replacement);
+    if (rewritePreview && canApplyRewritePreview(rewritePreview)) void navigator.clipboard?.writeText(rewritePreview.replacement);
   }, [rewritePreview]);
 
-  const newDocument = useCallback(() => {
+  const startNewDocument = useCallback(() => {
     cancelRewrite();
     updateWorkspace({ title: "Untitled draft", draft: "" });
-    resetHistory("");
+    commit("");
     setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, resetHistory, setSelection, updateWorkspace]);
+  }, [cancelRewrite, commit, setSelection, updateWorkspace]);
+
+  const newDocument = useCallback(() => {
+    if (!workspace.draft.trim()) {
+      startNewDocument();
+      return;
+    }
+    setNewDraftOpen(true);
+  }, [startNewDocument, workspace.draft]);
 
   const clearDocument = useCallback(() => {
     cancelRewrite();
@@ -203,6 +241,7 @@ export default function Home() {
     clearPersistedData();
     resetHistory(SAMPLE_DOCUMENT);
     setSettingsOpen(false);
+    setNewDraftOpen(false);
     setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
     setActiveIssueId(null);
@@ -257,8 +296,9 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={clearLocalData} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
     </main>
   );
 }

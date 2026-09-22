@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   createAnalysisChunks,
@@ -197,4 +198,11 @@ test("issue merging stays deterministic for thousands of candidates", () => {
   const elapsed = performance.now() - start;
   assert.equal(merged.length, issues.length);
   assert.ok(elapsed < 1_500, `merge took ${elapsed.toFixed(1)}ms`);
+});
+
+
+test("web analysis cache is cleared when private credential material changes", async () => {
+  const hook = await readFile(new URL("../hooks/useAnalysis.ts", import.meta.url), "utf8");
+  assert.match(hook, /cache\.current\.clear\(\);\s*\}, \[classifier\?\.apiKey, settings\.apiKey, settings\.customHeaders\]\);/u);
+  assert.doesNotMatch(hook, /settingsFingerprint[\s\S]{0,500}apiKey:\s*settings\.apiKey/u);
 });

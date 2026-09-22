@@ -416,3 +416,57 @@ test("rewrite protection rejects duplicated or newly introduced protected values
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("natural-language protected change permission is scoped to the requested token kind", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "Meet on 2026-09-19 at https://evil.example for ticket ABC-999.",
+      explanation: "Updated the date.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("natural-language protected change permission allows only the requested date change", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com for ticket ABC-123.";
+  const replacement = "Meet on 2026-09-19 at https://example.com for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement,
+      explanation: "Updated the date.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings);
+    assert.equal(result.replacement, replacement);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("date edits inside quotes preserve the rest of the quoted passage", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = 'The note says "Meet on 2026-09-18 at https://example.com".';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: 'The note says "Meet on 2026-09-19 at https://example.com".',
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings);
+    assert.match(result.replacement, /2026-09-19/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

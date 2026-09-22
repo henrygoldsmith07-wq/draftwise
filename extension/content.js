@@ -6,14 +6,30 @@
   const dom = globalThis.DraftwiseDom;
   if (!grammar || typeof grammar.analyzeLocally !== "function" || !classifier || !dom) return;
 
-  const settings = {
+  const defaultSettings = {
     excludedSites: [],
     disabledSites: [],
     disabledFields: [],
+    siteAccess: [],
     aiEnabled: false,
     goals: { audience: "general", intent: "inform", tone: "professional" },
     style: { dialect: "en-GB", personalDictionary: [], names: [], ignoredWords: [], ignoredRuleIds: [], preferredTerminology: {}, oxfordComma: true, allowContractions: true, passiveVoiceSensitivity: "normal", preferredSentenceLength: "balanced", blockedWords: [] },
   };
+  const settings = {
+    ...defaultSettings,
+    excludedSites: [],
+    disabledSites: [],
+    disabledFields: [],
+    siteAccess: [],
+    goals: { ...defaultSettings.goals },
+    style: { ...defaultSettings.style },
+  };
+
+  function defaultSetting(key) {
+    const value = defaultSettings[key];
+    if (Array.isArray(value)) return [];
+    return value && typeof value === "object" ? { ...value } : value;
+  }
   let activeField = null;
   let activeIssues = [];
   let scanTimer = 0;
@@ -28,9 +44,12 @@
   let aiCoverage = null;
 
   const host = () => location.hostname.replace(/^www\./u, "");
-  const siteIsDisabled = () => settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)) || settings.disabledSites.includes(host());
+  const siteHasAccess = () => Array.isArray(settings.siteAccess) && settings.siteAccess.includes(host());
+  const siteIsDisabled = () => !siteHasAccess()
+    || (Array.isArray(settings.excludedSites) && settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)))
+    || (Array.isArray(settings.disabledSites) && settings.disabledSites.includes(host()));
   const fieldSignature = (element) => `${host()}|${element.name || element.id || element.getAttribute("aria-label") || element.tagName}`;
-  const fieldIsDisabled = (element) => settings.disabledFields.includes(fieldSignature(element));
+  const fieldIsDisabled = (element) => Array.isArray(settings.disabledFields) && settings.disabledFields.includes(fieldSignature(element));
   const isSensitive = (element) => classifier.isSensitiveField(element);
   const isEditable = (element) => Boolean(element && !isSensitive(element) && !fieldIsDisabled(element) && element.matches(dom.EDITABLE_SELECTOR));
   const textOf = (element) => element.isContentEditable ? dom.buildEditableTextMap(element).text : element.value;
@@ -55,6 +74,25 @@
 
   function clearPanel() { while (panel?.firstChild) panel.removeChild(panel.firstChild); }
   function textNode(tag, value, className) { const element = document.createElement(tag); element.textContent = value; if (className) element.className = className; return element; }
+
+  function deactivateCurrentPage() {
+    if (scanTimer) window.clearTimeout(scanTimer);
+    if (aiTimer) window.clearTimeout(aiTimer);
+    scanTimer = 0;
+    aiTimer = 0;
+    requestId += 1;
+    activeIssues = [];
+    aiPending = false;
+    aiError = "";
+    aiCoverage = null;
+    if (activeField) {
+      activeField.__draftwiseAiIssues = [];
+      activeField.__draftwiseAiCoverage = null;
+    }
+    activeField = null;
+    if (button) button.hidden = true;
+    if (panel) panel.hidden = true;
+  }
 
   function aiStateLabel() {
     if (!settings.aiEnabled) return "Local";
@@ -183,17 +221,26 @@
     initShadow(); dom.bindEditableSubtree(document.documentElement, bind);
     const observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    chrome.storage.onChanged.addListener((changes) => {
-      for (const [key, value] of Object.entries(changes)) settings[key] = value.newValue;
-      cache.clear(); requestId += 1;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area && area !== "local") return;
+      for (const [key, value] of Object.entries(changes)) {
+        if (!(key in defaultSettings)) continue;
+        settings[key] = value.newValue === undefined ? defaultSetting(key) : value.newValue;
+      }
+      cache.clear();
+      requestId += 1;
+      if (aiTimer) window.clearTimeout(aiTimer);
+      aiTimer = 0;
       if (siteIsDisabled() || (activeField && !isEditable(activeField))) {
-        activeIssues = []; aiPending = false; aiError = ""; aiCoverage = null; button.hidden = true; panel.hidden = true;
+        deactivateCurrentPage();
       } else {
         dom.bindEditableSubtree(document.documentElement, bind);
-        if (activeField) void scan(activeField);
+        const focused = document.activeElement;
+        if (isEditable(focused)) void scan(focused);
+        else if (activeField) void scan(activeField);
       }
     });
   }
 
-  chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "aiEnabled", "goals", "style"], init);
+  chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "siteAccess", "aiEnabled", "goals", "style"], init);
 })();

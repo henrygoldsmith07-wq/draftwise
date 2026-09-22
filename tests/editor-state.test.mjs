@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const pageUrl = new URL("../app/page.tsx", import.meta.url);
+const rewriteUrl = new URL("../hooks/useRewrite.ts", import.meta.url);
+
+test("new drafts require confirmation and preserve the previous text in session history", async () => {
+  const page = await readFile(pageUrl, "utf8");
+  assert.match(page, /Start a new draft\?/u);
+  assert.match(page, /if \(!workspace\.draft\.trim\(\)\)/u);
+  const start = page.match(/const startNewDocument = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
+  assert.ok(start);
+  assert.match(start[1], /commit\(""\)/u);
+  assert.doesNotMatch(start[1], /resetHistory/u);
+});
+
+test("destructive local-data clearing is confirmed and editor shortcuts do not fire behind dialogs", async () => {
+  const page = await readFile(pageUrl, "utf8");
+  assert.match(page, /Clear all local Draftwise data\?/u);
+  assert.match(page, /settingsOpen \|\| shortcutsOpen \|\| newDraftOpen \|\| clearDataOpen/u);
+  assert.match(page, /setClearDataOpen\(true\)/u);
+});
+
+test("rewrite-context changes cancel stale previews and requests", async () => {
+  const page = await readFile(pageUrl, "utf8");
+  assert.match(page, /const updateProvider = useCallback[\s\S]*cancelRewrite\(\)[\s\S]*updateWorkspace\(\{ provider \}\)/u);
+  assert.match(page, /const updateStyle = useCallback[\s\S]*cancelRewrite\(\)[\s\S]*updateWorkspace\(\{ style \}\)/u);
+  assert.match(page, /const updateGoals = useCallback[\s\S]*cancelRewrite\(\)/u);
+  assert.match(page, /if \(!aiEnabled\) cancelRewrite\(\)/u);
+
+  const rewrite = await readFile(rewriteUrl, "utf8");
+  assert.match(rewrite, /replacement: "", explanation:/u);
+  assert.match(rewrite, /useEffect\(\(\) => \(\) => abort\.current\?\.abort\(\), \[\]\)/u);
+});

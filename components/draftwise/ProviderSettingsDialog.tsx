@@ -19,7 +19,7 @@ interface ProviderSettingsDialogProps {
   onStyleChange: (style: StylePreferences) => void;
   onAiEnabledChange: (enabled: boolean) => void;
   onForgetKeys?: () => void;
-  onSave?: () => void;
+  onSave?: () => { ok: true } | { ok: false; error: string };
   onClearData: () => void;
 }
 
@@ -43,7 +43,8 @@ export function ProviderSettingsDialog({
   const classifierValue: ClassifierSettings = classifier ?? { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider" };
   const patchClassifier = (patch: Partial<ClassifierSettings>) => onClassifierChange?.({ ...classifierValue, ...patch });
   const save = () => {
-    onSave?.();
+    const result = onSave?.();
+    if (result && !result.ok) return;
     onOpenChange(false);
   };
   const forget = () => {

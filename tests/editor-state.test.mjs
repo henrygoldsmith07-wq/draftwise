@@ -48,3 +48,13 @@ test("Save & close remains open when immediate persistence fails", async () => {
   assert.match(settings, /if \(result && !result\.ok\) return;/u);
   assert.match(settings, /onOpenChange\(false\);/u);
 });
+
+test("undo and redo cancel stale rewrite state and reset selection", async () => {
+  const page = await readFile(pageUrl, "utf8");
+  const applyHistory = page.match(/const applyHistory = useCallback\(\(next: string \| undefined\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
+  assert.ok(applyHistory, "applyHistory callback should exist");
+  assert.match(applyHistory[1], /cancelRewrite\(\)/u);
+  assert.match(applyHistory[1], /updateDraft\(next, false\)/u);
+  assert.match(applyHistory[1], /setSelection\(\{ start: 0, end: 0 \}\)/u);
+  assert.match(applyHistory[1], /setActiveIssueId\(null\)/u);
+});

@@ -32,7 +32,7 @@ type IssueFilter = "all" | "grammar" | "style";
 function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const shortcuts = [
     ["Save locally", "⌘ / Ctrl + S"],
-    ["Accept all suggestions", "⌘ / Ctrl + Enter"],
+    ["Accept visible suggestions", "⌘ / Ctrl + Enter"],
     ["Close rewrite preview", "Esc"],
     ["Open shortcuts", "?"],
   ];
@@ -170,10 +170,10 @@ export default function Home() {
   }, [updateDraft, workspace.draft]);
 
   const acceptAll = useCallback(() => {
-    const next = applyIssueReplacements(workspace.draft, openIssues);
+    const next = applyIssueReplacements(workspace.draft, visibleIssues);
     if (next !== workspace.draft) updateDraft(next);
     setActiveIssueId(null);
-  }, [openIssues, updateDraft, workspace.draft]);
+  }, [updateDraft, visibleIssues, workspace.draft]);
 
   const applyHistory = useCallback((next: string | undefined) => {
     if (next !== undefined) {

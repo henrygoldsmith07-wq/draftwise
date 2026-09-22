@@ -34,6 +34,7 @@ interface EditorWorkspaceProps {
   goals: WritingGoals;
   style: StylePreferences;
   analysis: AnalysisResult;
+  openIssues: WritingIssue[];
   visibleIssues: WritingIssue[];
   activeIssueId: string | null;
   filter: IssueFilter;
@@ -124,7 +125,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="heading-actions">
             <Button variant="outline" size="sm" onClick={props.onNewDocument}><FileText size={14} /> New</Button>
             <Button variant="outline" size="sm" onClick={props.onRestoreSample}><RotateCw size={14} /> Sample</Button>
-            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.visibleIssues.some((issue) => issue.replacement && issue.replacement !== issue.original)}><CheckCheck size={14} /> Accept all</Button>
+            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.openIssues.some((issue) => issue.replacement && issue.replacement !== issue.original)}><CheckCheck size={14} /> Accept all</Button>
           </div>
         </div>
 
@@ -174,7 +175,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             </div>
           </div>
           <div className="editor-scroll-wrap">
-            <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.analysis.issues} activeIssueId={props.activeIssueId} /></div>
+            <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.openIssues} activeIssueId={props.activeIssueId} /></div>
             <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} aria-label="Draft editor" placeholder="Start writing…" />
           </div>
           <div className="editor-footer">
@@ -205,9 +206,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="issue-tabs">
             <Tabs value={props.filter} onValueChange={(value) => props.onFilterChange(value as IssueFilter)}>
               <TabsList variant="line">
-                <TabsTrigger value="all">All <span>{props.analysis.issues.length}</span></TabsTrigger>
-                <TabsTrigger value="grammar">Correctness <span>{props.analysis.issues.filter((item) => categoryMatches(item, "grammar")).length}</span></TabsTrigger>
-                <TabsTrigger value="style">Style <span>{props.analysis.issues.filter((item) => categoryMatches(item, "style")).length}</span></TabsTrigger>
+                <TabsTrigger value="all">All <span>{props.openIssues.length}</span></TabsTrigger>
+                <TabsTrigger value="grammar">Correctness <span>{props.openIssues.filter((item) => categoryMatches(item, "grammar")).length}</span></TabsTrigger>
+                <TabsTrigger value="style">Style <span>{props.openIssues.filter((item) => categoryMatches(item, "style")).length}</span></TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

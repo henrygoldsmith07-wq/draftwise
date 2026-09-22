@@ -44,6 +44,17 @@ function settingsFingerprint(value) {
   return "settings-" + (hash >>> 0).toString(16) + "-" + source.length;
 }
 
+function textFingerprint(text) {
+  let first = 2166136261;
+  let second = 2654435761;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ (code + ((index & 255) << 8)), 2246822519);
+  }
+  return text.length + "-" + (first >>> 0).toString(16) + "-" + (second >>> 0).toString(16);
+}
+
 function safeCustomHeadersFingerprint(raw) {
   try {
     const parsed = JSON.parse(raw || "{}");
@@ -245,10 +256,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       }
       const cacheKey = JSON.stringify({
-        textFingerprint: settingsFingerprint(text),
-        textLength: text.length,
-        goals: message.goals,
-        style: message.style,
+        textFingerprint: textFingerprint(text),
+        contextFingerprint: settingsFingerprint({ goals: message.goals, style: message.style }),
         range: message.changedRange,
         settings: settingsFingerprint({
           engineVersion: "analysis-engine-v4",

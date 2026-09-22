@@ -217,6 +217,10 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);
   assert.match(options, /classifier:\s*\{\s*\.\.\.state\.classifier,\s*apiKey:\s*""/iu);
   assert.match(options, /clear-ai-cache/iu);
+  assert.match(options, /previousCloudPatterns/iu);
+  assert.match(options, /desiredCloudPatterns/iu);
+  assert.match(options, /for \(const site of state\.siteAccess\)/u);
+  assert.match(options, /if \(!desiredCloudPatterns\.has\(pattern\)\) await permissionRemove\(\{ origins: \[pattern\] \}\);/u);
   assert.doesNotMatch(options, /draftwise-triage-v1|classifierModel/iu);
 });
 

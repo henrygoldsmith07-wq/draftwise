@@ -86,6 +86,21 @@ test("classifier excerpts minimise transmitted text and redact structured tokens
   assert.equal(redactExcerptForClassifier("The account request references the previous study.").includes("[identifier]"), false);
 });
 
+test("classifier excerpts redact private keys and credential connection strings", () => {
+  const privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "A".repeat(120) + "\n-----END OPENSSH PRIVATE KEY-----";
+  const pgpKey = "-----BEGIN PGP PRIVATE KEY BLOCK-----\n" + "B".repeat(120) + "\n-----END PGP PRIVATE KEY BLOCK-----";
+  const databaseUrl = "postgres://user:super-secret@example.com:5432/app";
+  const redisUrl = "redis://:password@example.com:6379/0";
+  const redacted = redactExcerptForClassifier(`Secrets:\n${privateKey}\n${pgpKey}\n${databaseUrl}\n${redisUrl}`);
+
+  assert.equal(redacted.includes("BEGIN OPENSSH PRIVATE KEY"), false);
+  assert.equal(redacted.includes("BEGIN PGP PRIVATE KEY BLOCK"), false);
+  assert.equal(redacted.includes("super-secret"), false);
+  assert.equal(redacted.includes("redis://"), false);
+  assert.match(redacted, /\[private-key\]/u);
+  assert.match(redacted, /\[connection-string\]/u);
+});
+
 test("classifier responses never rewrite: replacement fields are discarded", () => {
   const inputs = [{ chunkId: "chunk-0", excerpt: "hello", startOffset: 0, endOffset: 5, signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false }, categories: ["clarity"] }];
   const decisions = parseClassifierDecisions({

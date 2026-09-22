@@ -111,3 +111,17 @@ test("readability keeps a legitimate zero score instead of falling back", () => 
   const stats = { words: 10, characters: 40, sentences: 1, paragraphs: 1, readingTime: 1, readability: 0, longSentences: 0, fillerWords: 0, passiveVoice: 0, passiveVoicePercentage: 0, averageSentenceLength: 10, longestSentence: "", sentenceLengths: [10], paragraphLengths: [10], vocabularyDiversity: 0.8, repeatedWords: [], repeatedPhrases: [], fillerWordFrequency: [], commonWords: [] };
   assert.equal(scoreWriting(stats, [], { audience: "general", intent: "inform", tone: "neutral" }, "Short text.").readability, 0);
 });
+
+test("issue IDs change when different text produces the same rule at the same span", () => {
+  const first = analyzeLocally("repeatd").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  const second = analyzeLocally("recieve").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  const repeated = analyzeLocally("repeatd").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(repeated);
+  assert.equal(first.start, second.start);
+  assert.equal(first.end, second.end);
+  assert.notEqual(first.original, second.original);
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.id, repeated.id);
+});

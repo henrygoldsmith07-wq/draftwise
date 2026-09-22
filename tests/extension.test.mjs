@@ -10,7 +10,8 @@ const file = (name) => new URL(name, root);
 
 function browserLikeContext() {
   const listeners = { installed: [], startup: [], changed: [], removed: [], clicked: [], message: [] };
-  const storage = { values: { siteAccess: [], disabledSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
+  const storage = { values: { siteAccess: [], disabledSites: [], excludedSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
+  const scripting = { registered: new Map(), unregistered: [] };
   const event = (name) => ({ addListener(handler) { listeners[name].push(handler); } });
   const context = {
     URL,
@@ -40,11 +41,21 @@ function browserLikeContext() {
       onRemoved: event("removed"),
     },
     scripting: {
-      registerContentScripts(_value, callback) { callback?.(); },
-      unregisterContentScripts(_value, callback) { callback?.(); },
+      registerContentScripts(value, callback) {
+        for (const script of value || []) scripting.registered.set(script.id, script);
+        callback?.();
+      },
+      unregisterContentScripts(value, callback) {
+        for (const id of value?.ids || []) {
+          scripting.registered.delete(id);
+          scripting.unregistered.push(id);
+        }
+        callback?.();
+      },
+      getRegisteredContentScripts(_filter, callback) { callback([...scripting.registered.values()]); },
     },
   };
-  return { context, listeners, storage };
+  return { context, listeners, storage, scripting };
 }
 
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
@@ -76,6 +87,72 @@ test("generated bundles load at runtime and the service worker starts without re
   assert.ok(serviceWorker.storage.writes >= 1);
 });
 
+test("clearing site access unregisters stale dynamically registered scripts", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    siteAccess: [],
+    disabledSites: [],
+    excludedSites: [],
+  };
+  runtime.scripting.registered.set("draftwise-site-example-com", {
+    id: "draftwise-site-example-com",
+    matches: ["https://example.com/*"],
+  });
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  assert.equal(runtime.listeners.changed.length, 1);
+  runtime.listeners.changed[0]({ siteAccess: { oldValue: ["example.com"], newValue: undefined } }, "local");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.scripting.registered.has("draftwise-site-example-com"), false);
+  assert.ok(runtime.scripting.unregistered.includes("draftwise-site-example-com"));
+});
+
+test("disabling AI aborts an in-flight extension cloud request", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    aiEnabled: true,
+    provider: {
+      provider: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+      model: "test-model",
+      apiKey: "secret",
+      temperature: 0.2,
+      maxTokens: 900,
+      customHeaders: "",
+    },
+  };
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  let aborted = false;
+  runtime.context.DraftwiseProvider.analyzeWithTriage = (_text, _goals, _provider, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => {
+      aborted = true;
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+
+  const handler = runtime.listeners.message[0];
+  handler(
+    {
+      type: "analyse",
+      requestId: 1,
+      text: "This is a long draft sentence that is currently being reviewed by the configured provider.",
+      goals: { audience: "general", intent: "inform", tone: "neutral" },
+      style: {},
+    },
+    { tab: { id: 1 }, frameId: 0 },
+    () => undefined,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  runtime.listeners.changed[0]({ aiEnabled: { oldValue: true, newValue: false } }, "local");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(aborted, true);
+});
+
 test("extension scripts parse and keep provider secrets out of the content script", async () => {
   for (const name of ["extension/content.js", "extension/background.js", "extension/options.js", "extension/field-classification.js", "extension/permissions.js", "extension/dom-utils.js", "extension/shared-analysis.js", "extension/shared-provider.js"]) {
     const result = spawnSync(process.execPath, ["--check", name], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
@@ -91,6 +168,9 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(content, /AI unavailable/iu);
   assert.match(content, /Checking AI\.\.\./iu);
   assert.match(content, /filter\(\(issue\) => issue && issue\.source === "ai"\)/iu);
+  assert.match(content, /siteAccess/iu);
+  assert.match(content, /value\.newValue === undefined \? defaultSetting\(key\)/iu);
+  assert.match(content, /deactivateCurrentPage/iu);
   assert.doesNotMatch(content, /__draftwiseLocalResult\s*=\s*\{\s*\.\.\.local,\s*issues:\s*response\.issues/iu);
   const background = await readFile(file("extension/background.js"), "utf8");
   assert.match(background, /chrome\.storage\.local\.get/iu);

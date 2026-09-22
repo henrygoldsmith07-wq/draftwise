@@ -100,6 +100,19 @@ export interface AnalysisDiagnostics {
   engine: AnalysisEngine;
 }
 
+export interface TriageCoverage {
+  candidateChunks: number;
+  providerChunks: number;
+  skippedDueToLimit: number;
+}
+
+export interface AiCoverage {
+  requestedChunks: number;
+  successfulChunks: number;
+  failedChunks: number;
+  skippedChunks: number;
+}
+
 export interface AnalysisResult {
   issues: WritingIssue[];
   tone: string[];
@@ -112,7 +125,9 @@ export interface AnalysisResult {
   triage?: {
     decisions: ClassifierChunkDecision[];
     metrics: TriageMetrics;
+    coverage?: TriageCoverage;
   };
+  aiCoverage?: AiCoverage;
 }
 
 export interface WritingGoals {
@@ -228,6 +243,8 @@ export interface ClassifierChunkInput {
 export interface ClassifierChunkDecision {
   chunkId: string;
   decision: TriageDecision;
+  /** The exact classifier label, retained for live threshold evaluation. */
+  label?: string;
   categories: TriageCategory[];
   confidence: number;
   reason: string;

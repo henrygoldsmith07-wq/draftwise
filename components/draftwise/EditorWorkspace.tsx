@@ -41,6 +41,7 @@ interface EditorWorkspaceProps {
   statusLabel: string;
   analysisError?: string | null;
   savedLabel: string;
+  saveError?: string | null;
   selection: { start: number; end: number };
   selectedText: string;
   customInstruction: string;
@@ -182,7 +183,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         </div>
 
         {props.analysisError ? <div className="analysis-error" role="status"><span>AI analysis paused: {props.analysisError}</span><button onClick={props.onOpenSettings} type="button">Review settings</button></div> : null}
-        <div className="workspace-footnote"><span><ShieldCheck size={14} /> No account required</span><span>{props.savedLabel}</span><button onClick={props.onOpenSettings} type="button">Privacy controls</button></div>
+        <div className="workspace-footnote"><span><ShieldCheck size={14} /> No account required</span><span role={props.saveError ? "status" : undefined} title={props.saveError ?? undefined}>{props.saveError ? "Could not save locally" : props.savedLabel}</span><button onClick={props.onOpenSettings} type="button">Privacy controls</button></div>
       </section>
 
       {props.suggestionsOpen ? (

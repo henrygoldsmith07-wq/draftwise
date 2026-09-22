@@ -85,6 +85,9 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.ok(!/apiKey|innerHTML|dangerouslySetInnerHTML/iu.test(content));
   assert.match(content, /textContent/iu);
   assert.match(content, /analyzeLocallyIncremental/iu);
+  assert.match(content, /__draftwiseAiIssues/iu);
+  assert.match(content, /filter\(\(issue\) => issue && issue\.source === "ai"\)/iu);
+  assert.doesNotMatch(content, /__draftwiseLocalResult\s*=\s*\{\s*\.\.\.local,\s*issues:\s*response\.issues/iu);
   const background = await readFile(file("extension/background.js"), "utf8");
   assert.match(background, /chrome\.storage\.local\.get/iu);
   assert.match(background, /shared-provider/iu);

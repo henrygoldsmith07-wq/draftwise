@@ -1043,7 +1043,7 @@ export function analyzeLocallyIncremental(
   const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
   const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
   const delta = nextText.length - previousText.length;
-  const retained = previousIssues.flatMap((issue) => {
+  const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
     if (issue.start < previousRegion.end && issue.end > previousRegion.start) return [];
     const shift = issue.start >= previousRegion.end ? delta : 0;
     const start = issue.start + shift;

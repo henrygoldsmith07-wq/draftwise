@@ -128,14 +128,20 @@
     const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => ({ issues: null, error: "AI analysis is unavailable; local suggestions are still active." }));
     aiPending = false; aiError = response?.error || "";
     if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
-    if (Array.isArray(response.issues)) { activeIssues = response.issues; element.__draftwiseLocalResult = { ...local, issues: response.issues }; }
+    if (Array.isArray(response.issues)) {
+      const aiIssues = response.issues.filter((issue) => issue && issue.source === "ai");
+      element.__draftwiseAiIssues = aiIssues;
+      activeIssues = [...(local.issues || []), ...aiIssues];
+    }
     render(); place();
   }
 
   async function scan(element) {
     if (!isEditable(element) || siteIsDisabled()) return;
     const text = textOf(element); const previous = element.__draftwiseText || ""; const previousResult = element.__draftwiseLocalResult || null; element.__draftwiseText = text; activeField = element;
-    const local = localAnalysis(text, previous, previousResult); element.__draftwiseLocalResult = local;
+    const local = localAnalysis(text, previous, previousResult);
+    element.__draftwiseLocalResult = local;
+    element.__draftwiseAiIssues = [];
     activeIssues = local.issues || []; aiError = ""; aiPending = false; render(); place();
     // Cancel any pending cloud triage from rapid typing (cancellation support).
     if (aiTimer) window.clearTimeout(aiTimer);

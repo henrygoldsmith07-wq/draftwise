@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
 import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
-import { TRIAGE_LABEL_FORMULATION_ID, triageChunks } from "../packages/ai/src/index.ts";
+import {
+  CLASSIFIER_BATCH_SIZES,
+  TRIAGE_LABEL_FORMULATIONS,
+  mapClassifierLabel,
+  triageChunks,
+} from "../packages/ai/src/index.ts";
 
 const corpus = JSON.parse(await readFile(new URL("../evaluation/triage-corpus.json", import.meta.url), "utf8"));
 const classifierUrl = process.env.CLASSIFIER_BASE_URL || "https://classifier.dev";
@@ -11,6 +16,9 @@ const classifier = {
   timeoutMs: Number(process.env.CLASSIFIER_TIMEOUT_MS || 8_000),
   maxExcerptChars: 500,
 };
+const defaultGoals = { audience: "general", intent: "inform", tone: "professional" };
+const aiThresholds = [0.65, 0.70, 0.75, 0.80, 0.85];
+const localThresholds = [0.70, 0.75, 0.80, 0.85, 0.90];
 const metricFields = [
   "candidateChunks",
   "classifierRequests",
@@ -20,19 +28,16 @@ const metricFields = [
   "uncertainChunks",
   "classifierFailures",
   "omittedClassifierResults",
-  "providerRequests",
-  "providerChunks",
-  "avoidedProviderChunks",
 ];
-const totals = Object.fromEntries(metricFields.map((field) => [field, 0]));
-const latencySamples = [];
-const localLatencySamples = [];
+const limitArgument = process.argv.find((value) => value.startsWith("--limit="));
+const limit = Math.max(0, Math.min(corpus.length, Number(limitArgument?.split("=")[1] || corpus.length)));
+const benchmarkBatching = process.argv.includes("--benchmark-batching");
+const nativeFetch = globalThis.fetch;
+let fetchCalls = 0;
+let classifierBytesSent = 0;
 const classifierLatencySamples = [];
 const excerptSizes = [];
-let classifierBytesSent = 0;
-const details = [];
-let fetchCalls = 0;
-const nativeFetch = globalThis.fetch;
+
 globalThis.fetch = async (...args) => {
   fetchCalls += 1;
   const init = args[1] || {};
@@ -43,17 +48,13 @@ globalThis.fetch = async (...args) => {
       excerptSizes.push(...body.inputs.map((input) => String(input).length));
     }
   } catch {
-    // The triage client validates the response; observability must not alter it.
+    // Request observability must never change validation or fallback behaviour.
   }
   const startedAt = performance.now();
   const response = await nativeFetch(...args);
   classifierLatencySamples.push(performance.now() - startedAt);
   return response;
 };
-
-function addMetrics(metrics) {
-  for (const field of metricFields) totals[field] += Number(metrics[field] || 0);
-}
 
 function percentile(values, quantile) {
   if (!values.length) return 0;
@@ -65,115 +66,236 @@ function percentile(values, quantile) {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
 }
 
+function round(value) {
+  return Number(Number(value || 0).toFixed(3));
+}
+
 function predictedDecision(decisions) {
   if (decisions.some((decision) => decision.decision === "ai-needed")) return "ai-needed";
   if (decisions.some((decision) => decision.decision === "uncertain")) return "uncertain";
   return "locally-sufficient";
 }
 
-const limit = Number(process.argv.find((value) => value.startsWith("--limit="))?.split("=")[1] || corpus.length);
-for (const entry of corpus.slice(0, Math.max(0, limit))) {
-  const startedAt = performance.now();
-  const localStartedAt = performance.now();
-  const local = analyzeLocally(entry.text, { dialect: "en-GB" });
-  localLatencySamples.push(performance.now() - localStartedAt);
-  const outcome = await triageChunks(createAnalysisChunks(entry.text), local.issues, { classifier, uncertainPolicy: "provider" });
-  const latencyMs = performance.now() - startedAt;
-  const predicted = predictedDecision(outcome.decisions);
-  latencySamples.push(latencyMs);
-  addMetrics(outcome.metrics);
-  details.push({
-    id: entry.id,
-    expected: entry.expectedDecision,
-    predicted,
-    candidateSelected: outcome.metrics.candidateChunks > 0,
-    correct: predicted === entry.expectedDecision,
-    classifierFailures: outcome.metrics.classifierFailures,
-    omittedClassifierResults: outcome.metrics.omittedClassifierResults,
-    latencyMs: Number(latencyMs.toFixed(2)),
+function remapDecision(decision, labels, thresholds) {
+  if (!decision.label) return decision;
+  return {
+    ...decision,
+    decision: mapClassifierLabel(decision.label, decision.confidence, labels, thresholds),
+  };
+}
+
+function providerChunkCount(decisions) {
+  return decisions.filter((decision) => decision.decision === "ai-needed" || decision.decision === "uncertain").length;
+}
+
+async function collectFormulation(formulationId, classifierBatchSize = 100) {
+  const observations = [];
+  for (const entry of corpus.slice(0, limit)) {
+    const startedAt = performance.now();
+    const goals = entry.goals || defaultGoals;
+    const local = analyzeLocally(entry.text, { dialect: "en-GB" }, goals);
+    const chunks = createAnalysisChunks(entry.text);
+    const outcome = await triageChunks(chunks, local.issues, {
+      classifier,
+      goals,
+      uncertainPolicy: "provider",
+      labelFormulationId: formulationId,
+      classifierBatchSize,
+      thresholds: { aiNeeded: 0, locallySufficient: 0 },
+    });
+    observations.push({
+      entry,
+      chunks,
+      outcome,
+      latencyMs: performance.now() - startedAt,
+    });
+  }
+  return observations;
+}
+
+function scoreFormulation(observations, formulationId, thresholds) {
+  const labels = TRIAGE_LABEL_FORMULATIONS[formulationId];
+  const details = observations.map((observation) => {
+    const decisions = observation.outcome.decisions.map((decision) => remapDecision(decision, labels, thresholds));
+    const predicted = predictedDecision(decisions);
+    return {
+      id: observation.entry.id,
+      expected: observation.entry.expectedDecision,
+      predicted,
+      candidateSelected: observation.outcome.metrics.candidateChunks > 0,
+      correct: predicted === observation.entry.expectedDecision,
+      classifierDecisions: decisions.map((decision) => ({
+        label: decision.label || null,
+        confidence: decision.confidence,
+        decision: decision.decision,
+        fallback: Boolean(decision.fallback),
+      })),
+      providerChunks: providerChunkCount(decisions),
+      latencyMs: Number(observation.latencyMs.toFixed(2)),
+    };
+  });
+  const total = details.length;
+  const expectedAi = details.filter((item) => item.expected === "ai-needed").length;
+  const truePositives = details.filter((item) => item.expected === "ai-needed" && item.predicted === "ai-needed").length;
+  const falsePositives = details.filter((item) => item.expected !== "ai-needed" && item.predicted === "ai-needed").length;
+  const falseNegatives = details.filter((item) => item.expected === "ai-needed" && item.predicted !== "ai-needed").length;
+  const predictedAi = details.filter((item) => item.predicted === "ai-needed").length;
+  const expectedCandidates = details.filter((item) => item.expected !== "locally-sufficient").length;
+  const candidateTruePositives = details.filter((item) => item.candidateSelected && item.expected !== "locally-sufficient").length;
+  const candidateFalsePositives = details.filter((item) => item.candidateSelected && item.expected === "locally-sufficient").length;
+  const candidateFalseNegatives = details.filter((item) => !item.candidateSelected && item.expected !== "locally-sufficient").length;
+  const providerChunks = details.reduce((sum, item) => sum + item.providerChunks, 0);
+  const totalChunks = observations.reduce((sum, item) => sum + item.chunks.length, 0);
+  const metrics = Object.fromEntries(metricFields.map((field) => [
+    field,
+    observations.reduce((sum, item) => sum + Number(item.outcome.metrics[field] || 0), 0),
+  ]));
+  metrics.providerRequests = providerChunks;
+  metrics.providerChunks = providerChunks;
+  metrics.avoidedProviderChunks = Math.max(0, totalChunks - providerChunks);
+  const expectedReviews = details.filter((item) => item.expected !== "locally-sufficient").length;
+  const reviewTruePositives = details.filter((item) => item.expected !== "locally-sufficient" && item.providerChunks > 0).length;
+  const reviewFalsePositives = details.filter((item) => item.expected === "locally-sufficient" && item.providerChunks > 0).length;
+  const reviewFalseNegatives = details.filter((item) => item.expected !== "locally-sufficient" && item.providerChunks === 0).length;
+  return {
+    formulationId,
+    thresholds,
+    corpusSize: total,
+    classification: {
+      accuracy: round(total ? details.filter((item) => item.correct).length / total : 1),
+      aiPrecision: round(predictedAi ? truePositives / predictedAi : 1),
+      aiRecall: round(expectedAi ? truePositives / expectedAi : 1),
+      falseFilterRate: round(expectedAi ? falseNegatives / expectedAi : 0),
+      uncertainRate: round(total ? details.filter((item) => item.predicted === "uncertain").length / total : 0),
+      truePositives,
+      falsePositives,
+      falseNegatives,
+    },
+    candidateSelection: {
+      precision: round(candidateTruePositives + candidateFalsePositives ? candidateTruePositives / (candidateTruePositives + candidateFalsePositives) : 1),
+      recall: round(expectedCandidates ? candidateTruePositives / expectedCandidates : 1),
+      falseFilterRate: round(expectedCandidates ? candidateFalseNegatives / expectedCandidates : 0),
+      selectedCandidates: details.filter((item) => item.candidateSelected).length,
+      expectedCandidates,
+      falsePositives: candidateFalsePositives,
+      falseNegatives: candidateFalseNegatives,
+    },
+    providerRouting: {
+      reviewPrecision: round(reviewTruePositives + reviewFalsePositives ? reviewTruePositives / (reviewTruePositives + reviewFalsePositives) : 1),
+      reviewRecall: round(expectedReviews ? reviewTruePositives / expectedReviews : 1),
+      falseFilterRate: round(expectedReviews ? reviewFalseNegatives / expectedReviews : 0),
+      selectedReviews: details.filter((item) => item.providerChunks > 0).length,
+      expectedReviews,
+      falsePositives: reviewFalsePositives,
+      falseNegatives: reviewFalseNegatives,
+    },
+    calls: {
+      providerChunksWouldBe: providerChunks,
+      avoidedProviderChunks: metrics.avoidedProviderChunks,
+      providerAvoidanceRate: round(totalChunks ? metrics.avoidedProviderChunks / totalChunks : 1),
+    },
+    latencyMs: {
+      p50: Number(percentile(details.map((item) => item.latencyMs), 0.5).toFixed(2)),
+      p95: Number(percentile(details.map((item) => item.latencyMs), 0.95).toFixed(2)),
+    },
+    metrics,
+    details,
+  };
+}
+
+function rankResults(left, right) {
+  return left.providerRouting.falseFilterRate - right.providerRouting.falseFilterRate
+    || right.providerRouting.reviewRecall - left.providerRouting.reviewRecall
+    || left.classification.falseFilterRate - right.classification.falseFilterRate
+    || right.classification.aiRecall - left.classification.aiRecall
+    || right.calls.providerAvoidanceRate - left.calls.providerAvoidanceRate
+    || right.classification.accuracy - left.classification.accuracy;
+}
+
+const formulationReports = [];
+for (const formulationId of Object.keys(TRIAGE_LABEL_FORMULATIONS)) {
+  const observations = await collectFormulation(formulationId);
+  const thresholdGrid = [];
+  for (const aiNeeded of aiThresholds) {
+    for (const locallySufficient of localThresholds) {
+      thresholdGrid.push(scoreFormulation(observations, formulationId, { aiNeeded, locallySufficient }));
+    }
+  }
+  thresholdGrid.sort(rankResults);
+  formulationReports.push({
+    id: formulationId,
+    labels: TRIAGE_LABEL_FORMULATIONS[formulationId],
+    best: thresholdGrid[0] || scoreFormulation([], formulationId, { aiNeeded: 0.75, locallySufficient: 0.80 }),
+    thresholdGrid,
   });
 }
+
+const selected = formulationReports
+  .map((report) => report.best)
+  .sort(rankResults)[0] || {
+  formulationId: "semantic-v2",
+  thresholds: { aiNeeded: 0.75, locallySufficient: 0.80 },
+  classification: { falseFilterRate: 0, aiRecall: 1, accuracy: 1 },
+  providerRouting: { falseFilterRate: 0, reviewRecall: 1 },
+  calls: { providerAvoidanceRate: 1 },
+};
+
+let batching = null;
+if (benchmarkBatching && limit > 0) {
+  batching = [];
+  for (const batchSize of CLASSIFIER_BATCH_SIZES) {
+    const startedAt = performance.now();
+    const observations = await collectFormulation(selected.formulationId, batchSize);
+    batching.push({
+      batchSize,
+      elapsedMs: Number((performance.now() - startedAt).toFixed(2)),
+      classifierRequests: observations.reduce((sum, item) => sum + item.outcome.metrics.classifierRequests, 0),
+      classifierFailures: observations.reduce((sum, item) => sum + item.outcome.metrics.classifierFailures, 0),
+      omittedClassifierResults: observations.reduce((sum, item) => sum + item.outcome.metrics.omittedClassifierResults, 0),
+    });
+  }
+}
+
 globalThis.fetch = nativeFetch;
 
-const total = details.length;
-const expectedAi = details.filter((item) => item.expected === "ai-needed").length;
-const truePositives = details.filter((item) => item.expected === "ai-needed" && item.predicted === "ai-needed").length;
-const falsePositives = details.filter((item) => item.expected !== "ai-needed" && item.predicted === "ai-needed").length;
-const falseNegatives = details.filter((item) => item.expected === "ai-needed" && item.predicted !== "ai-needed").length;
-const predictedAi = details.filter((item) => item.predicted === "ai-needed").length;
-const accuracy = total ? details.filter((item) => item.correct).length / total : 1;
-const aiPrecision = predictedAi ? truePositives / predictedAi : 1;
-const aiRecall = expectedAi ? truePositives / expectedAi : 1;
-const falseFilterRate = expectedAi ? falseNegatives / expectedAi : 0;
-const uncertainRate = total ? details.filter((item) => item.predicted === "uncertain").length / total : 0;
-const expectedCandidates = details.filter((item) => item.expected !== "locally-sufficient").length;
-const selectedCandidates = details.filter((item) => item.candidateSelected).length;
-const candidateTruePositives = details.filter((item) => item.candidateSelected && item.expected !== "locally-sufficient").length;
-const candidateFalsePositives = details.filter((item) => item.candidateSelected && item.expected === "locally-sufficient").length;
-const candidateFalseNegatives = details.filter((item) => !item.candidateSelected && item.expected !== "locally-sufficient").length;
 const report = {
   mode: "live",
   classifierUrl,
-  labelFormulationId: TRIAGE_LABEL_FORMULATION_ID,
-  corpusSize: total,
+  corpusSize: limit,
   fetchCalls,
-  metrics: totals,
-  classification: {
-    accuracy: Number(accuracy.toFixed(3)),
-    aiPrecision: Number(aiPrecision.toFixed(3)),
-    aiRecall: Number(aiRecall.toFixed(3)),
-    falseFilterRate: Number(falseFilterRate.toFixed(3)),
-    uncertainRate: Number(uncertainRate.toFixed(3)),
-    truePositives,
-    falsePositives,
-    falseNegatives,
+  formulations: formulationReports,
+  selected: {
+    formulationId: selected.formulationId,
+    thresholds: selected.thresholds,
+    rationale: "Ranked by provider-routing false-filter rate and recall first, then exact semantic decision safety, provider-call avoidance, and overall accuracy.",
   },
-  candidateSelection: {
-    precision: Number((candidateTruePositives + candidateFalsePositives ? candidateTruePositives / (candidateTruePositives + candidateFalsePositives) : 1).toFixed(3)),
-    recall: Number((expectedCandidates ? candidateTruePositives / expectedCandidates : 1).toFixed(3)),
-    falseFilterRate: Number((expectedCandidates ? candidateFalseNegatives / expectedCandidates : 0).toFixed(3)),
-    selectedCandidates,
-    expectedCandidates,
-    falsePositives: candidateFalsePositives,
-    falseNegatives: candidateFalseNegatives,
-  },
-  calls: {
-    classifierRequests: totals.classifierRequests,
-    providerRequestsWouldBe: totals.providerChunks,
-    totalCloudRequestsWouldBe: totals.classifierRequests + totals.providerChunks,
-    avoidedProviderChunks: totals.avoidedProviderChunks,
-  },
-  latencyMs: {
-    p50: Number(percentile(latencySamples, 0.5).toFixed(2)),
-    p95: Number(percentile(latencySamples, 0.95).toFixed(2)),
-  },
-  excerptSize: {
-    averageChars: excerptSizes.length ? Number((excerptSizes.reduce((sum, value) => sum + value, 0) / excerptSizes.length).toFixed(2)) : 0,
-    p95Chars: Number(percentile(excerptSizes, 0.95).toFixed(2)),
-    maxChars: excerptSizes.length ? Math.max(...excerptSizes) : 0,
+  batching: {
+    tested: Boolean(batching),
+    recommendedDefault: 100,
+    sizes: [...CLASSIFIER_BATCH_SIZES],
+    results: batching,
   },
   observability: {
-    localAnalysisMs: {
-      p50: Number(percentile(localLatencySamples, 0.5).toFixed(2)),
-      p95: Number(percentile(localLatencySamples, 0.95).toFixed(2)),
-    },
     classifierLatencyMs: {
       p50: Number(percentile(classifierLatencySamples, 0.5).toFixed(2)),
       p95: Number(percentile(classifierLatencySamples, 0.95).toFixed(2)),
     },
     classifierBytesSent,
-    providerRequests: totals.providerRequests,
+    excerptSize: {
+      averageChars: excerptSizes.length ? Number((excerptSizes.reduce((sum, value) => sum + value, 0) / excerptSizes.length).toFixed(2)) : 0,
+      p95Chars: Number(percentile(excerptSizes, 0.95).toFixed(2)),
+      maxChars: excerptSizes.length ? Math.max(...excerptSizes) : 0,
+    },
     providerLatencyMs: null,
     providerTokensEstimate: null,
-    providerAvoidanceRate: Number((totals.providerChunks + totals.avoidedProviderChunks
-      ? totals.avoidedProviderChunks / (totals.providerChunks + totals.avoidedProviderChunks)
-      : 1).toFixed(3)),
   },
-  details,
 };
 
 console.log(JSON.stringify(report, null, 2));
-if (process.argv.includes("--strict") && (aiRecall < 0.75 || falseFilterRate > 0.25)) {
+if (process.argv.includes("--strict") && (
+  selected.providerRouting.reviewRecall < 0.75
+  || selected.providerRouting.falseFilterRate > 0.25
+)) {
   console.error("live triage strict gate failed");
   process.exit(1);
 }

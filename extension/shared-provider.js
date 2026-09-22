@@ -1274,7 +1274,7 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
     const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
     const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
     const delta = nextText.length - previousText.length;
-    const retained = previousIssues.flatMap((issue) => {
+    const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
         if (issue.start < previousRegion.end && issue.end > previousRegion.start)
             return [];
         const shift = issue.start >= previousRegion.end ? delta : 0;
@@ -1468,6 +1468,68 @@ function providerErrorForStatus(status) {
         return new ProviderError("rate-limited", "The provider is rate-limiting requests. Try again in a moment.", status);
     return new ProviderError("unknown", `The provider returned an error (${status}).`, status);
 }
+function isRetryableStatus(status, service) {
+    return service === "classifier"
+        ? [429, 502, 503, 504].includes(status)
+        : [429, 500, 502, 503, 504].includes(status);
+}
+function isAbortError(error) {
+    return error instanceof DOMException && error.name === "AbortError";
+}
+function abortError() {
+    return typeof DOMException === "undefined"
+        ? Object.assign(new Error("The request was aborted."), { name: "AbortError" })
+        : new DOMException("The request was aborted.", "AbortError");
+}
+function retryAfterMs(response, attempt) {
+    const value = response.headers.get("retry-after")?.trim();
+    if (value) {
+        const seconds = Number(value);
+        if (Number.isFinite(seconds))
+            return Math.max(0, Math.min(5_000, seconds * 1_000));
+        const timestamp = Date.parse(value);
+        if (Number.isFinite(timestamp))
+            return Math.max(0, Math.min(5_000, timestamp - Date.now()));
+    }
+    return Math.min(1_500, 100 * (2 ** attempt));
+}
+function waitForRetry(delayMs, signal) {
+    if (signal?.aborted)
+        return Promise.reject(abortError());
+    return new Promise((resolve, reject) => {
+        const cancel = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", cancel);
+            reject(abortError());
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", cancel);
+            resolve();
+        }, delayMs);
+        signal?.addEventListener("abort", cancel, { once: true });
+    });
+}
+async function fetchWithRetry(request, options) {
+    const maxRetries = Math.max(0, Math.min(3, Math.floor(options.maxRetries ?? 2)));
+    let attempt = 0;
+    while (true) {
+        if (options.signal?.aborted)
+            throw abortError();
+        try {
+            const response = await request();
+            if (!isRetryableStatus(response.status, options.service) || attempt >= maxRetries)
+                return response;
+            await waitForRetry(retryAfterMs(response, attempt), options.signal);
+            attempt += 1;
+        }
+        catch (error) {
+            if (options.signal?.aborted || isAbortError(error) || attempt >= maxRetries || !(error instanceof TypeError))
+                throw error;
+            await waitForRetry(Math.min(1_500, 100 * (2 ** attempt)), options.signal);
+            attempt += 1;
+        }
+    }
+}
 async function requestProvider(settings, messages, signal, timeoutMs = 25_000) {
     if (!settings.apiKey.trim())
         throw new ProviderError("missing-key", "Add an API key in Settings to enable AI suggestions.");
@@ -1480,12 +1542,12 @@ async function requestProvider(settings, messages, signal, timeoutMs = 25_000) {
     const cancel = () => timeoutController.abort();
     signal?.addEventListener("abort", cancel, { once: true });
     const call = async (includeResponseFormat) => {
-        const response = await fetch(endpoint, {
+        const response = await fetchWithRetry(() => fetch(endpoint, {
             method: "POST",
             signal: timeoutController.signal,
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${settings.apiKey.trim()}`,
+                Authorization: "Bearer " + settings.apiKey.trim(),
                 ...parseCustomHeaders(settings.customHeaders),
             },
             body: JSON.stringify({
@@ -1495,7 +1557,7 @@ async function requestProvider(settings, messages, signal, timeoutMs = 25_000) {
                 ...(includeResponseFormat ? { response_format: { type: "json_object" } } : {}),
                 messages,
             }),
-        });
+        }), { service: "provider", signal: timeoutController.signal });
         if (!response.ok) {
             const responseText = await response.text().catch(() => "");
             if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(responseText))
@@ -1616,6 +1678,63 @@ function parseAnalysisResponse(value, sourceText, options = {}) {
         ...(diagnostics ? { diagnostics } : {}),
     };
 }
+const PROVIDER_CONCURRENCY = 3;
+const MAX_AI_CHUNKS_PER_ANALYSIS = 10;
+const MAX_AI_CHARS_PER_ANALYSIS = 50_000;
+async function mapWithConcurrency(items, worker, options = {}) {
+    if (!items.length)
+        return [];
+    const results = new Array(items.length);
+    const concurrency = Math.max(1, Math.min(items.length, Math.floor(options.concurrency ?? PROVIDER_CONCURRENCY)));
+    let nextIndex = 0;
+    const runWorker = async () => {
+        while (true) {
+            const index = nextIndex;
+            nextIndex += 1;
+            if (index >= items.length)
+                return;
+            if (options.signal?.aborted)
+                throw abortError();
+            try {
+                results[index] = { status: "fulfilled", value: await worker(items[index], index) };
+            }
+            catch (reason) {
+                results[index] = { status: "rejected", reason };
+            }
+        }
+    };
+    const workerResults = await Promise.allSettled(Array.from({ length: concurrency }, () => runWorker()));
+    if (options.signal?.aborted)
+        throw abortError();
+    const workerFailure = workerResults.find((result) => result.status === "rejected");
+    if (workerFailure)
+        throw workerFailure.reason;
+    return results;
+}
+function selectProviderWorkload(chunks, options) {
+    const maxChunks = Math.max(0, Math.floor(options.maxAiChunks ?? MAX_AI_CHUNKS_PER_ANALYSIS));
+    const maxChars = Math.max(0, Math.floor(options.maxAiChars ?? MAX_AI_CHARS_PER_ANALYSIS));
+    const ranked = chunks
+        .map((chunk, index) => ({
+        chunk,
+        index,
+        changed: Boolean(options.changedRange && chunk.contentStartOffset < options.changedRange.end && chunk.contentEndOffset > options.changedRange.start),
+    }))
+        .sort((left, right) => Number(right.changed) - Number(left.changed) || left.index - right.index);
+    const selected = [];
+    let characters = 0;
+    for (const item of ranked) {
+        if (selected.length >= maxChunks || characters + item.chunk.text.length > maxChars)
+            continue;
+        selected.push(item.chunk);
+        characters += item.chunk.text.length;
+    }
+    selected.sort((left, right) => chunks.indexOf(left) - chunks.indexOf(right));
+    return {
+        selected,
+        skipped: Math.max(0, chunks.length - selected.length),
+    };
+}
 async function analyzeWithProvider(text, goals, settings, options = {}) {
     const startedAt = providerAnalysisNow();
     const preferences = options.preferences;
@@ -1631,14 +1750,25 @@ async function analyzeWithProvider(text, goals, settings, options = {}) {
     });
     if (!chunks.length)
         return { ...local, analysedText: text, source: "local" };
-    const settled = await Promise.allSettled(chunks.map(async (chunk) => ({
+    const workload = selectProviderWorkload(chunks, options);
+    if (!workload.selected.length) {
+        return {
+            ...local,
+            analysedText: text,
+            source: "local",
+            changedRange: options.changedRange ?? undefined,
+            aiCoverage: { requestedChunks: chunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+        };
+    }
+    const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
         chunk,
         response: await requestProvider(settings, [
             { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
             { role: "user", content: analysisPrompt(chunk, goals, preferences) },
         ], options.signal, options.timeoutMs),
-    })));
+    }), { concurrency: options.providerConcurrency, signal: options.signal });
     const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const failed = settled.filter((result) => result.status === "rejected").length;
     if (!successful.length) {
         const firstFailure = settled.find((result) => result.status === "rejected");
         if (firstFailure)
@@ -1658,8 +1788,14 @@ async function analyzeWithProvider(text, goals, settings, options = {}) {
         issues,
         scores: scoreWriting(stats, issues, goals, text),
         stats,
-        source: aiIssues.length ? "local+ai" : "local",
+        source: successful.length ? "local+ai" : "local",
         changedRange: options.changedRange ?? undefined,
+        aiCoverage: {
+            requestedChunks: chunks.length,
+            successfulChunks: successful.length,
+            failedChunks: failed,
+            skippedChunks: workload.skipped,
+        },
         ...(diagnostics ? { diagnostics } : {}),
     };
 }
@@ -1769,17 +1905,24 @@ const DEFAULT_CLASSIFIER_SETTINGS_VALUE = {
     maxExcerptChars: 500,
 };
 const CLASSIFIER_MAX_EXCERPT_CHARS = 500;
-const CLASSIFIER_MAX_BATCH_CHUNKS = 1_000;
+const CLASSIFIER_MAX_BATCH_CHUNKS = 100;
+const CLASSIFIER_BATCH_SIZES = [5, 10, 25, 50, 100];
 const TRIAGE_LABEL_FORMULATIONS = {
     "semantic-v2": [
         "The local writing checks are sufficient; no semantic AI review is needed.",
         "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
-        "It is unclear whether semantic AI review would add enough value.",
     ],
     "direct-v1": [
-        "Local checks are enough; do not use AI review.",
-        "AI review is needed to find useful semantic writing issues.",
-        "Uncertain whether AI review would help.",
+        "Local writing checks are sufficient.",
+        "Semantic AI review would likely add useful feedback.",
+    ],
+    "explicit-v1": [
+        "No additional semantic review is needed beyond the local writing checks.",
+        "A semantic writing model would likely identify useful issues the local checks cannot reliably detect.",
+    ],
+    "compact-v1": [
+        "Local checks are enough for this passage.",
+        "An AI writing review would likely add useful feedback.",
     ],
 };
 const TRIAGE_LABEL_FORMULATION_ID = "semantic-v2";
@@ -1939,7 +2082,10 @@ function collectChunkSignals(chunkText, issuesInChunk) {
         hasPassiveOrWordiness,
     };
 }
-function inferTriageCategories(chunkText, issuesInChunk) {
+function goalSupportsEngagementReview(goals) {
+    return goals?.intent === "persuade" || goals?.audience === "casual" || goals?.tone === "friendly";
+}
+function inferTriageCategories(chunkText, issuesInChunk, goals) {
     const mapped = issuesInChunk.map((issue) => mapLocalCategoryToTriage(issue.category));
     const signals = collectChunkSignals(chunkText, issuesInChunk);
     const extra = [];
@@ -1949,7 +2095,7 @@ function inferTriageCategories(chunkText, issuesInChunk) {
         extra.push("clarity");
     if (signals.hasPassiveOrWordiness)
         extra.push("style");
-    if (issuesInChunk.length === 0 && chunkText.trim().split(/\s+/u).length > 25)
+    if (issuesInChunk.length === 0 && chunkText.trim().split(/\s+/u).length > 25 && goalSupportsEngagementReview(goals))
         extra.push("engagement");
     if (HEDGE_PATTERN.test(chunkText))
         extra.push("tone");
@@ -1957,10 +2103,10 @@ function inferTriageCategories(chunkText, issuesInChunk) {
     return merged.length ? merged.slice(0, 4) : ["other"];
 }
 /** Local-first heuristic: decide whether a chunk is unresolved/ambiguous and may need AI. */
-function isChunkUnresolved(chunkText, issuesInChunk) {
+function isChunkUnresolved(chunkText, issuesInChunk, goals) {
     const text = String(chunkText || "");
     const trimmed = text.trim();
-    const categories = inferTriageCategories(text, issuesInChunk);
+    const categories = inferTriageCategories(text, issuesInChunk, goals);
     if (trimmed.length < 20) {
         if ((trimmed.match(/[.!?]/gu) ?? []).length >= 2) {
             return { unresolved: true, reasons: ["short-fragment"], categories: ["structure"] };
@@ -1978,7 +2124,7 @@ function isChunkUnresolved(chunkText, issuesInChunk) {
         }
         // Low-engagement clean text: longer, no direct address, no questions.
         // Needs AI for engagement/structure even when local finds nothing.
-        if (words > 25 && !/\b(you|we|our|your|us|\?)\b/iu.test(trimmed)) {
+        if (words > 25 && goalSupportsEngagementReview(goals) && !/\b(you|we|our|your|us|\?)\b/iu.test(trimmed)) {
             return { unresolved: true, reasons: ["low-engagement-clean-text"], categories: categories.length ? categories : ["engagement"] };
         }
         return { unresolved: false, reasons: ["clean"], categories: [] };
@@ -2007,10 +2153,10 @@ function isChunkUnresolved(chunkText, issuesInChunk) {
     }
     return { unresolved: true, reasons: ["mixed-issues"], categories };
 }
-function selectTriageCandidates(chunks, localIssues) {
+function selectTriageCandidates(chunks, localIssues, goals) {
     return chunks.map((chunk) => {
         const issues = localIssues.filter((issue) => issue.start < chunk.endOffset && issue.end > chunk.startOffset);
-        return { chunk, issues, assessment: isChunkUnresolved(chunk.text, issues) };
+        return { chunk, issues, assessment: isChunkUnresolved(chunk.text, issues, goals) };
     });
 }
 function buildClassifierInputs(candidates, maxExcerptChars = CLASSIFIER_MAX_EXCERPT_CHARS) {
@@ -2044,13 +2190,13 @@ function isKnownClassifierLabel(value, labels = CLASSIFIER_TRIAGE_LABELS) {
     const normalised = normaliseClassifierLabel(value);
     return labels.some((label) => normaliseClassifierLabel(label) === normalised);
 }
-function mapClassifierLabel(label, confidence, labels = CLASSIFIER_TRIAGE_LABELS) {
+function mapClassifierLabel(label, confidence, labels = CLASSIFIER_TRIAGE_LABELS, thresholds = TRIAGE_CONFIDENCE_THRESHOLDS) {
     const normalised = normaliseClassifierLabel(label);
     const localLabel = normaliseClassifierLabel(labels[0]);
     const aiLabel = normaliseClassifierLabel(labels[1]);
-    if (normalised === localLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.locallySufficient)
+    if (normalised === localLabel && confidence >= thresholds.locallySufficient)
         return "locally-sufficient";
-    if (normalised === aiLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.aiNeeded)
+    if (normalised === aiLabel && confidence >= thresholds.aiNeeded)
         return "ai-needed";
     return "uncertain";
 }
@@ -2059,7 +2205,7 @@ function mapClassifierLabel(label, confidence, labels = CLASSIFIER_TRIAGE_LABELS
  * paired by response order: classifier.dev returns one result per input and
  * does not know Draftwise chunk IDs.
  */
-function parseClassifierDecisions(value, expectedInputs, labels = CLASSIFIER_TRIAGE_LABELS) {
+function parseClassifierDecisions(value, expectedInputs, labels = CLASSIFIER_TRIAGE_LABELS, thresholds = TRIAGE_CONFIDENCE_THRESHOLDS) {
     const rawList = isRecord(value) && Array.isArray(value.results)
         ? value.results
         : Array.isArray(value)
@@ -2076,10 +2222,11 @@ function parseClassifierDecisions(value, expectedInputs, labels = CLASSIFIER_TRI
         if (!label)
             return null;
         const input = expectedInputs[index];
-        const decision = mapClassifierLabel(label, confidence, labels);
+        const decision = mapClassifierLabel(label, confidence, labels, thresholds);
         return {
             chunkId: input.chunkId,
             decision,
+            label,
             categories: input.categories.length ? input.categories : ["other"],
             confidence,
             reason: ("classifier.dev label: " + label).slice(0, 300),
@@ -2102,7 +2249,7 @@ async function requestClassifierDecisions(inputs, settings, options = {}) {
         const apiKey = settings.apiKey?.trim();
         if (apiKey)
             headers.Authorization = "Bearer " + apiKey;
-        const response = await fetch(endpoint, {
+        const response = await fetchWithRetry(() => fetch(endpoint, {
             method: "POST",
             signal: timeoutController.signal,
             headers,
@@ -2111,7 +2258,7 @@ async function requestClassifierDecisions(inputs, settings, options = {}) {
                 labels,
                 instructions: "Choose exactly one label for each input. Return results in the same order as inputs. Do not rewrite or quote the input.",
             }),
-        });
+        }), { service: "classifier", signal: timeoutController.signal });
         if (!response.ok)
             throw classifierErrorForStatus(response.status);
         const declaredLength = Number(response.headers.get("content-length") || 0);
@@ -2133,7 +2280,7 @@ async function requestClassifierDecisions(inputs, settings, options = {}) {
         catch {
             throw new ClassifierError("invalid-json", "The classifier returned invalid JSON.");
         }
-        const parsed = parseClassifierDecisions(payload, inputs, labels);
+        const parsed = parseClassifierDecisions(payload, inputs, labels, options.thresholds);
         return parsed.length < inputs.length
             ? [...parsed, ...Array.from({ length: inputs.length - parsed.length }, () => null)]
             : parsed;
@@ -2182,7 +2329,7 @@ function buildTriageMetrics(chunks, decisions, candidateChunks, uncertainPolicy,
 }
 /** Local-first triage: local rules, optional classifier.dev gate, then provider only when policy allows. */
 async function triageChunks(chunks, localIssues, options = {}) {
-    const assessed = selectTriageCandidates(chunks, localIssues);
+    const assessed = selectTriageCandidates(chunks, localIssues, options.goals);
     const locallySufficient = assessed.filter((item) => !item.assessment.unresolved);
     const inputs = buildClassifierInputs(assessed, options.maxExcerptChars ?? CLASSIFIER_MAX_EXCERPT_CHARS);
     const decisions = locallySufficient.map((item) => ({
@@ -2219,8 +2366,9 @@ async function triageChunks(chunks, localIssues, options = {}) {
         };
     }
     const inputBatches = [];
-    for (let offset = 0; offset < inputs.length; offset += CLASSIFIER_MAX_BATCH_CHUNKS) {
-        inputBatches.push(inputs.slice(offset, offset + CLASSIFIER_MAX_BATCH_CHUNKS));
+    const batchSize = Math.max(1, Math.min(CLASSIFIER_MAX_BATCH_CHUNKS, Math.floor(options.classifierBatchSize ?? CLASSIFIER_MAX_BATCH_CHUNKS)));
+    for (let offset = 0; offset < inputs.length; offset += batchSize) {
+        inputBatches.push(inputs.slice(offset, offset + batchSize));
     }
     let classifierRequests = 0;
     try {
@@ -2231,6 +2379,7 @@ async function triageChunks(chunks, localIssues, options = {}) {
                 signal: options.signal,
                 timeoutMs: options.timeoutMs ?? classifier.timeoutMs,
                 labelFormulationId: options.labelFormulationId,
+                thresholds: options.thresholds,
             }));
         }
         let omittedClassifierResults = 0;
@@ -2308,6 +2457,9 @@ async function analyzeWithTriage(text, goals, settings, options = {}) {
         classifier: options.classifier ?? null,
         uncertainPolicy,
         labelFormulationId: options.labelFormulationId,
+        thresholds: options.triageThresholds,
+        goals,
+        classifierBatchSize: options.classifierBatchSize,
         maxExcerptChars: options.classifier?.maxExcerptChars,
         timeoutMs: options.classifierTimeoutMs ?? options.classifier?.timeoutMs,
     });
@@ -2323,18 +2475,50 @@ async function analyzeWithTriage(text, goals, settings, options = {}) {
             stats,
             source: "local",
             changedRange: options.changedRange ?? undefined,
-            triage: { decisions: triage.decisions, metrics: triage.metrics },
+            triage: {
+                decisions: triage.decisions,
+                metrics: triage.metrics,
+                coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: 0 },
+            },
+            aiCoverage: { requestedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: 0 },
             ...(diagnostics ? { diagnostics } : {}),
         };
     }
-    const settled = await Promise.allSettled(aiChunks.map(async (chunk) => ({
+    const workload = selectProviderWorkload(aiChunks, options);
+    if (!workload.selected.length) {
+        const stats = getWritingStats(text);
+        const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider");
+        return {
+            ...local,
+            analysedText: text,
+            issues: mergeAnalysisIssues([...local.issues]),
+            scores: scoreWriting(stats, local.issues, goals, text),
+            stats,
+            source: "local",
+            changedRange: options.changedRange ?? undefined,
+            triage: {
+                decisions: triage.decisions,
+                metrics: {
+                    ...triage.metrics,
+                    providerRequests: 0,
+                    providerChunks: 0,
+                    avoidedProviderChunks: Math.max(0, chunks.length),
+                },
+                coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: workload.skipped },
+            },
+            aiCoverage: { requestedChunks: aiChunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+            ...(diagnostics ? { diagnostics } : {}),
+        };
+    }
+    const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
         chunk,
         response: await requestProvider(settings, [
             { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
             { role: "user", content: analysisPrompt(chunk, goals, preferences) },
         ], options.signal, options.timeoutMs),
-    })));
+    }), { concurrency: options.providerConcurrency, signal: options.signal });
     const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const failed = settled.filter((result) => result.status === "rejected").length;
     if (!successful.length) {
         const firstFailure = settled.find((result) => result.status === "rejected");
         if (firstFailure)
@@ -2354,16 +2538,23 @@ async function analyzeWithTriage(text, goals, settings, options = {}) {
         issues,
         scores: scoreWriting(stats, issues, goals, text),
         stats,
-        source: aiIssues.length ? "local+ai" : "local",
+        source: successful.length ? "local+ai" : "local",
         changedRange: options.changedRange ?? undefined,
         triage: {
             decisions: triage.decisions,
             metrics: {
                 ...triage.metrics,
-                providerRequests: aiChunks.length,
-                providerChunks: aiChunks.length,
-                avoidedProviderChunks: Math.max(0, chunks.length - aiChunks.length),
+                providerRequests: workload.selected.length,
+                providerChunks: workload.selected.length,
+                avoidedProviderChunks: Math.max(0, chunks.length - workload.selected.length),
             },
+            coverage: { candidateChunks: triage.candidateCount, providerChunks: workload.selected.length, skippedDueToLimit: workload.skipped },
+        },
+        aiCoverage: {
+            requestedChunks: aiChunks.length,
+            successfulChunks: successful.length,
+            failedChunks: failed,
+            skippedChunks: workload.skipped,
         },
         ...(diagnostics ? { diagnostics } : {}),
     };

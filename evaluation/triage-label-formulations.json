@@ -1,44 +1,103 @@
 {
   "selected": "semantic-v2",
-  "decision": "semantic-v2",
-  "rationale": "The semantic boundary is explicit enough to bias recall while still giving classifier.dev a clear locally-sufficient option.",
+  "thresholds": {
+    "aiNeeded": 0.75,
+    "locallySufficient": 0.8
+  },
+  "selectionRationale": "Keep the semantic boundary explicit and use the mandated 0.75 AI-needed and 0.80 locally-sufficient confidence thresholds in production. Live evidence is recorded separately: a 20-entry classifier.dev probe ranked semantic-v2/direct-v1 ahead of the shorter alternatives on exact-label safety, but its exact AI recall was too low to promote a new threshold; provider-routing safety remained the relevant fail-safe because uncertain decisions still go to the provider.",
   "formulations": [
     {
       "id": "semantic-v2",
       "labels": [
         "The local writing checks are sufficient; no semantic AI review is needed.",
-        "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
-        "It is unclear whether semantic AI review would add enough value."
+        "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect."
       ],
-      "tradeoff": "Longer labels carry the intended boundary and reduce ambiguity, at the cost of a slightly larger request."
+      "tradeoff": "Explicit local-versus-semantic boundary; slightly larger request."
     },
     {
       "id": "direct-v1",
       "labels": [
-        "Local checks are enough; do not use AI review.",
-        "AI review is needed to find useful semantic writing issues.",
-        "Uncertain whether AI review would help."
+        "Local writing checks are sufficient.",
+        "Semantic AI review would likely add useful feedback."
       ],
-      "tradeoff": "Shorter labels reduce prompt size, but the local-versus-semantic distinction is less explicit and may reduce recall."
+      "tradeoff": "Concise and cheap; less detail about what semantic review adds."
+    },
+    {
+      "id": "explicit-v1",
+      "labels": [
+        "No additional semantic review is needed beyond the local writing checks.",
+        "A semantic writing model would likely identify useful issues the local checks cannot reliably detect."
+      ],
+      "tradeoff": "Very explicit boundary; longest formulation."
+    },
+    {
+      "id": "compact-v1",
+      "labels": [
+        "Local checks are enough for this passage.",
+        "An AI writing review would likely add useful feedback."
+      ],
+      "tradeoff": "Smallest request; potentially more ambiguous across writing goals."
     }
   ],
-  "evaluation_method": "The offline evaluator runs both formulations against the same corpus and compares AI recall, false-filter rate, uncertain rate, excerpt size, and latency. Keep the formulation that meets the false-filter budget while preserving recall.",
-  "last_offline_measurement": {
-    "corpusSize": 51,
-    "semantic-v2": {
-      "accuracy": 0.941,
-      "aiPrecision": 0.923,
-      "aiRecall": 1,
-      "falseFilterRate": 0,
-      "uncertainRate": 0.078
+  "evaluationMethod": {
+    "liveCommand": "npm run evaluate:triage:live -- --strict",
+    "thresholdGrid": {
+      "aiNeeded": [0.65, 0.7, 0.75, 0.8, 0.85],
+      "locallySufficient": [0.7, 0.75, 0.8, 0.85, 0.9]
     },
-    "direct-v1": {
-      "accuracy": 0.941,
-      "aiPrecision": 0.923,
-      "aiRecall": 1,
-      "falseFilterRate": 0,
-      "uncertainRate": 0.078
+    "ranking": [
+      "low provider-routing false-filter rate",
+      "high provider-routing review recall",
+      "low exact-label false-filter rate",
+      "reasonable provider savings",
+      "overall accuracy"
+    ],
+    "batchBenchmark": "Add --benchmark-batching to compare 5, 10, 25, 50, and 100 inputs per classifier request."
+  },
+  "lastLiveMeasurement": {
+    "date": "2026-09-21",
+    "corpusSize": 20,
+    "fetchCalls": 16,
+    "classifierBytesSent": 6180,
+    "selectedByGrid": {
+      "formulationId": "semantic-v2",
+      "aiNeeded": 0.65,
+      "locallySufficient": 0.7
     },
-    "selection": "semantic-v2 remains selected because it states the local-versus-semantic boundary explicitly; live evaluation should be rerun before changing the default."
+    "results": [
+      {
+        "formulationId": "semantic-v2",
+        "exactAiRecall": 0.25,
+        "exactFalseFilterRate": 0.75,
+        "accuracy": 0.8,
+        "providerRoutingRecall": 1,
+        "providerRoutingFalseFilterRate": 0
+      },
+      {
+        "formulationId": "direct-v1",
+        "exactAiRecall": 0.25,
+        "exactFalseFilterRate": 0.75,
+        "accuracy": 0.8,
+        "providerRoutingRecall": 1,
+        "providerRoutingFalseFilterRate": 0
+      },
+      {
+        "formulationId": "explicit-v1",
+        "exactAiRecall": 0,
+        "exactFalseFilterRate": 1,
+        "accuracy": 0.75,
+        "providerRoutingRecall": 1,
+        "providerRoutingFalseFilterRate": 0
+      },
+      {
+        "formulationId": "compact-v1",
+        "exactAiRecall": 0,
+        "exactFalseFilterRate": 1,
+        "accuracy": 0.75,
+        "providerRoutingRecall": 1,
+        "providerRoutingFalseFilterRate": 0
+      }
+    ],
+    "note": "This was a live smoke probe, not a full-corpus promotion gate. Re-run the live workflow with classifier credentials and the full corpus before changing the production formulation or thresholds."
   }
 }

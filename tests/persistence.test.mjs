@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readWorkspaceFromStorage } from "../hooks/useDraftPersistence.ts";
+import { isClassifierSettings, isWorkspace, readWorkspaceFromStorage, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
 import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
@@ -31,4 +31,59 @@ test("legacy split keys migrate without crashing on malformed optional values", 
   assert.equal(loaded.draft, "legacy draft");
   assert.equal(loaded.aiEnabled, true);
   assert.equal(loaded.goals.audience, initial.goals.audience);
+});
+
+test("partially corrupted versioned workspaces keep valid fields and default invalid fields", () => {
+  const initial = DEFAULT_WORKSPACE("initial draft");
+  const loaded = readWorkspaceFromStorage(initial, storage({
+    "draftwise:workspace:v2": JSON.stringify({
+      version: "old",
+      title: "Valid title",
+      draft: "Valid draft",
+      goals: { audience: "academic", intent: "not-an-intent", tone: "formal" },
+      style: { ...initial.style, dialect: "pirate", ignoredWords: "not-an-array" },
+      provider: { ...initial.provider, model: "", temperature: "hot", apiKey: "valid-key" },
+      classifier: { baseUrl: "https://classifier.dev", model: "legacy-model", uncertainPolicy: "provider" },
+      aiEnabled: true,
+      theme: "neon",
+    }),
+  }));
+  assert.equal(loaded.title, "Valid title");
+  assert.equal(loaded.draft, "Valid draft");
+  assert.equal(loaded.goals.audience, "academic");
+  assert.equal(loaded.goals.intent, initial.goals.intent);
+  assert.equal(loaded.style.dialect, initial.style.dialect);
+  assert.deepEqual(loaded.style.ignoredWords, initial.style.ignoredWords);
+  assert.equal(loaded.provider.apiKey, "valid-key");
+  assert.equal(loaded.provider.model, initial.provider.model);
+  assert.equal(loaded.classifier?.uncertainPolicy, "provider");
+  assert.equal("model" in (loaded.classifier || {}), false);
+  assert.equal(loaded.theme, initial.theme);
+});
+
+test("invalid JSON, unexpected shapes, and incorrect arrays never escape the migration boundary", () => {
+  const initial = DEFAULT_WORKSPACE("initial draft");
+  for (const value of ["{not-json", "[]", "null", JSON.stringify({ goals: [], style: {}, provider: [] })]) {
+    const loaded = readWorkspaceFromStorage(initial, storage({ "draftwise:workspace:v2": value }));
+    assert.ok(isWorkspace(loaded));
+  }
+});
+
+test("runtime validators reject malformed classifier settings", () => {
+  assert.ok(isClassifierSettings({ baseUrl: "https://classifier.dev", uncertainPolicy: "provider" }));
+  assert.equal(isClassifierSettings({ baseUrl: "http://classifier.dev", uncertainPolicy: "provider" }), false);
+  assert.equal(isClassifierSettings({ baseUrl: "https://classifier.dev", uncertainPolicy: "maybe" }), false);
+});
+
+test("failed local writes return an error instead of a false saved state", () => {
+  const initial = DEFAULT_WORKSPACE("draft");
+  const result = writeWorkspaceToStorage(initial, {
+    ...storage(),
+    setItem() {
+      const error = new Error("quota");
+      error.name = "QuotaExceededError";
+      throw error;
+    },
+  });
+  assert.deepEqual(result, { ok: false, error: "Local storage is full." });
 });

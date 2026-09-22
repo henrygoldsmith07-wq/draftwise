@@ -5,6 +5,7 @@ import {
   CLASSIFIER_TRIAGE_LABELS,
   TRIAGE_LABEL_FORMULATIONS,
   redactExcerptForClassifier,
+  selectTriageCandidates,
   triageChunks,
 } from "../packages/ai/src/index.ts";
 
@@ -58,7 +59,7 @@ function deterministicLabel(excerpt, labels = CLASSIFIER_TRIAGE_LABELS) {
   const lower = excerpt.toLocaleLowerCase();
   const borderline = excerpt.length < 80 && /(really clear|make a decision|was reviewed|ready(?: for review)?|ready\.|set\.|go\.)/u.test(lower);
   const semanticSignals = /(thing|stuff|various|somehow|in order to|at the end of the day|game changer|leverage synergies|without a verb|nested|might|possibly|perhaps|extremely|passive)/u.test(lower);
-  if (borderline) return { label: labels[2], confidence: 0.55 };
+  if (borderline) return { label: labels[0], confidence: 0.55 };
   return { label: labels[1], confidence: semanticSignals ? 0.88 : 0.82 };
 }
 
@@ -92,7 +93,9 @@ for (const entry of corpus) {
   const local = analyzeLocally(entry.text, { dialect: "en-GB" });
   localLatencySamples.push(performance.now() - localStartedAt);
   const chunks = createAnalysisChunks(entry.text);
-  const outcome = await triageChunks(chunks, local.issues, { classifier, uncertainPolicy: "provider" });
+  const goals = entry.goals || { audience: "general", intent: "inform", tone: "professional" };
+  const assessments = selectTriageCandidates(chunks, local.issues, goals);
+  const outcome = await triageChunks(chunks, local.issues, { classifier, goals, uncertainPolicy: "provider" });
   const latencyMs = performance.now() - startedAt;
   const predicted = predictedDecision(outcome.decisions);
   latencySamples.push(latencyMs);
@@ -105,6 +108,7 @@ for (const entry of corpus) {
     correct: predicted === entry.expectedDecision,
     expectedCategories: entry.expectedCategories,
     predictedCategories: [...new Set(outcome.decisions.flatMap((decision) => decision.categories))],
+    triggerReasons: [...new Set(assessments.flatMap((assessment) => assessment.assessment.reasons))],
     latencyMs: Number(latencyMs.toFixed(2)),
   });
 }
@@ -177,6 +181,19 @@ const selectedCandidates = details.filter((item) => item.candidateSelected).leng
 const candidateTruePositives = details.filter((item) => item.candidateSelected && item.expected !== "locally-sufficient").length;
 const candidateFalsePositives = details.filter((item) => item.candidateSelected && item.expected === "locally-sufficient").length;
 const candidateFalseNegatives = details.filter((item) => !item.candidateSelected && item.expected !== "locally-sufficient").length;
+const triggerNames = [...new Set(details.flatMap((item) => item.triggerReasons))];
+const triggerMetrics = Object.fromEntries(triggerNames.map((trigger) => {
+  const selectedByTrigger = details.filter((item) => item.triggerReasons.includes(trigger));
+  const useful = selectedByTrigger.filter((item) => item.expected !== "locally-sufficient").length;
+  const unnecessary = selectedByTrigger.filter((item) => item.expected === "locally-sufficient").length;
+  const missed = details.filter((item) => item.expected === "ai-needed" && !item.triggerReasons.includes(trigger)).length;
+  return [trigger, {
+    usefulClassifierCandidate: useful,
+    unnecessaryClassifierRequest: unnecessary,
+    missedAiWorthyPassage: missed,
+    triggerRate: details.length ? Number((selectedByTrigger.length / details.length).toFixed(3)) : 0,
+  }];
+}));
 const excerpts = requestLog.flatMap((request) => request.inputs.map((input) => String(input).length));
 const redactionProbes = [
   "https://example.com/help",
@@ -217,6 +234,7 @@ const report = {
     falsePositives: candidateFalsePositives,
     falseNegatives: candidateFalseNegatives,
   },
+  triggerMetrics,
   calls: {
     classifierRequests: totals.classifierRequests,
     providerRequestsWouldBe: totals.providerChunks,

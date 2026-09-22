@@ -7,6 +7,7 @@ import {
   CLASSIFIER_TRIAGE_LABELS,
   filterChunksForProvider,
   isChunkUnresolved,
+  mapClassifierLabel,
   parseClassifierDecisions,
   redactExcerptForClassifier,
   triageChunks,
@@ -109,6 +110,23 @@ test("ordered classifier results map by input position and unknown labels stay u
   assert.equal(missing.length, 0);
 });
 
+test("candidate selection respects writing goals for impersonal prose", () => {
+  const text = "The study evaluates the reported method across three sites and compares the measured outcome with the documented baseline for the final analysis and subsequent comparison of the published findings.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  assert.equal(isChunkUnresolved(text, local.issues, { audience: "academic", intent: "inform", tone: "formal" }).unresolved, false);
+  assert.equal(isChunkUnresolved(text, local.issues, { audience: "general", intent: "persuade", tone: "confident" }).unresolved, true);
+});
+
+test("two-label classifier outcomes derive uncertainty from confidence", () => {
+  assert.equal(mapClassifierLabel(CLASSIFIER_TRIAGE_LABELS[1], 0.75), "ai-needed");
+  assert.equal(mapClassifierLabel(CLASSIFIER_TRIAGE_LABELS[0], 0.80), "locally-sufficient");
+  assert.equal(mapClassifierLabel(CLASSIFIER_TRIAGE_LABELS[1], 0.74), "uncertain");
+  assert.equal(mapClassifierLabel(CLASSIFIER_TRIAGE_LABELS[0], 0.79), "uncertain");
+  const input = [{ chunkId: "chunk-confidence", excerpt: "long enough input", startOffset: 0, endOffset: 18, signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false }, categories: ["clarity"] }];
+  const malformed = parseClassifierDecisions({ results: [{ label: CLASSIFIER_TRIAGE_LABELS[1], confidence: "high" }] }, input);
+  assert.equal(malformed[0], null);
+});
+
 test("malformed ordered results leave an explicit hole instead of shifting chunk identity", () => {
   const inputs = [0, 1, 2].map((index) => ({
     chunkId: "chunk-" + index,
@@ -145,7 +163,7 @@ test("classifier.dev request uses the official keyless ordered payload", async (
   let request;
   globalThis.fetch = async (url, init) => {
     request = { url: String(url), headers: init.headers, body: JSON.parse(init.body) };
-    return new Response(JSON.stringify({ results: request.body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[2], confidence: 0.55, scores: {} })) }), { status: 200 });
+    return new Response(JSON.stringify({ results: request.body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[0], confidence: 0.55, scores: {} })) }), { status: 200 });
   };
   try {
     const outcome = await triageChunks(createAnalysisChunks(text), local.issues, { classifier: { baseUrl: "https://classifier.dev" } });
@@ -168,7 +186,7 @@ test("uncertain policy can keep low-confidence classifier results local", async 
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
     return new Response(JSON.stringify({
-      results: body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[2], confidence: 0.55 })),
+      results: body.inputs.map(() => ({ label: CLASSIFIER_TRIAGE_LABELS[0], confidence: 0.55 })),
     }), { status: 200 });
   };
   try {
@@ -271,7 +289,7 @@ test("classifier failure is explicit and proceeds to the provider by default", a
   try {
     const result = await analyzeWithTriage(text, goals, provider, { classifier });
     assert.ok(providerCalls >= 1);
-    assert.equal(result.source, "local");
+    assert.equal(result.source, "local+ai");
     assert.equal(result.triage.metrics.classifierFailures, 1);
     assert.ok(result.triage.metrics.aiNeededChunks >= 1);
     assert.ok(result.triage.metrics.providerChunks >= 1);

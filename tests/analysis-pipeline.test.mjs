@@ -10,6 +10,7 @@ import {
   mergeAnalysisIssues,
   retainUnaffectedIssues,
 } from "../packages/analysis/src/index.ts";
+import { analyzeLocallyIncremental } from "../packages/grammar/src/index.ts";
 
 test("analysis cache fingerprints are deterministic and exclude raw credential text", () => {
   const first = createAnalysisSettingsFingerprint({
@@ -151,6 +152,18 @@ test("incremental issue retention shifts unaffected ranges and discards the edit
   ], ranges, next);
   assert.deepEqual(retained.map((issue) => issue.id), ["before", "after"]);
   assert.equal(next.slice(retained[1].start, retained[1].end), "After");
+});
+
+test("incremental local analysis never retains merged AI issues", () => {
+  const previous = "The draft is repeatd here. The stable tail remains.";
+  const next = "The draft is repeated here. The stable tail remains.";
+  const changed = detectChangedRange(previous, next);
+  const result = analyzeLocallyIncremental(previous, next, [
+    { id: "ai-stale", ruleId: "ai-clarity", start: previous.indexOf("stable"), end: previous.indexOf("stable") + 6, original: "stable", replacement: "clear", category: "clarity", severity: "low", confidence: 0.9, title: "AI suggestion", explanation: "", source: "ai" },
+    { id: "local-typo", ruleId: "spelling-common-typo", start: previous.indexOf("repeatd"), end: previous.indexOf("repeatd") + 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, title: "Spelling", explanation: "", source: "local" },
+  ], changed, { dialect: "en-GB" });
+  assert.equal(result.issues.some((issue) => issue.id === "ai-stale"), false);
+  assert.equal(result.issues.some((issue) => issue.source === "local"), true);
 });
 
 test("issue merging stays deterministic for thousands of candidates", () => {

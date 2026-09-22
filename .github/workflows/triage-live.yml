@@ -7,6 +7,11 @@ on:
         description: "Number of corpus entries to evaluate (blank means all)"
         required: false
         default: ""
+      benchmark_batching:
+        description: "Also benchmark classifier batches of 5, 10, 25, 50, and 100"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   evaluate:
@@ -23,8 +28,7 @@ jobs:
           CLASSIFIER_API_KEY: ${{ secrets.CLASSIFIER_API_KEY }}
           CLASSIFIER_BASE_URL: ${{ secrets.CLASSIFIER_BASE_URL }}
         run: |
-          if [ -n "${{ inputs.limit }}" ]; then
-            npm run evaluate:triage:live -- --limit=${{ inputs.limit }}
-          else
-            npm run evaluate:triage:live
-          fi
+          args=""
+          if [ -n "${{ inputs.limit }}" ]; then args="$args --limit=${{ inputs.limit }}"; fi
+          if [ "${{ inputs.benchmark_batching }}" = "true" ]; then args="$args --benchmark-batching"; fi
+          npm run evaluate:triage:live -- $args

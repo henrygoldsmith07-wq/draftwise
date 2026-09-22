@@ -28,6 +28,7 @@ import type {
   RewriteResult,
   StylePreferences,
   TriageCategory,
+  TriageCoverage,
   TriageDecision,
   TriageMetrics,
   UncertainPolicy,
@@ -203,6 +204,72 @@ function providerErrorForStatus(status: number) {
   return new ProviderError("unknown", `The provider returned an error (${status}).`, status);
 }
 
+type ExternalService = "classifier" | "provider";
+
+function isRetryableStatus(status: number, service: ExternalService) {
+  return service === "classifier"
+    ? [429, 502, 503, 504].includes(status)
+    : [429, 500, 502, 503, 504].includes(status);
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function abortError() {
+  return typeof DOMException === "undefined"
+    ? Object.assign(new Error("The request was aborted."), { name: "AbortError" })
+    : new DOMException("The request was aborted.", "AbortError");
+}
+
+function retryAfterMs(response: Response, attempt: number) {
+  const value = response.headers.get("retry-after")?.trim();
+  if (value) {
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) return Math.max(0, Math.min(5_000, seconds * 1_000));
+    const timestamp = Date.parse(value);
+    if (Number.isFinite(timestamp)) return Math.max(0, Math.min(5_000, timestamp - Date.now()));
+  }
+  return Math.min(1_500, 100 * (2 ** attempt));
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(abortError());
+  return new Promise<void>((resolve, reject) => {
+    const cancel = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+export async function fetchWithRetry(
+  request: () => Promise<Response>,
+  options: { service: ExternalService; signal?: AbortSignal; maxRetries?: number },
+) {
+  const maxRetries = Math.max(0, Math.min(3, Math.floor(options.maxRetries ?? 2)));
+  let attempt = 0;
+  while (true) {
+    if (options.signal?.aborted) throw abortError();
+    try {
+      const response = await request();
+      if (!isRetryableStatus(response.status, options.service) || attempt >= maxRetries) return response;
+      await waitForRetry(retryAfterMs(response, attempt), options.signal);
+      attempt += 1;
+    } catch (error) {
+      if (options.signal?.aborted || isAbortError(error) || attempt >= maxRetries || !(error instanceof TypeError)) throw error;
+      await waitForRetry(Math.min(1_500, 100 * (2 ** attempt)), options.signal);
+      attempt += 1;
+    }
+  }
+}
+
 async function requestProvider(
   settings: ProviderSettings,
   messages: Array<{ role: "system" | "user"; content: string }>,
@@ -219,12 +286,13 @@ async function requestProvider(
   signal?.addEventListener("abort", cancel, { once: true });
 
   const call = async (includeResponseFormat: boolean) => {
-    const response = await fetch(endpoint, {
+    const response = await fetchWithRetry(
+      () => fetch(endpoint, {
       method: "POST",
       signal: timeoutController.signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey.trim()}`,
+        Authorization: "Bearer " + settings.apiKey.trim(),
         ...parseCustomHeaders(settings.customHeaders),
       },
       body: JSON.stringify({
@@ -234,7 +302,9 @@ async function requestProvider(
         ...(includeResponseFormat ? { response_format: { type: "json_object" } } : {}),
         messages,
       }),
-    });
+      }),
+      { service: "provider", signal: timeoutController.signal },
+    );
     if (!response.ok) {
       const responseText = await response.text().catch(() => "");
       if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(responseText)) return call(false);
@@ -347,6 +417,66 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
   };
 }
 
+export const PROVIDER_CONCURRENCY = 3;
+export const MAX_AI_CHUNKS_PER_ANALYSIS = 10;
+export const MAX_AI_CHARS_PER_ANALYSIS = 50_000;
+
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<R>,
+  options: { concurrency?: number; signal?: AbortSignal } = {},
+): Promise<Array<PromiseSettledResult<R>>> {
+  if (!items.length) return [];
+  const results: Array<PromiseSettledResult<R>> = new Array(items.length);
+  const concurrency = Math.max(1, Math.min(items.length, Math.floor(options.concurrency ?? PROVIDER_CONCURRENCY)));
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      if (options.signal?.aborted) throw abortError();
+      try {
+        results[index] = { status: "fulfilled", value: await worker(items[index], index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  const workerResults = await Promise.allSettled(Array.from({ length: concurrency }, () => runWorker()));
+  if (options.signal?.aborted) throw abortError();
+  const workerFailure = workerResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (workerFailure) throw workerFailure.reason;
+  return results;
+}
+
+function selectProviderWorkload(
+  chunks: AnalysisChunk[],
+  options: Pick<ProviderAnalysisOptions, "changedRange" | "maxAiChunks" | "maxAiChars">,
+) {
+  const maxChunks = Math.max(0, Math.floor(options.maxAiChunks ?? MAX_AI_CHUNKS_PER_ANALYSIS));
+  const maxChars = Math.max(0, Math.floor(options.maxAiChars ?? MAX_AI_CHARS_PER_ANALYSIS));
+  const ranked = chunks
+    .map((chunk, index) => ({
+      chunk,
+      index,
+      changed: Boolean(options.changedRange && chunk.contentStartOffset < options.changedRange.end && chunk.contentEndOffset > options.changedRange.start),
+    }))
+    .sort((left, right) => Number(right.changed) - Number(left.changed) || left.index - right.index);
+  const selected: AnalysisChunk[] = [];
+  let characters = 0;
+  for (const item of ranked) {
+    if (selected.length >= maxChunks || characters + item.chunk.text.length > maxChars) continue;
+    selected.push(item.chunk);
+    characters += item.chunk.text.length;
+  }
+  selected.sort((left, right) => chunks.indexOf(left) - chunks.indexOf(right));
+  return {
+    selected,
+    skipped: Math.max(0, chunks.length - selected.length),
+  };
+}
+
 export interface ProviderAnalysisOptions {
   signal?: AbortSignal;
   preferences?: StylePreferences;
@@ -355,6 +485,9 @@ export interface ProviderAnalysisOptions {
   contextWindow?: number;
   timeoutMs?: number;
   localAnalysis?: AnalysisResult;
+  providerConcurrency?: number;
+  maxAiChunks?: number;
+  maxAiChars?: number;
 }
 
 export async function analyzeWithProvider(
@@ -376,14 +509,25 @@ export async function analyzeWithProvider(
     endOffset: changed?.end,
   });
   if (!chunks.length) return { ...local, analysedText: text, source: "local" as const } satisfies AnalysisResult;
-  const settled = await Promise.allSettled(chunks.map(async (chunk) => ({
+  const workload = selectProviderWorkload(chunks, options);
+  if (!workload.selected.length) {
+    return {
+      ...local,
+      analysedText: text,
+      source: "local" as const,
+      changedRange: options.changedRange ?? undefined,
+      aiCoverage: { requestedChunks: chunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+    } satisfies AnalysisResult;
+  }
+  const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
     chunk,
     response: await requestProvider(settings, [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
       { role: "user", content: analysisPrompt(chunk, goals, preferences) },
     ], options.signal, options.timeoutMs),
-  })));
+  }), { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const failed = settled.filter((result) => result.status === "rejected").length;
   if (!successful.length) {
     const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (firstFailure) throw firstFailure.reason;
@@ -402,8 +546,14 @@ export async function analyzeWithProvider(
     issues,
     scores: scoreWriting(stats, issues, goals, text),
     stats,
-    source: aiIssues.length ? "local+ai" : "local",
+    source: successful.length ? "local+ai" : "local",
     changedRange: options.changedRange ?? undefined,
+    aiCoverage: {
+      requestedChunks: chunks.length,
+      successfulChunks: successful.length,
+      failedChunks: failed,
+      skippedChunks: workload.skipped,
+    },
     ...(diagnostics ? { diagnostics } : {}),
   } satisfies AnalysisResult;
 }
@@ -515,26 +665,37 @@ export const DEFAULT_CLASSIFIER_SETTINGS_VALUE: ClassifierSettings = {
 };
 
 export const CLASSIFIER_MAX_EXCERPT_CHARS = 500;
-export const CLASSIFIER_MAX_BATCH_CHUNKS = 1_000;
+export const CLASSIFIER_MAX_BATCH_CHUNKS = 100;
+export const CLASSIFIER_BATCH_SIZES = [5, 10, 25, 50, 100] as const;
 export const TRIAGE_LABEL_FORMULATIONS = {
   "semantic-v2": [
     "The local writing checks are sufficient; no semantic AI review is needed.",
     "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
-    "It is unclear whether semantic AI review would add enough value.",
   ],
   "direct-v1": [
-    "Local checks are enough; do not use AI review.",
-    "AI review is needed to find useful semantic writing issues.",
-    "Uncertain whether AI review would help.",
+    "Local writing checks are sufficient.",
+    "Semantic AI review would likely add useful feedback.",
+  ],
+  "explicit-v1": [
+    "No additional semantic review is needed beyond the local writing checks.",
+    "A semantic writing model would likely identify useful issues the local checks cannot reliably detect.",
+  ],
+  "compact-v1": [
+    "Local checks are enough for this passage.",
+    "An AI writing review would likely add useful feedback.",
   ],
 } as const;
 export type TriageLabelFormulationId = keyof typeof TRIAGE_LABEL_FORMULATIONS;
 export const TRIAGE_LABEL_FORMULATION_ID: TriageLabelFormulationId = "semantic-v2";
 export const CLASSIFIER_TRIAGE_LABELS = TRIAGE_LABEL_FORMULATIONS[TRIAGE_LABEL_FORMULATION_ID];
-export const TRIAGE_CONFIDENCE_THRESHOLDS = {
+export interface TriageConfidenceThresholds {
+  aiNeeded: number;
+  locallySufficient: number;
+}
+export const TRIAGE_CONFIDENCE_THRESHOLDS: TriageConfidenceThresholds = {
   aiNeeded: 0.75,
   locallySufficient: 0.80,
-} as const;
+};
 
 export class ClassifierError extends Error {
   readonly code: ClassifierErrorCode;
@@ -695,14 +856,18 @@ export function collectChunkSignals(chunkText: string, issuesInChunk: WritingIss
   };
 }
 
-export function inferTriageCategories(chunkText: string, issuesInChunk: WritingIssue[]): TriageCategory[] {
+function goalSupportsEngagementReview(goals?: WritingGoals) {
+  return goals?.intent === "persuade" || goals?.audience === "casual" || goals?.tone === "friendly";
+}
+
+export function inferTriageCategories(chunkText: string, issuesInChunk: WritingIssue[], goals?: WritingGoals): TriageCategory[] {
   const mapped = issuesInChunk.map((issue) => mapLocalCategoryToTriage(issue.category));
   const signals = collectChunkSignals(chunkText, issuesInChunk);
   const extra: TriageCategory[] = [];
   if (signals.hasLongSentence) extra.push("structure");
   if (signals.hasVagueOrFiller) extra.push("clarity");
   if (signals.hasPassiveOrWordiness) extra.push("style");
-  if (issuesInChunk.length === 0 && chunkText.trim().split(/\s+/u).length > 25) extra.push("engagement");
+  if (issuesInChunk.length === 0 && chunkText.trim().split(/\s+/u).length > 25 && goalSupportsEngagementReview(goals)) extra.push("engagement");
   if (HEDGE_PATTERN.test(chunkText)) extra.push("tone");
   const merged = [...new Set([...mapped, ...extra])];
   return merged.length ? merged.slice(0, 4) as TriageCategory[] : ["other"];
@@ -715,10 +880,10 @@ export interface UnresolvedAssessment {
 }
 
 /** Local-first heuristic: decide whether a chunk is unresolved/ambiguous and may need AI. */
-export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue[]): UnresolvedAssessment {
+export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue[], goals?: WritingGoals): UnresolvedAssessment {
   const text = String(chunkText || "");
   const trimmed = text.trim();
-  const categories = inferTriageCategories(text, issuesInChunk);
+  const categories = inferTriageCategories(text, issuesInChunk, goals);
   if (trimmed.length < 20) {
     if ((trimmed.match(/[.!?]/gu) ?? []).length >= 2) {
       return { unresolved: true, reasons: ["short-fragment"], categories: ["structure"] };
@@ -736,7 +901,7 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
     }
     // Low-engagement clean text: longer, no direct address, no questions.
     // Needs AI for engagement/structure even when local finds nothing.
-    if (words > 25 && !/\b(you|we|our|your|us|\?)\b/iu.test(trimmed)) {
+    if (words > 25 && goalSupportsEngagementReview(goals) && !/\b(you|we|our|your|us|\?)\b/iu.test(trimmed)) {
       return { unresolved: true, reasons: ["low-engagement-clean-text"], categories: categories.length ? categories : ["engagement"] };
     }
     return { unresolved: false, reasons: ["clean"], categories: [] };
@@ -775,10 +940,11 @@ export function isChunkUnresolved(chunkText: string, issuesInChunk: WritingIssue
 export function selectTriageCandidates(
   chunks: AnalysisChunk[],
   localIssues: WritingIssue[],
+  goals?: WritingGoals,
 ): Array<{ chunk: AnalysisChunk; issues: WritingIssue[]; assessment: UnresolvedAssessment }> {
   return chunks.map((chunk) => {
     const issues = localIssues.filter((issue) => issue.start < chunk.endOffset && issue.end > chunk.startOffset);
-    return { chunk, issues, assessment: isChunkUnresolved(chunk.text, issues) };
+    return { chunk, issues, assessment: isChunkUnresolved(chunk.text, issues, goals) };
   });
 }
 
@@ -820,12 +986,17 @@ function isKnownClassifierLabel(value: string, labels: readonly string[] = CLASS
   return labels.some((label) => normaliseClassifierLabel(label) === normalised);
 }
 
-export function mapClassifierLabel(label: string, confidence: number, labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS): TriageDecision {
+export function mapClassifierLabel(
+  label: string,
+  confidence: number,
+  labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS,
+  thresholds: TriageConfidenceThresholds = TRIAGE_CONFIDENCE_THRESHOLDS,
+): TriageDecision {
   const normalised = normaliseClassifierLabel(label);
   const localLabel = normaliseClassifierLabel(labels[0]);
   const aiLabel = normaliseClassifierLabel(labels[1]);
-  if (normalised === localLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.locallySufficient) return "locally-sufficient";
-  if (normalised === aiLabel && confidence >= TRIAGE_CONFIDENCE_THRESHOLDS.aiNeeded) return "ai-needed";
+  if (normalised === localLabel && confidence >= thresholds.locallySufficient) return "locally-sufficient";
+  if (normalised === aiLabel && confidence >= thresholds.aiNeeded) return "ai-needed";
   return "uncertain";
 }
 
@@ -838,6 +1009,7 @@ export function parseClassifierDecisions(
   value: unknown,
   expectedInputs: ClassifierChunkInput[],
   labels: readonly string[] = CLASSIFIER_TRIAGE_LABELS,
+  thresholds: TriageConfidenceThresholds = TRIAGE_CONFIDENCE_THRESHOLDS,
 ): Array<ClassifierChunkDecision | null> {
   const rawList = isRecord(value) && Array.isArray(value.results)
     ? value.results
@@ -852,10 +1024,11 @@ export function parseClassifierDecisions(
     const label = raw.label.trim();
     if (!label) return null;
     const input = expectedInputs[index];
-    const decision = mapClassifierLabel(label, confidence, labels);
+    const decision = mapClassifierLabel(label, confidence, labels, thresholds);
     return {
       chunkId: input.chunkId,
       decision,
+      label,
       categories: input.categories.length ? input.categories : ["other"],
       confidence,
       reason: ("classifier.dev label: " + label).slice(0, 300),
@@ -868,6 +1041,7 @@ export interface ClassifierRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   labelFormulationId?: TriageLabelFormulationId;
+  thresholds?: TriageConfidenceThresholds;
 }
 
 async function requestClassifierDecisions(
@@ -887,16 +1061,19 @@ async function requestClassifierDecisions(
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const apiKey = settings.apiKey?.trim();
     if (apiKey) headers.Authorization = "Bearer " + apiKey;
-    const response = await fetch(endpoint, {
-      method: "POST",
-      signal: timeoutController.signal,
-      headers,
-      body: JSON.stringify({
-        inputs: inputs.map((input) => input.excerpt),
-        labels,
-        instructions: "Choose exactly one label for each input. Return results in the same order as inputs. Do not rewrite or quote the input.",
+    const response = await fetchWithRetry(
+      () => fetch(endpoint, {
+        method: "POST",
+        signal: timeoutController.signal,
+        headers,
+        body: JSON.stringify({
+          inputs: inputs.map((input) => input.excerpt),
+          labels,
+          instructions: "Choose exactly one label for each input. Return results in the same order as inputs. Do not rewrite or quote the input.",
+        }),
       }),
-    });
+      { service: "classifier", signal: timeoutController.signal },
+    );
     if (!response.ok) throw classifierErrorForStatus(response.status);
     const declaredLength = Number(response.headers.get("content-length") || 0);
     if (declaredLength > 500_000) throw new ClassifierError("invalid-json", "The classifier response was too large.");
@@ -913,7 +1090,7 @@ async function requestClassifierDecisions(
     } catch {
       throw new ClassifierError("invalid-json", "The classifier returned invalid JSON.");
     }
-    const parsed = parseClassifierDecisions(payload, inputs, labels);
+    const parsed = parseClassifierDecisions(payload, inputs, labels, options.thresholds);
     return parsed.length < inputs.length
       ? [...parsed, ...Array.from({ length: inputs.length - parsed.length }, () => null)]
       : parsed;
@@ -945,6 +1122,9 @@ export interface TriageOptions {
   classifier?: ClassifierSettings | null;
   uncertainPolicy?: UncertainPolicy;
   labelFormulationId?: TriageLabelFormulationId;
+  thresholds?: TriageConfidenceThresholds;
+  goals?: WritingGoals;
+  classifierBatchSize?: number;
   maxExcerptChars?: number;
   timeoutMs?: number;
 }
@@ -953,6 +1133,7 @@ export interface TriageOutcome {
   decisions: ClassifierChunkDecision[];
   candidateCount: number;
   metrics: TriageMetrics;
+  coverage?: TriageCoverage;
 }
 
 function buildTriageMetrics(
@@ -988,7 +1169,7 @@ export async function triageChunks(
   localIssues: WritingIssue[],
   options: TriageOptions = {},
 ): Promise<TriageOutcome> {
-  const assessed = selectTriageCandidates(chunks, localIssues);
+  const assessed = selectTriageCandidates(chunks, localIssues, options.goals);
   const locallySufficient = assessed.filter((item) => !item.assessment.unresolved);
   const inputs = buildClassifierInputs(assessed, options.maxExcerptChars ?? CLASSIFIER_MAX_EXCERPT_CHARS);
   const decisions: ClassifierChunkDecision[] = locallySufficient.map((item) => ({
@@ -1025,8 +1206,9 @@ export async function triageChunks(
     };
   }
   const inputBatches: ClassifierChunkInput[][] = [];
-  for (let offset = 0; offset < inputs.length; offset += CLASSIFIER_MAX_BATCH_CHUNKS) {
-    inputBatches.push(inputs.slice(offset, offset + CLASSIFIER_MAX_BATCH_CHUNKS));
+  const batchSize = Math.max(1, Math.min(CLASSIFIER_MAX_BATCH_CHUNKS, Math.floor(options.classifierBatchSize ?? CLASSIFIER_MAX_BATCH_CHUNKS)));
+  for (let offset = 0; offset < inputs.length; offset += batchSize) {
+    inputBatches.push(inputs.slice(offset, offset + batchSize));
   }
   let classifierRequests = 0;
   try {
@@ -1037,6 +1219,7 @@ export async function triageChunks(
         signal: options.signal,
         timeoutMs: options.timeoutMs ?? classifier.timeoutMs,
         labelFormulationId: options.labelFormulationId,
+        thresholds: options.thresholds,
       }));
     }
     let omittedClassifierResults = 0;
@@ -1091,6 +1274,8 @@ export interface ProviderTriageOptions extends ProviderAnalysisOptions {
   triageEnabled?: boolean;
   uncertainPolicy?: UncertainPolicy;
   labelFormulationId?: TriageLabelFormulationId;
+  triageThresholds?: TriageConfidenceThresholds;
+  classifierBatchSize?: number;
   classifierTimeoutMs?: number;
 }
 
@@ -1127,6 +1312,9 @@ export async function analyzeWithTriage(
     classifier: options.classifier ?? null,
     uncertainPolicy,
     labelFormulationId: options.labelFormulationId,
+    thresholds: options.triageThresholds,
+    goals,
+    classifierBatchSize: options.classifierBatchSize,
     maxExcerptChars: options.classifier?.maxExcerptChars,
     timeoutMs: options.classifierTimeoutMs ?? options.classifier?.timeoutMs,
   });
@@ -1142,18 +1330,50 @@ export async function analyzeWithTriage(
       stats,
       source: "local" as const,
       changedRange: options.changedRange ?? undefined,
-      triage: { decisions: triage.decisions, metrics: triage.metrics },
+      triage: {
+        decisions: triage.decisions,
+        metrics: triage.metrics,
+        coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: 0 },
+      },
+      aiCoverage: { requestedChunks: 0, successfulChunks: 0, failedChunks: 0, skippedChunks: 0 },
       ...(diagnostics ? { diagnostics } : {}),
     } as AnalysisResult & { triage: TriageOutcome };
   }
-  const settled = await Promise.allSettled(aiChunks.map(async (chunk) => ({
+  const workload = selectProviderWorkload(aiChunks, options);
+  if (!workload.selected.length) {
+    const stats = getWritingStats(text);
+    const diagnostics = createAnalysisDiagnostics(local.issues.length, startedAt, "provider");
+    return {
+      ...local,
+      analysedText: text,
+      issues: mergeAnalysisIssues([...local.issues]),
+      scores: scoreWriting(stats, local.issues, goals, text),
+      stats,
+      source: "local" as const,
+      changedRange: options.changedRange ?? undefined,
+      triage: {
+        decisions: triage.decisions,
+        metrics: {
+          ...triage.metrics,
+          providerRequests: 0,
+          providerChunks: 0,
+          avoidedProviderChunks: Math.max(0, chunks.length),
+        },
+        coverage: { candidateChunks: triage.candidateCount, providerChunks: 0, skippedDueToLimit: workload.skipped },
+      },
+      aiCoverage: { requestedChunks: aiChunks.length, successfulChunks: 0, failedChunks: 0, skippedChunks: workload.skipped },
+      ...(diagnostics ? { diagnostics } : {}),
+    } as AnalysisResult & { triage: TriageOutcome };
+  }
+  const settled = await mapWithConcurrency(workload.selected, async (chunk) => ({
     chunk,
     response: await requestProvider(settings, [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
       { role: "user", content: analysisPrompt(chunk, goals, preferences) },
     ], options.signal, options.timeoutMs),
-  })));
+  }), { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const failed = settled.filter((result) => result.status === "rejected").length;
   if (!successful.length) {
     const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (firstFailure) throw firstFailure.reason;
@@ -1172,16 +1392,23 @@ export async function analyzeWithTriage(
     issues,
     scores: scoreWriting(stats, issues, goals, text),
     stats,
-    source: aiIssues.length ? "local+ai" : "local",
+    source: successful.length ? "local+ai" : "local",
     changedRange: options.changedRange ?? undefined,
     triage: {
       decisions: triage.decisions,
       metrics: {
         ...triage.metrics,
-        providerRequests: aiChunks.length,
-        providerChunks: aiChunks.length,
-        avoidedProviderChunks: Math.max(0, chunks.length - aiChunks.length),
+        providerRequests: workload.selected.length,
+        providerChunks: workload.selected.length,
+        avoidedProviderChunks: Math.max(0, chunks.length - workload.selected.length),
       },
+      coverage: { candidateChunks: triage.candidateCount, providerChunks: workload.selected.length, skippedDueToLimit: workload.skipped },
+    },
+    aiCoverage: {
+      requestedChunks: aiChunks.length,
+      successfulChunks: successful.length,
+      failedChunks: failed,
+      skippedChunks: workload.skipped,
     },
     ...(diagnostics ? { diagnostics } : {}),
   } as AnalysisResult & { triage: TriageOutcome };

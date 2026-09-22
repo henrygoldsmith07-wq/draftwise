@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   analyzeWithProvider,
+  fetchWithRetry,
+  mapWithConcurrency,
+  PROVIDER_CONCURRENCY,
   parseAnalysisIssues,
   parseCustomHeaders,
   ProviderError,
@@ -142,6 +145,79 @@ test("rate limits and invalid provider URLs expose stable error codes", async ()
     globalThis.fetch = originalFetch;
   }
   await assert.rejects(() => analyzeWithProvider("A short sentence.", goals, { ...settings, baseUrl: "https://user:pass@example.com/v1" }), (error) => error instanceof ProviderError && error.code === "invalid-url");
+});
+
+test("provider requests use bounded concurrency", async () => {
+  const originalFetch = globalThis.fetch;
+  let active = 0;
+  let maximum = 0;
+  globalThis.fetch = async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    active -= 1;
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
+  };
+  try {
+    const text = Array.from({ length: 12 }, (_, index) => "Section " + index + " " + "context ".repeat(72)).join("\n\n");
+    await analyzeWithProvider(text, goals, settings, { maxChunkChars: 500, contextWindow: 0, providerConcurrency: 2, maxAiChunks: 12 });
+    assert.ok(maximum <= 2);
+    assert.equal(PROVIDER_CONCURRENCY, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("provider worker pool preserves order and honours cancellation", async () => {
+  const settled = await mapWithConcurrency([0, 1, 2, 3, 4], async (value) => {
+    await new Promise((resolve) => setTimeout(resolve, (4 - value) * 3));
+    return value * 2;
+  }, { concurrency: 3 });
+  assert.deepEqual(settled.map((result) => result.status === "fulfilled" ? result.value : null), [0, 2, 4, 6, 8]);
+
+  const controller = new AbortController();
+  const pending = mapWithConcurrency([0, 1, 2], async (value) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return value;
+  }, { concurrency: 3, signal: controller.signal });
+  controller.abort();
+  await assert.rejects(pending, (error) => error?.name === "AbortError");
+});
+
+test("provider workload limits expose skipped AI coverage", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ issues: [], tone: [], scores: {} }) } }] }), { status: 200 });
+  };
+  try {
+    const text = Array.from({ length: 8 }, (_, index) => "Section " + index + " " + "context ".repeat(72)).join("\n\n");
+    const result = await analyzeWithProvider(text, goals, settings, { maxChunkChars: 500, contextWindow: 0, maxAiChunks: 2, maxAiChars: 1_000 });
+    assert.ok(calls <= 2);
+    assert.ok(result.aiCoverage);
+    assert.ok(result.aiCoverage.skippedChunks > 0);
+    assert.equal(result.aiCoverage.successfulChunks, calls);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("transient external failures retry with bounded attempts while client errors do not", async () => {
+  let calls = 0;
+  const recovered = await fetchWithRetry(async () => {
+    calls += 1;
+    return calls === 1 ? new Response("busy", { status: 503, headers: { "retry-after": "0" } }) : new Response("ok", { status: 200 });
+  }, { service: "provider", maxRetries: 2 });
+  assert.equal(recovered.status, 200);
+  assert.equal(calls, 2);
+  calls = 0;
+  const rejected = await fetchWithRetry(async () => {
+    calls += 1;
+    return new Response("bad request", { status: 400 });
+  }, { service: "classifier", maxRetries: 2 });
+  assert.equal(rejected.status, 400);
+  assert.equal(calls, 1);
 });
 
 test("provider timeout and invalid model are explicit failures", async () => {

@@ -1,17 +1,25 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
-import { analyzeWithTriage, ProviderError, TRIAGE_LABEL_FORMULATION_ID } from "@/packages/ai/src";
+import {
+  analyzeWithTriage,
+  CLASSIFIER_MAX_BATCH_CHUNKS,
+  MAX_AI_CHARS_PER_ANALYSIS,
+  MAX_AI_CHUNKS_PER_ANALYSIS,
+  PROVIDER_CONCURRENCY,
+  ProviderError,
+  TRIAGE_LABEL_FORMULATION_ID,
+} from "@/packages/ai/src";
 import { createAnalysisCacheKey, createAnalysisSettingsFingerprint, detectChangedRange, LruCache } from "@/packages/analysis/src";
 import { analyzeLocally, analyzeLocallyIncremental } from "@/packages/grammar/src";
-import type { AnalysisResult, ClassifierSettings, ProviderSettings, StylePreferences, WritingGoals } from "@/packages/types/src";
+import type { AnalysisResult, ClassifierSettings, ProviderSettings, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
 const emptyResult = (text: string, goals: WritingGoals, style: StylePreferences): AnalysisResult => {
   const local = analyzeLocally(text, style, goals);
   return { ...local, analysedText: text, source: "local" };
 };
 
-const ANALYSIS_ENGINE_VERSION = "analysis-engine-v3";
+const ANALYSIS_ENGINE_VERSION = "analysis-engine-v4";
 
 function safeCustomHeadersFingerprint(raw: string) {
   try {
@@ -41,7 +49,8 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
   const [status, setStatus] = useState<"local" | "analysing" | "ready" | "error">("local");
   const [error, setError] = useState<string | null>(null);
   const previousText = useRef("");
-  const previousAnalysis = useRef<AnalysisResult | null>(null);
+  const previousLocalAnalysis = useRef<AnalysisResult | null>(null);
+  const previousAiIssues = useRef<WritingIssue[]>([]);
   const runId = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const cache = useRef(new LruCache<AnalysisResult>(24));
@@ -49,14 +58,18 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
   useEffect(() => {
     const currentRun = ++runId.current;
     const beforeText = previousText.current;
-    const beforeAnalysis = previousAnalysis.current;
+    const beforeLocalAnalysis = previousLocalAnalysis.current;
     const changedRange = detectChangedRange(beforeText, text);
     previousText.current = text;
-    const localBase = beforeAnalysis && changedRange
-      ? analyzeLocallyIncremental(beforeText, text, beforeAnalysis.issues, changedRange, style, goals)
+    const localBase = beforeLocalAnalysis && changedRange
+      ? analyzeLocallyIncremental(beforeText, text, beforeLocalAnalysis.issues, changedRange, style, goals)
       : emptyResult(text, goals, style);
     const local = { ...localBase, analysedText: text, source: "local" as const, changedRange: changedRange ?? undefined };
-    previousAnalysis.current = local;
+    previousLocalAnalysis.current = local;
+    // AI issues are intentionally a separate history. They are not fed into
+    // the local incremental analyser and are cleared while the edited text
+    // waits for a fresh provider result.
+    previousAiIssues.current = [];
     startTransition(() => {
       setAnalysis(local);
       setError(null);
@@ -82,6 +95,9 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
         customHeaders: safeCustomHeadersFingerprint(settings.customHeaders),
+        providerConcurrency: PROVIDER_CONCURRENCY,
+        maxAiChunks: MAX_AI_CHUNKS_PER_ANALYSIS,
+        maxAiChars: MAX_AI_CHARS_PER_ANALYSIS,
       },
       classifier: classifier
         ? {
@@ -94,10 +110,12 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
           }
         : null,
       triagePolicy: classifier?.uncertainPolicy ?? "provider",
+      classifierBatchSize: CLASSIFIER_MAX_BATCH_CHUNKS,
     });
     const cacheKey = createAnalysisCacheKey(text, settingsFingerprint, changedRange);
     const cached = cache.current.get(cacheKey);
     if (cached) {
+      previousAiIssues.current = cached.issues.filter((issue) => issue.source === "ai");
       startTransition(() => {
         setAnalysis(cached);
         setStatus("ready");
@@ -123,7 +141,7 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
         .then((remote) => {
           if (controller.signal.aborted || currentRun !== runId.current) return;
           cache.current.set(cacheKey, remote);
-          previousAnalysis.current = remote;
+          previousAiIssues.current = remote.issues.filter((issue) => issue.source === "ai");
           setAnalysis(remote);
           setStatus("ready");
         })

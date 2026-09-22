@@ -195,7 +195,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         style: message.style,
         range: message.changedRange,
         settings: settingsFingerprint({
-          engineVersion: "analysis-engine-v3",
+          engineVersion: "analysis-engine-v4",
           provider: {
             provider: stored.provider.provider,
             baseUrl: stored.provider.baseUrl,
@@ -203,6 +203,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             temperature: stored.provider.temperature,
             maxTokens: stored.provider.maxTokens,
             customHeaders: safeCustomHeadersFingerprint(stored.provider.customHeaders),
+            providerConcurrency: 3,
+            maxAiChunks: 10,
+            maxAiChars: 50000,
           },
           classifier: classifier
             ? {
@@ -214,7 +217,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 uncertainPolicy: classifier.uncertainPolicy || "provider",
               }
             : null,
-          triagePolicy: "provider",
+          triagePolicy: classifier?.uncertainPolicy || "provider",
+          classifierBatchSize: 100,
         }),
       });
       const cached = analysisCache.get(cacheKey);
@@ -227,7 +231,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         text,
         message.goals || { audience: "general", intent: "inform", tone: "professional" },
         stored.provider,
-        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: classifier?.uncertainPolicy === "local" ? "local" : "provider", labelFormulationId: "semantic-v2" },
+        { signal: controller.signal, preferences: message.style, changedRange: message.changedRange, classifier, triageEnabled: true, uncertainPolicy: classifier?.uncertainPolicy === "local" ? "local" : "provider", labelFormulationId: "semantic-v2", classifierBatchSize: 100, providerConcurrency: 3, maxAiChunks: 10, maxAiChars: 50000 },
       );
       if (!controller.signal.aborted) {
         analysisCache.set(cacheKey, { issues: result.issues, triage: result.triage || null });

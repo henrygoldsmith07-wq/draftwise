@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_CLASSIFIER_SETTINGS,
   DEFAULT_GOALS,
@@ -23,6 +23,7 @@ export const LEGACY_STORAGE_KEYS = [
 ] as const;
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
+export const AUTO_SAVE_DELAY_MS = 350;
 
 export interface WorkspaceStorage {
   getItem(key: string): string | null;
@@ -244,12 +245,39 @@ export function writeWorkspaceToStorage(workspace: DraftwiseWorkspace, storage: 
   }
 }
 
+export function clearWorkspaceStorage(storage: WorkspaceStorage) {
+  try {
+    storage.removeItem(WORKSPACE_STORAGE_KEY);
+    for (const key of LEGACY_STORAGE_KEYS) storage.removeItem(key);
+    return { ok: true as const };
+  } catch (error) {
+    return { ok: false as const, error: storageErrorMessage(error) };
+  }
+}
+
 export function useDraftPersistence(initial: DraftwiseWorkspace) {
-  const [workspace, setWorkspace] = useState(initial);
+  const [workspace, setWorkspaceState] = useState(initial);
   const [hydrated, setHydrated] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const workspaceRef = useRef(initial);
+  const dirtyRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+
+  const persistCurrent = useCallback(() => {
+    const result = writeWorkspaceToStorage(workspaceRef.current, window.localStorage);
+    if (result.ok) {
+      dirtyRef.current = false;
+      setLastSavedAt(Date.now());
+      setSaveStatus("saved");
+      setSaveError(null);
+    } else {
+      setSaveStatus("error");
+      setSaveError(result.error);
+    }
+    return result;
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -259,7 +287,9 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
       } catch {
         loaded = initial;
       }
-      setWorkspace(loaded);
+      workspaceRef.current = loaded;
+      dirtyRef.current = false;
+      setWorkspaceState(loaded);
       setHydrated(true);
       setSaveStatus("idle");
       setSaveError(null);
@@ -268,57 +298,94 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
   }, [initial]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    let active = true;
-    const timer = window.setTimeout(() => {
-      if (!active) return;
-      setSaveStatus("saving");
-      setSaveError(null);
-      const result = writeWorkspaceToStorage(workspace, window.localStorage);
-      if (result.ok) {
-        if (active) {
-          setLastSavedAt(Date.now());
-          setSaveStatus("saved");
-        }
-      } else {
-        if (active) {
-          setSaveStatus("error");
-          setSaveError(result.error);
-        }
-      }
-    }, 0);
+    if (!hydrated || !dirtyRef.current) return;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    setSaveStatus("saving");
+    setSaveError(null);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      persistCurrent();
+    }, AUTO_SAVE_DELAY_MS);
     return () => {
-      active = false;
-      window.clearTimeout(timer);
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
     };
-  }, [hydrated, workspace]);
+  }, [hydrated, persistCurrent, workspace]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const flushPendingSave = () => {
+      if (!dirtyRef.current) return;
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const result = writeWorkspaceToStorage(workspaceRef.current, window.localStorage);
+      if (result.ok) dirtyRef.current = false;
+    };
+    window.addEventListener("pagehide", flushPendingSave);
+    return () => window.removeEventListener("pagehide", flushPendingSave);
+  }, [hydrated]);
 
   const updateWorkspace = useCallback((patch: Partial<DraftwiseWorkspace> | ((current: DraftwiseWorkspace) => DraftwiseWorkspace)) => {
-    setWorkspace((current) => typeof patch === "function" ? patch(current) : { ...current, ...patch });
+    setWorkspaceState((current) => {
+      const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+      workspaceRef.current = next;
+      dirtyRef.current = true;
+      return next;
+    });
   }, []);
 
+  const replaceWorkspace = useCallback((next: DraftwiseWorkspace | ((current: DraftwiseWorkspace) => DraftwiseWorkspace)) => {
+    setWorkspaceState((current) => {
+      const value = typeof next === "function" ? next(current) : next;
+      workspaceRef.current = value;
+      dirtyRef.current = true;
+      return value;
+    });
+  }, []);
+
+  const saveNow = useCallback(() => {
+    if (!hydrated) return { ok: false as const, error: "Draft is still loading." };
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setSaveStatus("saving");
+    setSaveError(null);
+    return persistCurrent();
+  }, [hydrated, persistCurrent]);
+
   const clearLocalData = useCallback(() => {
-    try {
-      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
-      for (const key of LEGACY_STORAGE_KEYS) window.localStorage.removeItem(key);
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const result = clearWorkspaceStorage(window.localStorage);
+    if (result.ok) {
+      workspaceRef.current = initial;
+      dirtyRef.current = false;
+      setWorkspaceState(initial);
       setLastSavedAt(null);
       setSaveError(null);
       setSaveStatus("idle");
-    } catch (error) {
+    } else {
       setSaveStatus("error");
-      setSaveError(storageErrorMessage(error));
+      setSaveError(result.error);
     }
-    setWorkspace(initial);
   }, [initial]);
 
   return {
     workspace,
-    setWorkspace,
+    setWorkspace: replaceWorkspace,
     updateWorkspace,
     hydrated,
     saveStatus,
     lastSavedAt,
     saveError,
+    saveNow,
     clearLocalData,
   };
 }

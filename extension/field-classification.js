@@ -35,6 +35,16 @@
     "transaction-amount",
   ]);
 
+  function associatedLabelText(element) {
+    const explicitLabels = Array.from(element?.labels || []).map((label) => label?.textContent || "");
+    const wrappingLabel = element?.closest?.("label")?.textContent || "";
+    const labelledBy = String(element?.getAttribute?.("aria-labelledby") || "")
+      .split(/\s+/u)
+      .filter(Boolean)
+      .map((id) => element?.ownerDocument?.getElementById?.(id)?.textContent || "");
+    return [...explicitLabels, wrappingLabel, ...labelledBy].filter(Boolean).join(" ");
+  }
+
   function metadataTokens(element) {
     return [
       element?.name,
@@ -43,6 +53,7 @@
       element?.getAttribute?.("autocomplete"),
       element?.getAttribute?.("aria-label"),
       element?.getAttribute?.("placeholder"),
+      associatedLabelText(element),
       element?.closest?.("form")?.getAttribute?.("autocomplete"),
     ].filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
   }

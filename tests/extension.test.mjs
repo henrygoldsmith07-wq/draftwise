@@ -368,6 +368,39 @@ test("sensitive field classification uses surrounding form metadata", async () =
   assert.equal(classify(fieldInForm(form("writing-form", "draft"))), false);
 });
 
+test("sensitive field classification covers financial and identity metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const field = (label) => ({
+    type: "text",
+    name: "generated",
+    id: "generated",
+    labels: [{ textContent: label }],
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute() { return ""; },
+    closest() { return null; },
+  });
+
+  for (const label of [
+    "Sign-in name",
+    "IBAN",
+    "Sort code",
+    "Bank account",
+    "Account number",
+    "Routing number",
+    "National Insurance number",
+    "Tax ID",
+  ]) {
+    assert.equal(classify(field(label)), true, label);
+  }
+  assert.equal(classify(field("Account summary")), false);
+});
+
 test("permission helpers derive narrow site and provider origins", async () => {
   const source = await readFile(file("extension/permissions.js"), "utf8");
   const context = { URL };

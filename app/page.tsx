@@ -11,6 +11,7 @@ import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
 import { categoryMatches } from "@/components/draftwise/EditorPrimitives";
 import { applyIssueReplacements, getOpenIssues } from "@/lib/issue-actions";
+import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { useHistory } from "@/hooks/useHistory";
@@ -50,7 +51,7 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
-  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
+  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   const { commit, undo: undoHistory, redo: redoHistory, reset: resetHistory, canUndo, canRedo } = useHistory(workspace.draft);
   const historyReady = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,7 +135,7 @@ export default function Home() {
   }, [requestRewrite, selectedText, selection, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
 
   const applyRewrite = useCallback((insert: boolean) => {
-    if (!rewritePreview || rewritePreview.loading) return;
+    if (!rewritePreview || !canApplyRewritePreview(rewritePreview)) return;
     const { start, end } = rewritePreview.selection;
     if (workspace.draft.slice(start, end) !== rewritePreview.original) { cancelRewrite(); return; }
     const next = insert ? `${workspace.draft.slice(0, end)}\n${rewritePreview.replacement}${workspace.draft.slice(end)}` : `${workspace.draft.slice(0, start)}${rewritePreview.replacement}${workspace.draft.slice(end)}`;
@@ -154,23 +155,29 @@ export default function Home() {
   }, [rewritePreview]);
 
   const newDocument = useCallback(() => {
+    cancelRewrite();
     updateWorkspace({ title: "Untitled draft", draft: "" });
     resetHistory("");
+    setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
     setActiveIssueId(null);
-  }, [resetHistory, updateWorkspace]);
+  }, [cancelRewrite, resetHistory, setSelection, updateWorkspace]);
 
   const clearDocument = useCallback(() => {
+    cancelRewrite();
     updateDraft("");
+    setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
     setActiveIssueId(null);
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const restoreSample = useCallback(() => {
+    cancelRewrite();
     updateDraft(SAMPLE_DOCUMENT);
+    setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
     setActiveIssueId(null);
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const onAddToDictionary = useCallback((word: string) => {
     const value = word.trim();
@@ -196,20 +203,22 @@ export default function Home() {
     clearPersistedData();
     resetHistory(SAMPLE_DOCUMENT);
     setSettingsOpen(false);
+    setSelection({ start: 0, end: 0 });
     setDismissedIssueIds([]);
-  }, [cancelRewrite, clearPersistedData, resetHistory]);
+    setActiveIssueId(null);
+  }, [cancelRewrite, clearPersistedData, resetHistory, setSelection]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); return; }
+      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); saveNow(); return; }
       if (modifier && event.key === "Enter") { event.preventDefault(); acceptAll(); return; }
       if (event.key === "Escape" && rewritePreview) { cancelRewrite(); return; }
       if (event.key === "?" && !modifier && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); setShortcutsOpen(true); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [acceptAll, cancelRewrite, rewritePreview]);
+  }, [acceptAll, cancelRewrite, rewritePreview, saveNow]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
   const savedLabel = !hydrated
@@ -248,7 +257,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={clearLocalData} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </main>
   );

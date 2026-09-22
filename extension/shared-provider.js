@@ -1372,6 +1372,7 @@ const CATEGORY_ALIASES = {
 };
 const VALID_SEVERITIES = new Set(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
+const MAX_PROVIDER_ISSUES_PER_RESPONSE = 250;
 const MAX_PROVIDER_ERROR_RESPONSE_BYTES = 16_384;
 function providerAnalysisNow() {
     return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -1383,7 +1384,7 @@ function parseProviderPayload(value) {
     const parsed = parseJsonContent(value);
     if (!isRecord(parsed) || !Array.isArray(parsed.issues))
         return null;
-    const rawIssues = parsed.issues;
+    const rawIssues = parsed.issues.slice(0, MAX_PROVIDER_ISSUES_PER_RESPONSE);
     const issues = rawIssues.flatMap((raw) => {
         if (!isRecord(raw) || typeof raw.start !== "number" || !Number.isFinite(raw.start) || typeof raw.end !== "number" || !Number.isFinite(raw.end) || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string")
             return [];

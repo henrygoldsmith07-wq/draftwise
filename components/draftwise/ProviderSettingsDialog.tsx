@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Info, ShieldCheck, Trash2 } from "lucide-react";
+import { Info, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -37,21 +37,16 @@ export function ProviderSettingsDialog({
   onForgetKeys,
   onClearData,
 }: ProviderSettingsDialogProps) {
-  const [saved, setSaved] = useState(false);
   const patchSettings = (patch: Partial<ProviderSettings>) => onSettingsChange({ ...settings, ...patch });
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
   const classifierValue: ClassifierSettings = classifier ?? { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider" };
   const patchClassifier = (patch: Partial<ClassifierSettings>) => onClassifierChange?.({ ...classifierValue, ...patch });
-  const save = () => {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
-  };
+  const done = () => onOpenChange(false);
   const forget = () => {
     onSettingsChange({ ...settings, apiKey: "" });
     onClassifierChange?.({ ...classifierValue, apiKey: "" });
     onAiEnabledChange(false);
     onForgetKeys?.();
-    setSaved(true);
   };
 
   return (
@@ -183,7 +178,7 @@ export function ProviderSettingsDialog({
         <DialogFooter className="settings-footer">
           <Button variant="ghost" onClick={forget}><Trash2 size={14} /> Forget keys</Button>
           <Button variant="ghost" onClick={onClearData}>Clear local data</Button>
-          <Button onClick={save}>{saved ? <><Check size={14} /> Saved locally</> : <><ShieldCheck size={14} /> Done</>}</Button>
+          <Button onClick={done}><ShieldCheck size={14} /> Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

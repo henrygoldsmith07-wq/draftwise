@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isClassifierSettings, isWorkspace, readWorkspaceFromStorage, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
+import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isWorkspace, readWorkspaceFromStorage, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
 import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
@@ -86,4 +86,22 @@ test("failed local writes return an error instead of a false saved state", () =>
     },
   });
   assert.deepEqual(result, { ok: false, error: "Local storage is full." });
+});
+
+
+test("clear local storage removes both current and legacy workspace keys", () => {
+  const target = storage({
+    [WORKSPACE_STORAGE_KEY]: "current",
+    ...Object.fromEntries(LEGACY_STORAGE_KEYS.map((key) => [key, "legacy"])),
+    "unrelated:key": "keep",
+  });
+  assert.deepEqual(clearWorkspaceStorage(target), { ok: true });
+  assert.equal(target.getItem(WORKSPACE_STORAGE_KEY), null);
+  for (const key of LEGACY_STORAGE_KEYS) assert.equal(target.getItem(key), null);
+  assert.equal(target.getItem("unrelated:key"), "keep");
+});
+
+test("autosave delay is intentionally debounced instead of per-keystroke", () => {
+  assert.ok(AUTO_SAVE_DELAY_MS >= 250);
+  assert.ok(AUTO_SAVE_DELAY_MS <= 1_000);
 });

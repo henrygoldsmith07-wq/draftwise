@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isClassifierSettings, isWorkspace, readWorkspaceFromStorage, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
+import { clearWorkspaceStorage, isClassifierSettings, isWorkspace, readWorkspaceFromStorage, shouldSkipAutosave, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
 import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
@@ -86,4 +86,55 @@ test("failed local writes return an error instead of a false saved state", () =>
     },
   });
   assert.deepEqual(result, { ok: false, error: "Local storage is full." });
+});
+
+test("clearing persistence removes the versioned workspace and every legacy key", () => {
+  const store = storage({
+    "draftwise:workspace:v2": "workspace",
+    "draftwise:draft": "draft",
+    "draftwise:goals": "goals",
+    "draftwise:provider": "provider",
+    "draftwise:theme": "theme",
+    "draftwise:ai-enabled": "true",
+    "unrelated": "keep",
+  });
+
+  assert.deepEqual(clearWorkspaceStorage(store), { ok: true });
+  assert.equal(store.getItem("draftwise:workspace:v2"), null);
+  assert.equal(store.getItem("draftwise:draft"), null);
+  assert.equal(store.getItem("draftwise:goals"), null);
+  assert.equal(store.getItem("draftwise:provider"), null);
+  assert.equal(store.getItem("draftwise:theme"), null);
+  assert.equal(store.getItem("draftwise:ai-enabled"), null);
+  assert.equal(store.getItem("unrelated"), "keep");
+});
+
+test("the cleared in-memory snapshot is not immediately auto-saved, but later edits are", () => {
+  const cleared = DEFAULT_WORKSPACE("sample");
+  assert.equal(shouldSkipAutosave(cleared, cleared), true);
+  assert.equal(shouldSkipAutosave({ ...cleared, draft: "new text" }, cleared), false);
+  assert.equal(shouldSkipAutosave(cleared, null), false);
+});
+
+test("clear attempts every Draftwise key even if one removal fails", () => {
+  const removed = [];
+  const store = {
+    ...storage(),
+    removeItem(key) {
+      removed.push(key);
+      if (key === "draftwise:draft") throw new Error("blocked");
+    },
+  };
+
+  const result = clearWorkspaceStorage(store);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /blocked/i);
+  assert.deepEqual(removed, [
+    "draftwise:workspace:v2",
+    "draftwise:draft",
+    "draftwise:goals",
+    "draftwise:provider",
+    "draftwise:theme",
+    "draftwise:ai-enabled",
+  ]);
 });

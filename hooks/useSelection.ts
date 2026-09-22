@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+export function clampSelection(selection: { start: number; end: number }, length: number) {
+  const safeLength = Math.max(0, Math.floor(length));
+  const start = Math.max(0, Math.min(safeLength, selection.start));
+  const end = Math.max(start, Math.min(safeLength, selection.end));
+  return start === selection.start && end === selection.end ? selection : { start, end };
+}
+
 export function useSelection(text: string) {
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   useEffect(() => {
-    setSelection((current) => {
-      const start = Math.max(0, Math.min(text.length, current.start));
-      const end = Math.max(start, Math.min(text.length, current.end));
-      return start === current.start && end === current.end ? current : { start, end };
-    });
+    setSelection((current) => clampSelection(current, text.length));
   }, [text.length]);
 
   const updateFromElement = useCallback((element: HTMLTextAreaElement | HTMLInputElement | null) => {

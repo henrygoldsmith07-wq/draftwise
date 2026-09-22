@@ -1085,6 +1085,9 @@ export function normaliseTriageDecision(value: unknown): TriageDecision | null {
 /** Minimise transmitted text: truncate to a word boundary and redact structured tokens. */
 export function redactExcerptForClassifier(text: string) {
   return String(text || "")
+    .replace(/-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----[\s\S]*?-----END (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----/gu, "[private-key]")
+    .replace(/-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----/gu, "[private-key]")
+    .replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s<>"']+/giu, "[connection-string]")
     .replace(/https?:\/\/[^\s<>"']+/giu, "[url]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu, "[email]")
     .replace(/["“'](?:sk[-_][A-Za-z0-9_-]{8,}|[A-Za-z0-9+/=_-]{24,})["”']/gu, "[quoted-secret]")

@@ -330,21 +330,18 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
   }, [hydrated]);
 
   const updateWorkspace = useCallback((patch: Partial<DraftwiseWorkspace> | ((current: DraftwiseWorkspace) => DraftwiseWorkspace)) => {
-    setWorkspaceState((current) => {
-      const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
-      workspaceRef.current = next;
-      dirtyRef.current = true;
-      return next;
-    });
+    const current = workspaceRef.current;
+    const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+    workspaceRef.current = next;
+    dirtyRef.current = true;
+    setWorkspaceState(next);
   }, []);
 
   const replaceWorkspace = useCallback((next: DraftwiseWorkspace | ((current: DraftwiseWorkspace) => DraftwiseWorkspace)) => {
-    setWorkspaceState((current) => {
-      const value = typeof next === "function" ? next(current) : next;
-      workspaceRef.current = value;
-      dirtyRef.current = true;
-      return value;
-    });
+    const value = typeof next === "function" ? next(workspaceRef.current) : next;
+    workspaceRef.current = value;
+    dirtyRef.current = true;
+    setWorkspaceState(value);
   }, []);
 
   const saveNow = useCallback(() => {

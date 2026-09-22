@@ -221,6 +221,12 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(options, /desiredCloudPatterns/iu);
   assert.match(options, /for \(const site of state\.siteAccess\)/u);
   assert.match(options, /if \(!desiredCloudPatterns\.has\(pattern\)\) await permissionRemove\(\{ origins: \[pattern\] \}\);/u);
+  assert.match(options, /function siteAccessUsesPattern\(state, pattern\)/u);
+  assert.match(options, /still required for writing-site access\. Revoke that site first\./u);
+  assert.match(options, /const alreadyGranted = await permissionContains\(\{ origins \}\);/u);
+  assert.match(options, /await storageSet\(\{ siteAccess: state\.siteAccess, disabledSites: state\.disabledSites \}\);/u);
+  assert.match(options, /if \(!alreadyGranted\) await permissionRemove\(\{ origins \}\);/u);
+  assert.match(options, /if \(!result\?\.ok\) \{ await storageSet\(\{ disabledSites: state\.disabledSites \}\)/u);
   assert.doesNotMatch(options, /draftwise-triage-v1|classifierModel/iu);
 });
 

@@ -393,10 +393,20 @@ function normaliseCategory(value: string): IssueCategory | null {
   return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
 }
 
+function aiIssueFingerprint(ruleId: string, original: string, replacement: string) {
+  const value = `${ruleId}\u001f${original}\u001f${replacement}`;
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?: string): WritingIssue[] {
   const parsed = parseProviderPayload(value);
   if (!parsed) return [];
-  return parsed.issues.flatMap((candidate, index) => {
+  return parsed.issues.flatMap((candidate) => {
     const start = Math.max(0, Math.floor(candidate.start));
     const end = Math.min(sourceText.length, Math.floor(candidate.end));
     const category = normaliseCategory(candidate.category);
@@ -405,14 +415,16 @@ export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?
     const original = sourceText.slice(start, end);
     if (!original || original !== candidate.original) return [];
     const confidence = Math.max(0, Math.min(1, candidate.confidence ?? 0.72));
+    const ruleId = candidate.ruleId?.slice(0, 80) || "ai-suggestion";
+    const replacement = candidate.replacement.slice(0, 1000);
     return [{
-      id: `ai-${chunkId ?? "full"}-${start}-${end}-${index}`,
-      ruleId: candidate.ruleId?.slice(0, 80) || "ai-suggestion",
+      id: `ai-${chunkId ?? "full"}-${start}-${end}-${aiIssueFingerprint(ruleId, original, replacement)}`,
+      ruleId,
       chunkId,
       start,
       end,
       original,
-      replacement: candidate.replacement.slice(0, 1000),
+      replacement,
       category,
       severity,
       confidence,
@@ -651,18 +663,54 @@ export async function analyzeWithProvider(
 
 function localRewrite(text: string, instruction: string): string {
   const lower = instruction.toLocaleLowerCase();
-  let result = text.replace(/\s{2,}/gu, " ").trim();
+  let result = text;
+
   if (lower.includes("shorten") || lower.includes("concise")) {
-    result = result.replace(/\b(?:actually|basically|just|really|quite|very|perhaps|simply)\b\s*/giu, "").replace(/\bin order to\b/giu, "to").replace(/\bat this point in time\b/giu, "now");
+    result = result
+      .replace(/\bin order to\b/giu, "to")
+      .replace(/\bat this point in time\b/giu, "now")
+      .replace(/\bdue to the fact that\b/giu, "because")
+      .replace(/\bin the event that\b/giu, "if");
   }
-  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) result = result.replace(/\bcan't\b/giu, "cannot").replace(/\bwon't\b/giu, "will not").replace(/\bget\b/giu, "receive");
-  if (lower.includes("casual") || lower.includes("friendly")) result = result.replace(/\bcannot\b/giu, "can't").replace(/\bwill not\b/giu, "won't");
-  if (lower.includes("confident")) result = result.replace(/\b(might|maybe|perhaps|could)\b/giu, "can");
-  if (lower.includes("simplify")) result = result.replace(/\butilize\b/giu, "use").replace(/\bapproximately\b/giu, "about");
+
+  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) {
+    result = result
+      .replace(/\bcan't\b/giu, "cannot")
+      .replace(/\bwon't\b/giu, "will not")
+      .replace(/\bdon't\b/giu, "do not")
+      .replace(/\bdoesn't\b/giu, "does not")
+      .replace(/\bdidn't\b/giu, "did not")
+      .replace(/\bisn't\b/giu, "is not")
+      .replace(/\baren't\b/giu, "are not")
+      .replace(/\bwasn't\b/giu, "was not")
+      .replace(/\bweren't\b/giu, "were not")
+      .replace(/\bcouldn't\b/giu, "could not")
+      .replace(/\bwouldn't\b/giu, "would not")
+      .replace(/\bshouldn't\b/giu, "should not");
+  }
+
+  if (lower.includes("casual") || lower.includes("friendly")) {
+    result = result
+      .replace(/\bcannot\b/giu, "can't")
+      .replace(/\bwill not\b/giu, "won't")
+      .replace(/\bdo not\b/giu, "don't")
+      .replace(/\bdoes not\b/giu, "doesn't")
+      .replace(/\bis not\b/giu, "isn't")
+      .replace(/\bare not\b/giu, "aren't");
+  }
+
+  if (lower.includes("simplify")) {
+    result = result
+      .replace(/\butilize\b/giu, "use")
+      .replace(/\bcommence\b/giu, "start")
+      .replace(/\bpurchase\b/giu, "buy")
+      .replace(/\bassist\b/giu, "help");
+  }
+
   return result || text;
 }
 
-function protectedTokens(text: string) {
+function protectedTokenCounts(text: string) {
   const patterns = [
     /https?:\/\/[^\s)]+/giu,
     /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
@@ -677,7 +725,24 @@ function protectedTokens(text: string) {
     /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
     /\b\d[\d,.]*\b/gu,
   ];
-  return [...new Set(patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0])))];
+  const counts = new Map<string, number>();
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0];
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function hasExactProtectedTokenMultiset(original: string, replacement: string) {
+  const originalTokens = protectedTokenCounts(original);
+  const replacementTokens = protectedTokenCounts(replacement);
+  if (originalTokens.size !== replacementTokens.size) return false;
+  for (const [token, count] of originalTokens) {
+    if (replacementTokens.get(token) !== count) return false;
+  }
+  return true;
 }
 
 function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
@@ -685,17 +750,19 @@ function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
   return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
 }
 
+function preserveBoundaryWhitespace(original: string, replacement: string) {
+  const leading = original.match(/^\s*/u)?.[0] ?? "";
+  const trailing = original.match(/\s*$/u)?.[0] ?? "";
+  return `${leading}${replacement.trim()}${trailing}`;
+}
+
 function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
   if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
   if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-  if (!allowProtectedChanges) {
-    for (const token of protectedTokens(original)) {
-      const originalCount = original.split(token).length - 1;
-      const replacementCount = replacement.split(token).length - 1;
-      if (replacementCount < originalCount) throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
-    }
+  if (!allowProtectedChanges && !hasExactProtectedTokenMultiset(original, replacement)) {
+    throw new ProviderError("invalid-json", "The rewrite changed, removed, duplicated, or introduced a protected URL, value, identifier, or quoted passage. Nothing was changed.");
   }
-  return replacement.trim();
+  return preserveBoundaryWhitespace(original, replacement);
 }
 
 export async function rewriteWithProvider(

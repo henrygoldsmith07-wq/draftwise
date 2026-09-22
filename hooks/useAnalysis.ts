@@ -56,6 +56,10 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
   const cache = useRef(new LruCache<AnalysisResult>(24));
 
   useEffect(() => {
+    cache.current.clear();
+  }, [classifier?.apiKey, settings.apiKey, settings.customHeaders]);
+
+  useEffect(() => {
     const currentRun = ++runId.current;
     const beforeText = previousText.current;
     const beforeLocalAnalysis = previousLocalAnalysis.current;

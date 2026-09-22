@@ -193,6 +193,12 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(content, /siteAccess/iu);
   assert.match(content, /value\.newValue === undefined \? defaultSetting\(key\)/iu);
   assert.match(content, /deactivateCurrentPage/iu);
+  assert.match(content, /const boundElements = new WeakSet\(\)/iu);
+  assert.match(content, /observer\?\.disconnect\(\)/iu);
+  assert.match(content, /if \(siteIsDisabled\(\) \|\| !isEditable\(element\) \|\| boundElements\.has\(element\)\) return;/iu);
+  assert.match(content, /const key = `\$\{fingerprintText\(text\)\}:\$\{fingerprintStyle\(settings\.style\)\}`/u);
+  assert.doesNotMatch(content, /dataset\.draftwiseBound/iu);
+  assert.doesNotMatch(content, /const key = `\$\{text\}\|/u);
   assert.doesNotMatch(content, /__draftwiseLocalResult\s*=\s*\{\s*\.\.\.local,\s*issues:\s*response\.issues/iu);
   const background = await readFile(file("extension/background.js"), "utf8");
   assert.match(background, /chrome\.storage\.local\.get/iu);

@@ -240,6 +240,33 @@ test("classifier.dev request uses the official keyless ordered payload", async (
   }
 });
 
+test("oversized classifier responses fall back without silent downgrade", async () => {
+  const text = "This thing is really useful for various aspects of the work and stuff.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("x".repeat(550_000), { status: 200 });
+  try {
+    const outcome = await triageChunks(createAnalysisChunks(text), local.issues, {
+      classifier: { baseUrl: "https://classifier.dev" },
+      uncertainPolicy: "provider",
+    });
+    assert.equal(outcome.metrics.classifierFailures, 1);
+    assert.ok(outcome.decisions.some((decision) => decision.fallback === true && decision.decision === "ai-needed"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("classifier response parsing uses the bounded streaming reader", async () => {
+  const source = await readFile(new URL("../packages/ai/src/index.ts", import.meta.url), "utf8");
+  const classifierStart = source.indexOf("async function requestClassifierDecisions");
+  const boundedRead = source.indexOf("readResponseTextLimited(response, 500_000)", classifierStart);
+  const parse = source.indexOf("JSON.parse(responseText)", classifierStart);
+  assert.ok(classifierStart >= 0);
+  assert.ok(boundedRead > classifierStart);
+  assert.ok(parse > boundedRead);
+});
+
 test("uncertain policy can keep low-confidence classifier results local", async () => {
   const text = "This thing is really useful for various aspects of the work and stuff.";
   const local = analyzeLocally(text, { dialect: "en-GB" });

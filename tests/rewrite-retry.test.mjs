@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRewriteRetryArgs } from "../lib/rewrite-retry.ts";
+import { canApplyRewritePreview, createRewriteRetryArgs } from "../lib/rewrite-retry.ts";
 import { ProviderError, rewriteWithProvider } from "../packages/ai/src/index.ts";
 
 const settings = { provider: "openai-compatible", baseUrl: "https://example.com/v1", model: "test-model", apiKey: "key", temperature: 0.2, maxTokens: 900, customHeaders: "" };
@@ -59,4 +59,12 @@ test("AI provider failure remains an explicit retryable failure", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test("failed or unchanged rewrite previews cannot be applied", () => {
+  assert.equal(canApplyRewritePreview({ original: "Keep this.", replacement: "Keep this.", failed: true }), false);
+  assert.equal(canApplyRewritePreview({ original: "Keep this.", replacement: "Keep this." }), false);
+  assert.equal(canApplyRewritePreview({ original: "Keep this.", replacement: "", loading: true }), false);
+  assert.equal(canApplyRewritePreview({ original: "Keep this.", replacement: "Use this." }), true);
 });

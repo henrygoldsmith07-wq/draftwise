@@ -205,7 +205,7 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(background, /textFingerprint:\s*textFingerprint\(text\)/iu);
   assert.match(background, /contextFingerprint:\s*settingsFingerprint\(\{ goals: message\.goals, style: message\.style \}\)/iu);
   assert.doesNotMatch(background, /const cacheKey = JSON\.stringify\(\{\s*text,/iu);
-  assert.doesNotMatch(background, /cacheKey[\s\S]{0,240}goals:\s*message\.goals,[\s\S]{0,80}style:\s*message\.style,/iu);
+  assert.doesNotMatch(background, /\n\s{8}goals:\s*message\.goals,\s*\n\s{8}style:\s*message\.style,/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");
   assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);

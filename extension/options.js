@@ -51,6 +51,13 @@ function classifierPattern() {
   return permissionsApi.providerPattern(get("classifierBaseUrl").value.trim());
 }
 
+function siteAccessUsesPattern(state, pattern) {
+  return state.siteAccess.some((site) => {
+    try { return permissionsApi.sitePatterns(site).includes(pattern); }
+    catch { return false; }
+  });
+}
+
 async function renderProviderPermission() {
   const status = get("providerAccessStatus");
   const label = get("providerOriginLabel");
@@ -106,7 +113,7 @@ async function renderSitePermissions() {
     const status = document.createElement("small"); status.textContent = state.disabledSites.includes(site) ? "Disabled in Draftwise" : "Enabled"; copy.append(document.createElement("br"), status);
     const actions = document.createElement("div");
     if (state.disabledSites.includes(site)) {
-      actions.append(createPermissionButton("Enable", async () => { await storageSet({ disabledSites: state.disabledSites.filter((item) => item !== site) }); await backgroundMessage({ type: "register-site", hostname: site }); await renderSitePermissions(); setStatus(`Enabled on ${site}`); }));
+      actions.append(createPermissionButton("Enable", async () => { const nextDisabled = state.disabledSites.filter((item) => item !== site); await storageSet({ disabledSites: nextDisabled }); const result = await backgroundMessage({ type: "register-site", hostname: site }); if (!result?.ok) { await storageSet({ disabledSites: state.disabledSites }); await renderSitePermissions(); setStatus(result?.error || `Could not enable ${site}.`, true); return; } await renderSitePermissions(); setStatus(`Enabled on ${site}`); }));
     } else {
       actions.append(createPermissionButton("Disable", async () => { await storageSet({ disabledSites: [...new Set([...state.disabledSites, site])] }); await backgroundMessage({ type: "unregister-site", hostname: site }); await renderSitePermissions(); setStatus(`Disabled on ${site}`); }));
     }
@@ -179,6 +186,11 @@ async function grantProviderAccess() {
 async function revokeProviderAccess() {
   try {
     const pattern = providerPattern();
+    const state = await readState();
+    if (siteAccessUsesPattern(state, pattern)) {
+      setStatus("This provider origin is still required for writing-site access. Revoke that site first.", true);
+      return;
+    }
     const removed = await permissionRemove({ origins: [pattern] });
     await renderProviderPermission(); setStatus(removed ? "Provider access revoked." : "Provider access was not revoked.", !removed);
   } catch (error) { setStatus(error instanceof Error ? error.message : "Provider access could not be revoked.", true); }
@@ -196,6 +208,11 @@ async function grantClassifierAccess() {
 async function revokeClassifierAccess() {
   try {
     const pattern = classifierPattern();
+    const state = await readState();
+    if (siteAccessUsesPattern(state, pattern)) {
+      setStatus("This classifier origin is still required for writing-site access. Revoke that site first.", true);
+      return;
+    }
     const removed = await permissionRemove({ origins: [pattern] });
     await renderClassifierPermission(); setStatus(removed ? "Classifier access revoked." : "Classifier access was not revoked.", !removed);
   } catch (error) { setStatus(error instanceof Error ? error.message : "Classifier access could not be revoked.", true); }
@@ -204,12 +221,21 @@ async function revokeClassifierAccess() {
 async function grantSiteAccess() {
   let hostname;
   try { hostname = permissionsApi.normaliseHostname(get("siteAccess").value); } catch (error) { setStatus(error instanceof Error ? error.message : "Enter a valid hostname.", true); return; }
-  const granted = await permissionRequest({ origins: permissionsApi.sitePatterns(hostname) });
+  const origins = permissionsApi.sitePatterns(hostname);
+  const alreadyGranted = await permissionContains({ origins });
+  const granted = alreadyGranted || await permissionRequest({ origins });
   if (!granted) { setStatus(`Access was not granted for ${hostname}.`, true); return; }
   const state = await readState();
-  await storageSet({ siteAccess: [...new Set([...state.siteAccess, hostname])], disabledSites: state.disabledSites.filter((site) => site !== hostname) });
+  const nextSiteAccess = [...new Set([...state.siteAccess, hostname])];
+  const nextDisabledSites = state.disabledSites.filter((site) => site !== hostname);
+  await storageSet({ siteAccess: nextSiteAccess, disabledSites: nextDisabledSites });
   const registered = await backgroundMessage({ type: "register-site", hostname });
-  if (!registered?.ok) { setStatus(registered?.error || `Could not enable ${hostname}.`, true); return; }
+  if (!registered?.ok) {
+    await storageSet({ siteAccess: state.siteAccess, disabledSites: state.disabledSites });
+    if (!alreadyGranted) await permissionRemove({ origins });
+    setStatus(registered?.error || `Could not enable ${hostname}.`, true);
+    return;
+  }
   get("siteAccess").value = ""; await renderSitePermissions(); setStatus(`Draftwise enabled on ${hostname}`);
 }
 

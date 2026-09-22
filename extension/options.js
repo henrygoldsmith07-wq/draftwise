@@ -148,6 +148,9 @@ async function saveSettings() {
     try { previousCloudPatterns.add(permissionsApi.providerPattern(value)); } catch { /* stale invalid configuration */ }
   }
   const desiredCloudPatterns = new Set([providerPatternValue, classifierPatternValue]);
+  for (const site of state.siteAccess) {
+    for (const pattern of permissionsApi.sitePatterns(site)) desiredCloudPatterns.add(pattern);
+  }
   const excludedSites = get("excludedSites").value.split(/\n|,/u).map((site) => site.trim().toLowerCase().replace(/^https?:\/\//u, "").replace(/\/.*$/u, "")).filter((site) => /^[a-z0-9.-]+$/u.test(site));
   await storageSet({
     aiEnabled: toggleValue("aiEnabled"),

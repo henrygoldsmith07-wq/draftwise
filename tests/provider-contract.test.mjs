@@ -300,3 +300,42 @@ test("rewrite protection keeps currencies, percentages, dates, identifiers, mode
     globalThis.fetch = originalFetch;
   }
 });
+
+test("local formal rewrites expand contractions without changing unrelated verbs", async () => {
+  const result = await rewriteWithProvider(
+    {
+      text: "I get tired, but I can't rest.",
+      instruction: "Make this formal.",
+      goals,
+    },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.source, "local");
+  assert.equal(result.replacement, "I get tired, but I cannot rest.");
+});
+
+test("local confident rewrites do not inflate uncertainty into certainty", async () => {
+  const text = "It could rain tomorrow, and the plan might change.";
+  const result = await rewriteWithProvider(
+    {
+      text,
+      instruction: "Make this sound more confident.",
+      goals,
+    },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("local concise rewrites preserve meaningful intensifiers and limiting words", async () => {
+  const text = "I just need very little time in order to finish at this point in time.";
+  const result = await rewriteWithProvider(
+    {
+      text,
+      instruction: "Shorten this.",
+      goals,
+    },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, "I just need very little time to finish now.");
+});

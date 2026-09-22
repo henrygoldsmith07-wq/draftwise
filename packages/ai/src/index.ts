@@ -750,8 +750,13 @@ function rangesOverlap(left: ProtectedRange, right: ProtectedRange) {
 function protectedKindsAllowedByInstruction(instruction: string) {
   const value = String(instruction || "");
   const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
+  const directNegation = String.raw`\b(?:do\s+not|don't|dont|never)\s+(?:change|update|replace|adjust|convert|reformat|correct)\b(?:(?![,.;!?]).){0,100}`;
+  const withoutChange = String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting)\b(?:(?![,.;!?]).){0,100}`;
   const allowed = new Set<ProtectedTokenKind>();
-  const permits = (target: string) => new RegExp(edit + target, "iu").test(value);
+  const permits = (target: string) => {
+    const denied = new RegExp(directNegation + target, "iu").test(value) || new RegExp(withoutChange + target, "iu").test(value);
+    return !denied && new RegExp(edit + target, "iu").test(value);
+  };
   if (permits(String.raw`\bdates?\b`)) allowed.add("date");
   if (permits(String.raw`\b(?:percentage|percent)s?\b`)) allowed.add("percentage");
   if (permits(String.raw`\bcurrenc(?:y|ies)\b`)) allowed.add("currency");
@@ -1048,7 +1053,12 @@ export function redactExcerptForClassifier(text: string) {
     .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu, "[email]")
     .replace(/["“'](?:sk[-_][A-Za-z0-9_-]{8,}|[A-Za-z0-9+/=_-]{24,})["”']/gu, "[quoted-secret]")
     .replace(/\b(?:sk|pk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gu, "[token]")
-    .replace(/\b(?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=:-]{6,}["']?/giu, "[secret]")
+    .replace(/\b(?:github_pat|npm)_[A-Za-z0-9_-]{12,}\b/gu, "[token]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu, "[token]")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/gu, "[token]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/giu, "[bearer-token]")
+    .replace(/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/gu, "[jwt]")
+    .replace(/\b(?:api[_ -]?key|access[_ -]?token|secret|password|authorization)\s*[:=]\s*["']?[A-Za-z0-9_./+=:-]{6,}["']?/giu, "[secret]")
     .replace(/\b(?:GPT|Claude|Gemini|Llama|OpenAI)\s*[-_ ]?\d+[A-Za-z]?(?:\.\d+){0,3}(?:[-_][A-Za-z0-9]+)?\b/giu, "[model]")
     .replace(/\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|tsv|json|xml|md|png|jpe?g|zip|tar|gz)\b/giu, "[filename]")
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, "[uuid]")

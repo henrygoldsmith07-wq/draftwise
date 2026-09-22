@@ -182,10 +182,12 @@ export default function Home() {
 
   const applyHistory = useCallback((next: string | undefined) => {
     if (next !== undefined) {
+      cancelRewrite();
       updateDraft(next, false);
+      setSelection({ start: 0, end: 0 });
       setActiveIssueId(null);
     }
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const undo = useCallback(() => applyHistory(undoHistory()), [applyHistory, undoHistory]);
   const redo = useCallback(() => applyHistory(redoHistory()), [applyHistory, redoHistory]);

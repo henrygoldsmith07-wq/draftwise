@@ -42,6 +42,13 @@
     return String(value || "").slice(0, MAX_METADATA_PART_CHARS);
   }
 
+  function normaliseMetadataPart(value) {
+    return metadataPart(value)
+      .replace(/([a-z])([A-Z])/gu, "$1 $2")
+      .replace(/([A-Za-z])([0-9])/gu, "$1 $2")
+      .replace(/([0-9])([A-Za-z])/gu, "$1 $2");
+  }
+
   function associatedLabelText(element) {
     const explicitLabels = Array.from(element?.labels || [])
       .slice(0, MAX_ASSOCIATED_LABELS)
@@ -69,7 +76,7 @@
       form?.id,
       form?.getAttribute?.("aria-label"),
       form?.getAttribute?.("autocomplete"),
-    ].map(metadataPart).filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+    ].map(normaliseMetadataPart).filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
   }
 
   function hasAny(tokens, values) {

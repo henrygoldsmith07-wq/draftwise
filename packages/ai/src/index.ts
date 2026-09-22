@@ -133,7 +133,7 @@ export function parseCustomHeaders(value: string): Record<string, string> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
       Object.entries(parsed)
-        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|set-cookie|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
+        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|content-type|origin|set-cookie|transfer-encoding|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
         .map(([key, item]) => [key, String(item).slice(0, 500)]),
     );
   } catch {

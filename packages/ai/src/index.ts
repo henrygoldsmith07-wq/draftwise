@@ -652,13 +652,49 @@ export async function analyzeWithProvider(
 function localRewrite(text: string, instruction: string): string {
   const lower = instruction.toLocaleLowerCase();
   let result = text.replace(/\s{2,}/gu, " ").trim();
+
   if (lower.includes("shorten") || lower.includes("concise")) {
-    result = result.replace(/\b(?:actually|basically|just|really|quite|very|perhaps|simply)\b\s*/giu, "").replace(/\bin order to\b/giu, "to").replace(/\bat this point in time\b/giu, "now");
+    result = result
+      .replace(/\bin order to\b/giu, "to")
+      .replace(/\bat this point in time\b/giu, "now")
+      .replace(/\bdue to the fact that\b/giu, "because")
+      .replace(/\bin the event that\b/giu, "if");
   }
-  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) result = result.replace(/\bcan't\b/giu, "cannot").replace(/\bwon't\b/giu, "will not").replace(/\bget\b/giu, "receive");
-  if (lower.includes("casual") || lower.includes("friendly")) result = result.replace(/\bcannot\b/giu, "can't").replace(/\bwill not\b/giu, "won't");
-  if (lower.includes("confident")) result = result.replace(/\b(might|maybe|perhaps|could)\b/giu, "can");
-  if (lower.includes("simplify")) result = result.replace(/\butilize\b/giu, "use").replace(/\bapproximately\b/giu, "about");
+
+  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) {
+    result = result
+      .replace(/\bcan't\b/giu, "cannot")
+      .replace(/\bwon't\b/giu, "will not")
+      .replace(/\bdon't\b/giu, "do not")
+      .replace(/\bdoesn't\b/giu, "does not")
+      .replace(/\bdidn't\b/giu, "did not")
+      .replace(/\bisn't\b/giu, "is not")
+      .replace(/\baren't\b/giu, "are not")
+      .replace(/\bwasn't\b/giu, "was not")
+      .replace(/\bweren't\b/giu, "were not")
+      .replace(/\bcouldn't\b/giu, "could not")
+      .replace(/\bwouldn't\b/giu, "would not")
+      .replace(/\bshouldn't\b/giu, "should not");
+  }
+
+  if (lower.includes("casual") || lower.includes("friendly")) {
+    result = result
+      .replace(/\bcannot\b/giu, "can't")
+      .replace(/\bwill not\b/giu, "won't")
+      .replace(/\bdo not\b/giu, "don't")
+      .replace(/\bdoes not\b/giu, "doesn't")
+      .replace(/\bis not\b/giu, "isn't")
+      .replace(/\bare not\b/giu, "aren't");
+  }
+
+  if (lower.includes("simplify")) {
+    result = result
+      .replace(/\butilize\b/giu, "use")
+      .replace(/\bcommence\b/giu, "start")
+      .replace(/\bpurchase\b/giu, "buy")
+      .replace(/\bassist\b/giu, "help");
+  }
+
   return result || text;
 }
 

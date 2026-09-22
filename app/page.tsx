@@ -68,6 +68,25 @@ function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
   );
 }
 
+function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Clear all local Draftwise data?</DialogTitle>
+          <DialogDescription>
+            This removes the local draft, preferences, provider and classifier credentials, and migrated Draftwise storage from this browser. This action cannot be undone after the page is closed.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Clear local data</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
   const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
@@ -84,6 +103,7 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newDraftOpen, setNewDraftOpen] = useState(false);
+  const [clearDataOpen, setClearDataOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [customInstruction, setCustomInstruction] = useState("");
@@ -114,8 +134,14 @@ export default function Home() {
   }, [commit, updateWorkspace]);
 
   const updateGoals = useCallback((patch: Partial<WritingGoals>) => {
+    cancelRewrite();
     updateWorkspace((current) => ({ ...current, goals: { ...current.goals, ...patch } }));
-  }, [updateWorkspace]);
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateStyle = useCallback((style: typeof workspace.style) => {
+    cancelRewrite();
+    updateWorkspace({ style });
+  }, [cancelRewrite, updateWorkspace]);
 
   const updateProvider = useCallback((provider: typeof workspace.provider) => {
     cancelRewrite();
@@ -242,6 +268,7 @@ export default function Home() {
     resetHistory(SAMPLE_DOCUMENT);
     setSettingsOpen(false);
     setNewDraftOpen(false);
+    setClearDataOpen(false);
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
@@ -251,13 +278,14 @@ export default function Home() {
     const handleShortcuts = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
       if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); saveNow(); return; }
+      if (settingsOpen || shortcutsOpen || newDraftOpen || clearDataOpen) return;
       if (modifier && event.key === "Enter") { event.preventDefault(); acceptAll(); return; }
       if (event.key === "Escape" && rewritePreview) { cancelRewrite(); return; }
       if (event.key === "?" && !modifier && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); setShortcutsOpen(true); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [acceptAll, cancelRewrite, rewritePreview, saveNow]);
+  }, [acceptAll, cancelRewrite, clearDataOpen, newDraftOpen, rewritePreview, saveNow, settingsOpen, shortcutsOpen]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
   const savedLabel = !hydrated
@@ -296,9 +324,10 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
+      <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
     </main>
   );
 }

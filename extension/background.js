@@ -72,6 +72,29 @@ const storageGet = (keys) => chromeCall(chrome.storage.local.get.bind(chrome.sto
 const storageSet = (value) => chromeCall(chrome.storage.local.set.bind(chrome.storage.local), [value]);
 const permissionsContains = (value) => chromeCall(chrome.permissions.contains.bind(chrome.permissions), [value]);
 
+function cancelActiveAiWork() {
+  for (const controller of activeRequests.values()) controller.abort();
+  activeRequests.clear();
+  analysisCache.clear();
+}
+
+function isExcludedSite(site, excludedSites) {
+  return excludedSites.some((excluded) => site === excluded || site.endsWith(`.${excluded}`));
+}
+
+async function registeredDraftwiseScriptIds() {
+  if (typeof chrome.scripting.getRegisteredContentScripts !== "function") return [];
+  const scripts = await chromeCall(chrome.scripting.getRegisteredContentScripts.bind(chrome.scripting), [{}]).catch(() => []);
+  return Array.isArray(scripts)
+    ? scripts.map((script) => script?.id).filter((id) => typeof id === "string" && id.startsWith("draftwise-site-"))
+    : [];
+}
+
+async function unregisterScriptIds(ids) {
+  if (!ids.length) return;
+  await chromeCall(chrome.scripting.unregisterContentScripts.bind(chrome.scripting), [{ ids }]).catch(() => undefined);
+}
+
 async function unregisterSite(hostname) {
   const id = globalThis.DraftwisePermissions.siteScriptId(hostname);
   await chromeCall(chrome.scripting.unregisterContentScripts.bind(chrome.scripting), [{ ids: [id] }]).catch(() => undefined);
@@ -94,12 +117,18 @@ async function registerSite(hostname) {
 }
 
 async function syncRegisteredSites() {
-  const stored = await storageGet(["siteAccess", "disabledSites"]);
+  const stored = await storageGet(["siteAccess", "disabledSites", "excludedSites"]);
   const disabled = new Set(Array.isArray(stored.disabledSites) ? stored.disabledSites : []);
+  const excluded = Array.isArray(stored.excludedSites) ? stored.excludedSites : [];
   const sites = Array.isArray(stored.siteAccess) ? stored.siteAccess : [];
+  const activeSites = sites.filter((site) => !disabled.has(site) && !isExcludedSite(site, excluded));
+  const desiredIds = new Set(activeSites.map((site) => globalThis.DraftwisePermissions.siteScriptId(site)));
+  const registeredIds = await registeredDraftwiseScriptIds();
+  await unregisterScriptIds(registeredIds.filter((id) => !desiredIds.has(id)));
+
   for (const site of sites) {
     try {
-      if (disabled.has(site)) await unregisterSite(site);
+      if (disabled.has(site) || isExcludedSite(site, excluded)) await unregisterSite(site);
       else await registerSite(site);
     } catch {
       // A user may have revoked a permission outside Draftwise. The settings page
@@ -128,21 +157,28 @@ async function initialise() {
 chrome.runtime.onInstalled.addListener(() => { void initialise(); });
 chrome.runtime.onStartup.addListener(() => { void initialise(); });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes.siteAccess || changes.disabledSites)) void syncRegisteredSites();
+  if (area !== "local") return;
+  const changedKeys = Object.keys(changes);
+  if (changedKeys.some((key) => ["aiEnabled", "provider", "classifier", "style", "goals", "siteAccess", "disabledSites", "excludedSites", "disabledFields"].includes(key))) {
+    cancelActiveAiWork();
+  }
+  if (changes.siteAccess || changes.disabledSites || changes.excludedSites) void syncRegisteredSites();
 });
-chrome.permissions.onRemoved.addListener(() => { void syncRegisteredSites(); });
+chrome.permissions.onRemoved.addListener(() => {
+  cancelActiveAiWork();
+  void syncRegisteredSites();
+});
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "clear-ai-cache") {
-    for (const controller of activeRequests.values()) controller.abort();
-    activeRequests.clear();
-    analysisCache.clear();
+    cancelActiveAiWork();
     sendResponse({ ok: true });
     return true;
   }
   if (message?.type === "register-site" || message?.type === "unregister-site") {
+    if (message.type === "unregister-site") cancelActiveAiWork();
     const operation = message.type === "register-site" ? registerSite(message.hostname) : unregisterSite(message.hostname);
     operation.then((hostname) => sendResponse({ ok: true, hostname })).catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Site permission update failed." }));
     return true;

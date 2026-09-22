@@ -225,7 +225,11 @@ export function readWorkspaceFromStorage(initial: DraftwiseWorkspace, storage: W
   const stored = readSafely(storage, WORKSPACE_STORAGE_KEY);
   if (!stored) return readLegacyWorkspace(initial, storage);
   const parsed = parseRecord(stored);
-  return parsed ? sanitiseWorkspace(initial, parsed) : initial;
+  return parsed ? sanitiseWorkspace(initial, parsed) : readLegacyWorkspace(initial, storage);
+}
+
+export function resolveHydratedWorkspace(current: DraftwiseWorkspace, loaded: DraftwiseWorkspace, dirty: boolean) {
+  return dirty ? current : loaded;
 }
 
 function storageErrorMessage(error: unknown) {
@@ -289,11 +293,15 @@ export function useDraftPersistence(initial: DraftwiseWorkspace) {
       } catch {
         loaded = initial;
       }
-      workspaceRef.current = loaded;
-      dirtyRef.current = false;
-      setWorkspaceState(loaded);
+      const wasDirty = dirtyRef.current;
+      const resolved = resolveHydratedWorkspace(workspaceRef.current, loaded, wasDirty);
+      workspaceRef.current = resolved;
+      if (!wasDirty) {
+        dirtyRef.current = false;
+        setWorkspaceState(resolved);
+      }
       setHydrated(true);
-      setSaveStatus("idle");
+      setSaveStatus(wasDirty ? "saving" : "idle");
       setSaveError(null);
     }, 0);
     return () => window.clearTimeout(timer);

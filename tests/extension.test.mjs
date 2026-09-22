@@ -184,8 +184,10 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.ok(!/apiKey|innerHTML|dangerouslySetInnerHTML/iu.test(content));
   assert.match(content, /textContent/iu);
   assert.match(content, /analyzeLocallyIncremental/iu);
-  assert.match(content, /__draftwiseAiIssues/iu);
-  assert.match(content, /__draftwiseAiCoverage/iu);
+  assert.match(content, /let fieldState = new WeakMap\(\)/iu);
+  assert.match(content, /fieldState\.get\(/iu);
+  assert.match(content, /fieldState\.set\(/iu);
+  assert.doesNotMatch(content, /__draftwise(?:Text|LocalResult|AiIssues|AiCoverage)/iu);
   assert.match(content, /Partial AI/iu);
   assert.match(content, /AI unavailable/iu);
   assert.match(content, /Checking AI\.\.\./iu);

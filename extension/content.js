@@ -38,6 +38,8 @@
   let button = null;
   let panel = null;
   let cache = new Map();
+  let observer = null;
+  const boundElements = new WeakSet();
   let aiTimer = 0;
   let aiPending = false;
   let aiError = "";
@@ -55,8 +57,29 @@
   const textOf = (element) => element.isContentEditable ? dom.buildEditableTextMap(element).text : element.value;
   const issueColor = { spelling: "#e25d70", grammar: "#ef9f55", punctuation: "#8b78e6", repetition: "#d46191", conciseness: "#d8944a", clarity: "#4a9a9d", consistency: "#6a8f68" };
 
+  function fingerprintText(text) {
+    let first = 2_166_136_261;
+    let second = 2_654_435_761;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first = Math.imul(first ^ code, 16_777_619);
+      second = Math.imul(second ^ (code + ((index & 255) << 8)), 2_246_822_519);
+    }
+    return `${text.length}-${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
+  }
+
+  function fingerprintStyle(style) {
+    const serialised = JSON.stringify(style || {});
+    let hash = 2_166_136_261;
+    for (let index = 0; index < serialised.length; index += 1) {
+      hash ^= serialised.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0).toString(16);
+  }
+
   function localAnalysis(text, previous, previousResult) {
-    const key = `${text}|${JSON.stringify(settings.style)}`;
+    const key = `${fingerprintText(text)}:${fingerprintStyle(settings.style)}`;
     const cached = cache.get(key);
     if (cached) return cached;
     const changed = previous !== text && grammar.detectChangedRange ? grammar.detectChangedRange(previous, text) : null;
@@ -75,7 +98,19 @@
   function clearPanel() { while (panel?.firstChild) panel.removeChild(panel.firstChild); }
   function textNode(tag, value, className) { const element = document.createElement(tag); element.textContent = value; if (className) element.className = className; return element; }
 
+  function startObserver() {
+    if (observer || siteIsDisabled()) return;
+    observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function stopObserver() {
+    observer?.disconnect();
+    observer = null;
+  }
+
   function deactivateCurrentPage() {
+    stopObserver();
     if (scanTimer) window.clearTimeout(scanTimer);
     if (aiTimer) window.clearTimeout(aiTimer);
     scanTimer = 0;
@@ -130,7 +165,7 @@
       const dismiss = textNode("button", "×", "dw-dismiss"); dismiss.type = "button"; dismiss.setAttribute("aria-label", `Dismiss ${item.title || "suggestion"}`); dismiss.addEventListener("click", () => { activeIssues = activeIssues.filter((candidate) => candidate.id !== item.id); render(); }); fix.append(dismiss); issue.append(fix); panel.append(issue);
     });
     const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", aiStateLabel()));
-    const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; chrome.storage.local.set({ disabledSites: settings.disabledSites }); panel.hidden = true; button.hidden = true; }); footer.append(disable); panel.append(footer);
+    const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; deactivateCurrentPage(); chrome.storage.local.set({ disabledSites: settings.disabledSites }); }); footer.append(disable); panel.append(footer);
     if (actionable.length) panel.setAttribute("aria-label", `${actionable.length} actionable writing suggestions`);
   }
 
@@ -200,10 +235,22 @@
   }
 
   function bind(element) {
-    if (!isEditable(element) || element.dataset.draftwiseBound) return;
-    element.dataset.draftwiseBound = "true";
-    element.addEventListener("focus", () => { activeField = element; button.hidden = false; window.setTimeout(() => scan(element), 80); });
-    element.addEventListener("input", () => { window.clearTimeout(scanTimer); scanTimer = window.setTimeout(() => scan(element), 360); });
+    if (siteIsDisabled() || !isEditable(element) || boundElements.has(element)) return;
+    boundElements.add(element);
+    element.addEventListener("focus", () => {
+      if (siteIsDisabled() || !isEditable(element)) {
+        deactivateCurrentPage();
+        return;
+      }
+      activeField = element;
+      if (button) button.hidden = false;
+      window.setTimeout(() => scan(element), 80);
+    });
+    element.addEventListener("input", () => {
+      if (siteIsDisabled() || !isEditable(element)) return;
+      window.clearTimeout(scanTimer);
+      scanTimer = window.setTimeout(() => scan(element), 360);
+    });
     element.addEventListener("blur", () => { window.setTimeout(() => { if (document.activeElement !== element && panel) panel.hidden = true; }, 120); });
   }
 
@@ -218,9 +265,9 @@
   function init(stored) {
     Object.assign(settings, stored || {});
     if (siteIsDisabled()) return;
-    initShadow(); dom.bindEditableSubtree(document.documentElement, bind);
-    const observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    initShadow();
+    dom.bindEditableSubtree(document.documentElement, bind);
+    startObserver();
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area && area !== "local") return;
       for (const [key, value] of Object.entries(changes)) {
@@ -234,6 +281,7 @@
       if (siteIsDisabled() || (activeField && !isEditable(activeField))) {
         deactivateCurrentPage();
       } else {
+        startObserver();
         dom.bindEditableSubtree(document.documentElement, bind);
         const focused = document.activeElement;
         if (isEditable(focused)) void scan(focused);

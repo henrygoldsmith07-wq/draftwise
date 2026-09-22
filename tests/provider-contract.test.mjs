@@ -258,7 +258,7 @@ test("provider response bodies are bounded before full buffering", async () => {
   globalThis.fetch = async () => new Response("x".repeat(2_050_000), { status: 200 });
   try {
     await assert.rejects(
-      () => analyzeWithProvider("A short sentence.", goals, settings),
+      () => rewriteWithProvider({ text: "A short sentence.", instruction: "Make this clearer.", goals }, settings),
       (error) => error instanceof ProviderError && error.code === "invalid-json" && /too large/iu.test(error.message),
     );
   } finally {

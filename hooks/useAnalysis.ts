@@ -54,6 +54,7 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
   const runId = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const cache = useRef(new LruCache<AnalysisResult>(24));
+  const credentialIdentity = useRef({ providerApiKey: settings.apiKey, classifierApiKey: classifier?.apiKey ?? "" });
 
   useEffect(() => {
     const currentRun = ++runId.current;
@@ -76,6 +77,14 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
       setStatus("local");
     });
     abort.current?.abort();
+
+    const nextCredentialIdentity = { providerApiKey: settings.apiKey, classifierApiKey: classifier?.apiKey ?? "" };
+    const credentialsChanged = credentialIdentity.current.providerApiKey !== nextCredentialIdentity.providerApiKey
+      || credentialIdentity.current.classifierApiKey !== nextCredentialIdentity.classifierApiKey;
+    if (credentialsChanged) {
+      cache.current.clear();
+      credentialIdentity.current = nextCredentialIdentity;
+    }
 
     // Cloud AI (provider + classifier.dev) only runs when explicitly enabled.
     // Local analysis above already ran synchronously; triage below decides

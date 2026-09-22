@@ -80,7 +80,6 @@ interface ProviderIssue {
 interface ProviderPayload {
   issues: ProviderIssue[];
   tone: string[];
-  scores: Partial<Record<"correctness" | "clarity" | "conciseness" | "readability" | "engagement" | "consistency" | "goalAlignment" | "overall", number>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,16 +105,10 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
       ruleId: typeof raw.ruleId === "string" ? raw.ruleId : undefined,
     }];
   });
-  const rawScores = isRecord(parsed.scores) ? parsed.scores : {};
-  const scoreKeys = ["correctness", "clarity", "conciseness", "readability", "engagement", "consistency", "goalAlignment", "overall"] as const;
-  const scores = Object.fromEntries(scoreKeys.flatMap((key) => {
-    const score = rawScores[key];
-    return typeof score === "number" && Number.isFinite(score) ? [[key, score] as const] : [];
-  })) as ProviderPayload["scores"];
   const tone = Array.isArray(parsed.tone)
     ? parsed.tone.filter((item): item is string => typeof item === "string").slice(0, 8)
     : [];
-  return { issues, tone, scores };
+  return { issues, tone };
 }
 
 export class ProviderError extends Error {

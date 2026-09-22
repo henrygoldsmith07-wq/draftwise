@@ -12,6 +12,7 @@ function browserLikeContext() {
   const listeners = { installed: [], startup: [], changed: [], removed: [], clicked: [], message: [] };
   const storage = { values: { siteAccess: [], disabledSites: [], excludedSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
   const scripting = { registered: new Map(), unregistered: [] };
+  const permissionState = { deniedOrigins: new Set() };
   const event = (name) => ({ addListener(handler) { listeners[name].push(handler); } });
   const context = {
     URL,
@@ -36,7 +37,7 @@ function browserLikeContext() {
       onChanged: event("changed"),
     },
     permissions: {
-      contains(_value, callback) { callback(true); },
+      contains(value, callback) { callback(!(value?.origins || []).some((origin) => permissionState.deniedOrigins.has(origin))); },
       getAll(callback) { callback({ origins: [] }); },
       onRemoved: event("removed"),
     },
@@ -55,7 +56,7 @@ function browserLikeContext() {
       getRegisteredContentScripts(_filter, callback) { callback([...scripting.registered.values()]); },
     },
   };
-  return { context, listeners, storage, scripting };
+  return { context, listeners, storage, scripting, permissionState };
 }
 
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
@@ -107,6 +108,27 @@ test("clearing site access unregisters stale dynamically registered scripts", as
 
   assert.equal(runtime.scripting.registered.has("draftwise-site-example-com"), false);
   assert.ok(runtime.scripting.unregistered.includes("draftwise-site-example-com"));
+});
+
+
+test("external host-permission revocation removes stale stored site access", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    siteAccess: ["example.com"],
+    disabledSites: [],
+    excludedSites: [],
+  };
+  runtime.permissionState.deniedOrigins.add("https://example.com/*");
+  runtime.permissionState.deniedOrigins.add("http://example.com/*");
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  assert.equal(runtime.listeners.removed.length, 1);
+  runtime.listeners.removed[0]({ origins: ["https://example.com/*", "http://example.com/*"] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(runtime.storage.values.siteAccess, []);
 });
 
 test("disabling AI aborts an in-flight extension cloud request", async () => {
@@ -179,6 +201,9 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(background, /providerPattern/iu);
   assert.match(background, /aiCoverage/iu);
   assert.match(background, /clear-ai-cache/iu);
+  assert.match(background, /reconcileSiteAccessWithPermissions/iu);
+  assert.match(background, /textFingerprint:\s*settingsFingerprint\(text\)/iu);
+  assert.doesNotMatch(background, /const cacheKey = JSON\.stringify\(\{\s*text,/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");
   assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);

@@ -300,3 +300,42 @@ test("rewrite protection keeps currencies, percentages, dates, identifiers, mode
     globalThis.fetch = originalFetch;
   }
 });
+
+test("rewrite protection rejects changed values even when the original token is reinserted elsewhere", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "The approved budget is £100 for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The approved budget is £200 for ticket ABC-123 (previously £100).",
+      explanation: "Clarified the budget.",
+    }) } }],
+  }), { status: 200 });
+
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rewrite protection rejects duplicated or newly introduced protected values", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Send report.pdf to user@example.com by 18 September 2026.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "Send report.pdf and backup.pdf to user@example.com by 18 September 2026, with a second copy on 19 September 2026.",
+    }) } }],
+  }), { status: 200 });
+
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

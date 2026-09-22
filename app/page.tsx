@@ -50,7 +50,7 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
-  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
+  const { workspace, hydrated, saveStatus, saveError, saveNow, updateWorkspace, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   const { commit, undo: undoHistory, redo: redoHistory, reset: resetHistory, canUndo, canRedo } = useHistory(workspace.draft);
   const historyReady = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -202,14 +202,14 @@ export default function Home() {
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); return; }
+      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); saveNow(); return; }
       if (modifier && event.key === "Enter") { event.preventDefault(); acceptAll(); return; }
       if (event.key === "Escape" && rewritePreview) { cancelRewrite(); return; }
       if (event.key === "?" && !modifier && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); setShortcutsOpen(true); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [acceptAll, cancelRewrite, rewritePreview]);
+  }, [acceptAll, cancelRewrite, rewritePreview, saveNow]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
   const savedLabel = !hydrated

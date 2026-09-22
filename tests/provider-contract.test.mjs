@@ -63,7 +63,15 @@ test("provider URL validation requires HTTPS except for localhost", () => {
 });
 
 test("custom headers cannot override credential or transport headers", () => {
-  const headers = parseCustomHeaders(JSON.stringify({ "X-Trace": "test", Authorization: "bad", Cookie: "secret", "Content-Length": "1" }));
+  const headers = parseCustomHeaders(JSON.stringify({
+    "X-Trace": "test",
+    Authorization: "bad",
+    Cookie: "secret",
+    "Content-Length": "1",
+    "Content-Type": "text/plain",
+    Origin: "https://attacker.example",
+    "Transfer-Encoding": "chunked",
+  }));
   assert.deepEqual(headers, { "X-Trace": "test" });
 });
 

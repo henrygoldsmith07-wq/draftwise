@@ -301,7 +301,7 @@ test("sensitive field classification uses explicit tokens without blocking norma
     closest() { return { getAttribute: () => "" }; },
   });
   for (const normal of [field({ name: "author" }), field({ name: "authority" }), field({ placeholder: "Authentication explanation" }), field({ name: "notes" }), field({ name: "search" }), field({ name: "title" })]) assert.equal(classify(normal), false);
-  for (const sensitive of [field({ type: "password" }), field({ name: "auth_token" }), field({ name: "api_key" }), field({ name: "cvv" }), field({ name: "otp" }), field({ name: "pin" })]) assert.equal(classify(sensitive), true);
+  for (const sensitive of [field({ type: "password" }), field({ type: "email" }), field({ type: "tel" }), field({ type: "date" }), field({ autocomplete: "street-address" }), field({ autocomplete: "cc-name" }), field({ name: "auth_token" }), field({ name: "api_key" }), field({ name: "cvv" }), field({ name: "otp" }), field({ name: "pin" }), field({ name: "email" }), field({ name: "phone_number" })]) assert.equal(classify(sensitive), true);
 });
 
 test("permission helpers derive narrow site and provider origins", async () => {

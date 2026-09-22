@@ -128,7 +128,7 @@ test("external host-permission revocation removes stale stored site access", asy
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.deepEqual(runtime.storage.values.siteAccess, []);
+  assert.equal(runtime.storage.values.siteAccess.length, 0);
 });
 
 test("disabling AI aborts an in-flight extension cloud request", async () => {

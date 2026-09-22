@@ -6,6 +6,7 @@
     "current-password",
     "new-password",
     "one-time-code",
+    "webauthn",
     "cc-number",
     "cc-exp",
     "cc-exp-month",
@@ -29,6 +30,9 @@
     "cc-given-name",
     "cc-additional-name",
     "cc-family-name",
+    "cc-type",
+    "transaction-currency",
+    "transaction-amount",
   ]);
 
   function metadataTokens(element) {
@@ -52,7 +56,8 @@
     const type = String(element.type || "").toLocaleLowerCase();
     if (sensitiveTypes.has(type)) return true;
     const autocomplete = String(element.getAttribute?.("autocomplete") || "").toLocaleLowerCase();
-    if (sensitiveAutocomplete.has(autocomplete)) return true;
+    const autocompleteTokens = autocomplete.split(/\s+/u).filter(Boolean);
+    if (autocompleteTokens.some((token) => sensitiveAutocomplete.has(token))) return true;
     const tokens = metadataTokens(element);
     if (hasAny(tokens, ["password", "passwd", "passcode", "credential", "username", "login", "pin", "otp", "cvv", "cvc", "ssn", "secret"])) return true;
     if (hasAny(tokens, ["email", "phone", "telephone", "mobile", "postcode", "zipcode"])) return true;

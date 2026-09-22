@@ -1966,30 +1966,30 @@ function rangesOverlap(left, right) {
 }
 function protectedKindsAllowedByInstruction(instruction) {
     const value = String(instruction || "");
-    const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
+    const edit = String.raw `\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
     const allowed = new Set();
     const permits = (target) => new RegExp(edit + target, "iu").test(value);
-    if (permits(String.raw`\bdates?\b`))
+    if (permits(String.raw `\bdates?\b`))
         allowed.add("date");
-    if (permits(String.raw`\b(?:percentage|percent)s?\b`))
+    if (permits(String.raw `\b(?:percentage|percent)s?\b`))
         allowed.add("percentage");
-    if (permits(String.raw`\bcurrenc(?:y|ies)\b`))
+    if (permits(String.raw `\bcurrenc(?:y|ies)\b`))
         allowed.add("currency");
-    if (permits(String.raw`\b(?:url|link)s?\b`))
+    if (permits(String.raw `\b(?:url|link)s?\b`))
         allowed.add("url");
-    if (permits(String.raw`\bemail(?:\s+address)?s?\b`))
+    if (permits(String.raw `\bemail(?:\s+address)?s?\b`))
         allowed.add("email");
-    if (permits(String.raw`\b(?:id|identifier|ticket|reference|case)s?\b`)) {
+    if (permits(String.raw `\b(?:id|identifier|ticket|reference|case)s?\b`)) {
         allowed.add("identifier");
         allowed.add("uuid");
     }
-    if (permits(String.raw`\b(?:quote|quotation|quoted\s+passage)s?\b`))
+    if (permits(String.raw `\b(?:quote|quotation|quoted\s+passage)s?\b`))
         allowed.add("quote");
-    if (permits(String.raw`\b(?:filename|file\s+name)s?\b`))
+    if (permits(String.raw `\b(?:filename|file\s+name)s?\b`))
         allowed.add("filename");
-    if (permits(String.raw`\b(?:model|version)s?\b`))
+    if (permits(String.raw `\b(?:model|version)s?\b`))
         allowed.add("model");
-    if (permits(String.raw`\b(?:number|value)s?\b`))
+    if (permits(String.raw `\b(?:number|value)s?\b`))
         allowed.add("number");
     return allowed;
 }

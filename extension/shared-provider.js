@@ -2308,6 +2308,8 @@ function redactExcerptForClassifier(text) {
     return String(text || "")
         .replace(/-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----[\s\S]*?-----END (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----/gu, "[private-key]")
         .replace(/-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----/gu, "[private-key]")
+        .replace(/-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----[\s\S]*/gu, "[private-key]")
+        .replace(/-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*/gu, "[private-key]")
         .replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s<>"']+/giu, "[connection-string]")
         .replace(/https?:\/\/[^\s<>"']+/giu, "[url]")
         .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu, "[email]")

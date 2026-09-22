@@ -393,10 +393,20 @@ function normaliseCategory(value: string): IssueCategory | null {
   return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
 }
 
+function aiIssueFingerprint(ruleId: string, original: string, replacement: string) {
+  const value = `${ruleId}\u001f${original}\u001f${replacement}`;
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?: string): WritingIssue[] {
   const parsed = parseProviderPayload(value);
   if (!parsed) return [];
-  return parsed.issues.flatMap((candidate, index) => {
+  return parsed.issues.flatMap((candidate) => {
     const start = Math.max(0, Math.floor(candidate.start));
     const end = Math.min(sourceText.length, Math.floor(candidate.end));
     const category = normaliseCategory(candidate.category);
@@ -405,14 +415,16 @@ export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?
     const original = sourceText.slice(start, end);
     if (!original || original !== candidate.original) return [];
     const confidence = Math.max(0, Math.min(1, candidate.confidence ?? 0.72));
+    const ruleId = candidate.ruleId?.slice(0, 80) || "ai-suggestion";
+    const replacement = candidate.replacement.slice(0, 1000);
     return [{
-      id: `ai-${chunkId ?? "full"}-${start}-${end}-${index}`,
-      ruleId: candidate.ruleId?.slice(0, 80) || "ai-suggestion",
+      id: `ai-${chunkId ?? "full"}-${start}-${end}-${aiIssueFingerprint(ruleId, original, replacement)}`,
+      ruleId,
       chunkId,
       start,
       end,
       original,
-      replacement: candidate.replacement.slice(0, 1000),
+      replacement,
       category,
       severity,
       confidence,

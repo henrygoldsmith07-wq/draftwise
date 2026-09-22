@@ -79,6 +79,30 @@ test("malformed provider issues are discarded while exact ranges survive", () =>
   assert.equal(source.slice(issues[0].start, issues[0].end), issues[0].original);
 });
 
+test("AI suggestion IDs stay stable when provider issue order changes", () => {
+  const source = "repeatd and recieve";
+  const firstIssue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const secondIssue = { start: 12, end: 19, original: "recieve", replacement: "receive", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+
+  const forward = parseAnalysisIssues({ issues: [firstIssue, secondIssue] }, source, "chunk-0-19");
+  const reversed = parseAnalysisIssues({ issues: [secondIssue, firstIssue] }, source, "chunk-0-19");
+  const forwardIds = new Map(forward.map((issue) => [issue.original, issue.id]));
+  const reversedIds = new Map(reversed.map((issue) => [issue.original, issue.id]));
+
+  assert.equal(forwardIds.get("repeatd"), reversedIds.get("repeatd"));
+  assert.equal(forwardIds.get("recieve"), reversedIds.get("recieve"));
+});
+
+test("AI suggestion IDs change when the proposed change materially changes", () => {
+  const source = "repeatd";
+  const base = { start: 0, end: 7, original: "repeatd", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const first = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeated" }] }, source, "chunk-0-7")[0];
+  const second = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeat" }] }, source, "chunk-0-7")[0];
+  assert.ok(first);
+  assert.ok(second);
+  assert.notEqual(first.id, second.id);
+});
+
 test("long-document provider calls keep the full analysed text", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

@@ -18,16 +18,32 @@ function hasValidIssueRange(text: string, issue: WritingIssue) {
     && issue.end - issue.start === issue.original.length;
 }
 
-function rangesOverlap(left: WritingIssue, right: WritingIssue) {
-  return left.start < right.end && right.start < left.end;
+function withoutOverlappingRanges(issues: WritingIssue[]) {
+  if (issues.length < 2) return issues;
+
+  const ordered = issues
+    .map((issue, index) => ({ issue, index }))
+    .sort((left, right) => left.issue.start - right.issue.start || right.issue.end - left.issue.end);
+  const conflicting = new Set<number>();
+  let furthest = ordered[0];
+
+  for (let index = 1; index < ordered.length; index += 1) {
+    const current = ordered[index];
+    if (current.issue.start < furthest.issue.end) {
+      conflicting.add(current.index);
+      conflicting.add(furthest.index);
+    }
+    if (current.issue.end > furthest.issue.end) furthest = current;
+  }
+
+  return issues.filter((_, index) => !conflicting.has(index));
 }
 
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
   const candidates = issues.filter(
     (issue) => issue.replacement && issue.replacement !== issue.original && hasValidIssueRange(text, issue),
   );
-  const actionable = candidates
-    .filter((issue, index) => !candidates.some((other, otherIndex) => otherIndex !== index && rangesOverlap(issue, other)))
+  const actionable = withoutOverlappingRanges(candidates)
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;

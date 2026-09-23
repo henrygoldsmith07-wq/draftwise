@@ -55,12 +55,28 @@ test("bulk acceptance skips all overlapping suggestions rather than choosing one
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
 });
 
+test("identical duplicate replacements are applied once instead of being treated as a conflict", () => {
+  const issues = [
+    issue({ id: "local-copy", source: "local", replacement: "good" }),
+    issue({ id: "ai-copy", source: "ai", replacement: "good" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "good word");
+});
+
 test("bulk acceptance skips competing insertions at the same position", () => {
   const issues = [
     issue({ id: "insert-a", start: 3, end: 3, original: "", replacement: "!" }),
     issue({ id: "insert-b", start: 3, end: 3, original: "", replacement: "?" }),
   ];
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+});
+
+test("identical duplicate insertions are applied once", () => {
+  const issues = [
+    issue({ id: "insert-a", source: "local", start: 3, end: 3, original: "", replacement: "!" }),
+    issue({ id: "insert-b", source: "ai", start: 3, end: 3, original: "", replacement: "!" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad! word");
 });
 
 test("a single insertion remains actionable", () => {

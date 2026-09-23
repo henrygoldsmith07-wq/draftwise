@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, categoryMatches } from "@/components/draftwise/EditorPrimitives";
 import { RewritePreview } from "@/components/draftwise/RewritePreview";
+import { hasActionableReplacement } from "@/lib/issue-actions";
 import type { AnalysisResult, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
 
@@ -124,7 +125,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="heading-actions">
             <Button variant="outline" size="sm" onClick={props.onNewDocument}><FileText size={14} /> New</Button>
             <Button variant="outline" size="sm" onClick={props.onRestoreSample}><RotateCw size={14} /> Sample</Button>
-            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.visibleIssues.some((issue) => issue.replacement && issue.replacement !== issue.original)}><CheckCheck size={14} /> {props.filter === "all" ? "Accept all" : "Accept visible"}</Button>
+            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.visibleIssues.some(hasActionableReplacement)}><CheckCheck size={14} /> {props.filter === "all" ? "Accept all" : "Accept visible"}</Button>
           </div>
         </div>
 

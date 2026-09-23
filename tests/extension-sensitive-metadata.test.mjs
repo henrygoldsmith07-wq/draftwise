@@ -13,42 +13,21 @@ function loadClassifier() {
   });
 }
 
-function field({ name = "", id = "", aria = "", placeholder = "", title = "", describedBy = "", referenced = {} } = {}) {
+function field({ name = "", id = "", aria = "", placeholder = "", title = "", describedBy = "", referenced = {}, formAction = "", formName = "", formId = "", formAria = "" } = {}) {
   return {
-    type: "text",
-    name,
-    id,
-    labels: [],
-    disabled: false,
-    readOnly: false,
-    hidden: false,
-    getAttribute(key) {
-      return ({ "aria-label": aria, placeholder, title, autocomplete: "", "aria-labelledby": "", "aria-describedby": describedBy, "aria-hidden": "" })[key] || "";
-    },
+    type: "text", name, id, labels: [], disabled: false, readOnly: false, hidden: false,
+    getAttribute(key) { return ({ "aria-label": aria, placeholder, title, autocomplete: "", "aria-labelledby": "", "aria-describedby": describedBy, "aria-hidden": "" })[key] || ""; },
     closest(selector) {
-      return selector === "form" ? { name: "", id: "", getAttribute: () => "" } : null;
+      if (selector !== "form") return null;
+      return { name: formName, id: formId, getAttribute(key) { return ({ "aria-label": formAria, autocomplete: "", action: formAction })[key] || ""; } };
     },
-    ownerDocument: {
-      getElementById(referenceId) {
-        return Object.prototype.hasOwnProperty.call(referenced, referenceId) ? { textContent: referenced[referenceId] } : null;
-      },
-    },
+    ownerDocument: { getElementById(referenceId) { return Object.prototype.hasOwnProperty.call(referenced, referenceId) ? { textContent: referenced[referenceId] } : null; } },
   };
 }
 
 test("camelCase and alpha-numeric metadata cannot bypass sensitive-field blocking", async () => {
   const { isSensitiveField, metadataTokens } = await loadClassifier();
-
-  for (const sensitive of [
-    field({ name: "creditCardNumber" }),
-    field({ id: "bankAccountNumber" }),
-    field({ aria: "oneTimeCode" }),
-    field({ placeholder: "apiKey" }),
-    field({ name: "routingNumber2" }),
-  ]) {
-    assert.equal(isSensitiveField(sensitive), true);
-  }
-
+  for (const sensitive of [field({ name: "creditCardNumber" }), field({ id: "bankAccountNumber" }), field({ aria: "oneTimeCode" }), field({ placeholder: "apiKey" }), field({ name: "routingNumber2" })]) assert.equal(isSensitiveField(sensitive), true);
   const tokens = Array.from(metadataTokens(field({ name: "creditCardNumber2" })));
   for (const token of ["credit", "card", "number", "2"]) assert.ok(tokens.includes(token));
 });
@@ -60,18 +39,21 @@ test("sensitive accessible helper text and title metadata block analysis", async
   assert.equal(isSensitiveField(field({ title: "API key" })), true);
 });
 
+test("sensitive form context blocks generic fields", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const sensitive of [
+    field({ name: "value", formAction: "/account/login" }),
+    field({ id: "entry", formAction: "https://example.test/auth/token" }),
+    field({ name: "details", formAction: "/checkout/payment" }),
+    field({ name: "answer", formName: "securityQuestion" }),
+  ]) assert.equal(isSensitiveField(sensitive), true);
+
+  assert.equal(isSensitiveField(field({ name: "body", formAction: "/articles/publish", formName: "editor" })), false);
+});
+
 test("normal writing metadata remains eligible and described-by lookup is bounded", async () => {
   const { isSensitiveField } = await loadClassifier();
-  for (const normal of [
-    field({ name: "articleBody" }),
-    field({ id: "writingNotes2" }),
-    field({ aria: "projectSummary" }),
-    field({ title: "Draft introduction" }),
-    field({ describedBy: "help", referenced: { help: "Write a short project summary" } }),
-  ]) {
-    assert.equal(isSensitiveField(normal), false);
-  }
-
+  for (const normal of [field({ name: "articleBody" }), field({ id: "writingNotes2" }), field({ aria: "projectSummary" }), field({ title: "Draft introduction" }), field({ describedBy: "help", referenced: { help: "Write a short project summary" } })]) assert.equal(isSensitiveField(normal), false);
   const ids = Array.from({ length: 20 }, (_, index) => `hint-${index}`).join(" ");
   const referenced = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`hint-${index}`, index === 10 ? "password" : "ordinary writing help"]));
   assert.equal(isSensitiveField(field({ describedBy: ids, referenced })), false);

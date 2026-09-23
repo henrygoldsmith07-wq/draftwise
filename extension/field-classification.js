@@ -49,17 +49,25 @@
       .replace(/([0-9])([A-Za-z])/gu, "$1 $2");
   }
 
+  function referencedText(element, attribute) {
+    return metadataPart(element?.getAttribute?.(attribute))
+      .split(/\s+/u)
+      .filter(Boolean)
+      .slice(0, MAX_ASSOCIATED_LABELS)
+      .map((id) => metadataPart(element?.ownerDocument?.getElementById?.(id)?.textContent));
+  }
+
   function associatedLabelText(element) {
     const explicitLabels = Array.from(element?.labels || [])
       .slice(0, MAX_ASSOCIATED_LABELS)
       .map((label) => metadataPart(label?.textContent));
     const wrappingLabel = metadataPart(element?.closest?.("label")?.textContent);
-    const labelledBy = metadataPart(element?.getAttribute?.("aria-labelledby"))
-      .split(/\s+/u)
-      .filter(Boolean)
-      .slice(0, MAX_ASSOCIATED_LABELS)
-      .map((id) => metadataPart(element?.ownerDocument?.getElementById?.(id)?.textContent));
-    return [...explicitLabels, wrappingLabel, ...labelledBy].filter(Boolean).join(" ");
+    return [
+      ...explicitLabels,
+      wrappingLabel,
+      ...referencedText(element, "aria-labelledby"),
+      ...referencedText(element, "aria-describedby"),
+    ].filter(Boolean).join(" ");
   }
 
   function metadataTokens(element) {
@@ -71,6 +79,7 @@
       element?.getAttribute?.("autocomplete"),
       element?.getAttribute?.("aria-label"),
       element?.getAttribute?.("placeholder"),
+      element?.getAttribute?.("title"),
       associatedLabelText(element),
       form?.name,
       form?.id,

@@ -13,7 +13,7 @@ import {
   validateProviderUrl,
 } from "../packages/ai/src/index.ts";
 import { createAnalysisChunks } from "../packages/analysis/src/index.ts";
-import { isAiCoverageConsistent } from "../packages/types/src/index.ts";
+import { getAiReviewStatus, isAiCoverageConsistent } from "../packages/types/src/index.ts";
 
 const settings = {
   provider: "openai-compatible",
@@ -55,6 +55,18 @@ async function runChunkFailureCase(mode) {
     globalThis.fetch = originalFetch;
   }
 }
+
+test("AI review status prioritises active and failed phases before coverage exists", () => {
+  assert.equal(getAiReviewStatus(undefined, true, true, "analysing"), "AI review in progress");
+  assert.equal(getAiReviewStatus(undefined, true, true, "error"), "AI review encountered errors");
+  assert.equal(getAiReviewStatus(undefined, false, true, "analysing"), "Local analysis only");
+  assert.equal(getAiReviewStatus(undefined, true, false, "analysing"), "Local analysis only");
+});
+
+test("AI review status reports progress when coverage exists during analysis", () => {
+  const coverage = { requestedChunks: 4, attemptedChunks: 4, successfulChunks: 2, failedChunks: 2, skippedChunks: 0 };
+  assert.equal(getAiReviewStatus(coverage, true, true, "analysing"), "AI review in progress - 2/4 sections reviewed");
+});
 
 test("provider URL validation requires HTTPS except for localhost", () => {
   assert.equal(validateProviderUrl("https://example.com/v1").protocol, "https:");

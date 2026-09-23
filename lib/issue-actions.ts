@@ -10,7 +10,9 @@ export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterab
 }
 
 function hasValidIssueRange(text: string, issue: WritingIssue) {
-  return Number.isSafeInteger(issue.start)
+  return typeof issue.original === "string"
+    && typeof issue.replacement === "string"
+    && Number.isSafeInteger(issue.start)
     && Number.isSafeInteger(issue.end)
     && issue.start >= 0
     && issue.end >= issue.start
@@ -54,14 +56,14 @@ function withoutOverlappingRanges(issues: WritingIssue[]) {
 
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
   const candidates = issues.filter(
-    (issue) => issue.replacement && issue.replacement !== issue.original && hasValidIssueRange(text, issue),
+    (issue) => hasValidIssueRange(text, issue) && issue.replacement.length > 0 && issue.replacement !== issue.original,
   );
   const actionable = withoutOverlappingRanges(withoutDuplicateEdits(candidates))
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;
   for (const issue of actionable) {
-    if (!issue.replacement || !hasValidIssueRange(next, issue) || next.slice(issue.start, issue.end) !== issue.original) continue;
+    if (!hasValidIssueRange(next, issue) || issue.replacement.length === 0 || next.slice(issue.start, issue.end) !== issue.original) continue;
     next = `${next.slice(0, issue.start)}${issue.replacement}${next.slice(issue.end)}`;
   }
   return next;

@@ -32,7 +32,7 @@
   function metadataTokens(element) { return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean); }
   function hasAny(tokens, values) { return values.some((value) => tokens.includes(value)); }
   function hasSensitivePhrase(element) {
-    return metadataParts(element).some((part) => /(?:api\s*key|access\s*token|private\s*key|credit\s*card|bank\s*account|routing\s*number|sort\s*code|one\s*time\s*code)/u.test(part.toLocaleLowerCase()));
+    return metadataParts(element).some((part) => /(?:api\s*key|access\s*token|private\s*key|credit\s*card|bank\s*account|routing\s*number|sort\s*code|one\s*time\s*code|medical\s*(?:history|record)|health\s*record|patient\s*(?:id|identifier|number)|passport\s*(?:id|number)|driv(?:er|ing)\s*licen[cs]e(?:\s*(?:id|number))?)/u.test(part.toLocaleLowerCase()));
   }
   function isSensitiveField(element) {
     if (!element || element.disabled || element.readOnly || element.hidden || element.getAttribute?.("aria-hidden") === "true") return true;

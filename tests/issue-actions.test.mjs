@@ -64,6 +64,17 @@ test("overlap conflicts do not block independent suggestions", () => {
   assert.equal(applyIssueReplacements("bad word", issues), "bad term");
 });
 
+test("nested overlap clusters mark every conflicting suggestion", () => {
+  const text = "abcdefghij safe";
+  const issues = [
+    issue({ id: "outer", start: 0, end: 10, original: "abcdefghij", replacement: "outer" }),
+    issue({ id: "left", start: 1, end: 2, original: "b", replacement: "B" }),
+    issue({ id: "right", start: 8, end: 9, original: "i", replacement: "I" }),
+    issue({ id: "safe", start: 11, end: 15, original: "safe", replacement: "kept" }),
+  ];
+  assert.equal(applyIssueReplacements(text, issues), "abcdefghij kept");
+});
+
 test("adjacent suggestions can still be applied together", () => {
   const issues = [
     issue({ id: "first", start: 0, end: 3, original: "bad", replacement: "good" }),
@@ -71,6 +82,19 @@ test("adjacent suggestions can still be applied together", () => {
     issue({ id: "third", start: 4, end: 8, original: "word", replacement: "term" }),
   ];
   assert.equal(applyIssueReplacements("bad word", issues), "good-term");
+});
+
+test("bulk acceptance handles large independent suggestion sets without quadratic conflict scanning", () => {
+  const count = 2000;
+  const text = "a".repeat(count);
+  const issues = Array.from({ length: count }, (_, index) => issue({
+    id: `issue-${index}`,
+    start: index,
+    end: index + 1,
+    original: "a",
+    replacement: "b",
+  }));
+  assert.equal(applyIssueReplacements(text, issues), "b".repeat(count));
 });
 
 test("a changed suggestion at the same rule and range does not inherit an old dismissal", () => {

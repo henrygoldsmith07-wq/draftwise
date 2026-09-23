@@ -3,106 +3,33 @@
 
   const sensitiveTypes = new Set(["password", "hidden", "file", "checkbox", "radio", "submit", "button", "email", "tel", "number", "date", "datetime-local", "month", "week", "time", "url", "range", "color"]);
   const sensitiveAutocomplete = new Set([
-    "current-password",
-    "new-password",
-    "one-time-code",
-    "webauthn",
-    "cc-number",
-    "cc-exp",
-    "cc-exp-month",
-    "cc-exp-year",
-    "cc-csc",
-    "security-code",
-    "email",
-    "tel",
-    "name",
-    "given-name",
-    "additional-name",
-    "family-name",
-    "street-address",
-    "address-line1",
-    "address-line2",
-    "address-line3",
-    "postal-code",
-    "country",
-    "country-name",
-    "cc-name",
-    "cc-given-name",
-    "cc-additional-name",
-    "cc-family-name",
-    "cc-type",
-    "transaction-currency",
-    "transaction-amount",
+    "current-password", "new-password", "one-time-code", "webauthn", "cc-number", "cc-exp", "cc-exp-month", "cc-exp-year", "cc-csc", "security-code", "email", "tel", "name", "given-name", "additional-name", "family-name", "street-address", "address-line1", "address-line2", "address-line3", "postal-code", "country", "country-name", "cc-name", "cc-given-name", "cc-additional-name", "cc-family-name", "cc-type", "transaction-currency", "transaction-amount",
   ]);
 
   const MAX_METADATA_PART_CHARS = 512;
   const MAX_ASSOCIATED_LABELS = 8;
 
-  function metadataPart(value) {
-    return String(value || "").slice(0, MAX_METADATA_PART_CHARS);
-  }
-
+  function metadataPart(value) { return String(value || "").slice(0, MAX_METADATA_PART_CHARS); }
   function normaliseMetadataPart(value) {
-    return metadataPart(value)
-      .replace(/([a-z])([A-Z])/gu, "$1 $2")
-      .replace(/([A-Za-z])([0-9])/gu, "$1 $2")
-      .replace(/([0-9])([A-Za-z])/gu, "$1 $2");
+    return metadataPart(value).replace(/([a-z])([A-Z])/gu, "$1 $2").replace(/([A-Za-z])([0-9])/gu, "$1 $2").replace(/([0-9])([A-Za-z])/gu, "$1 $2");
   }
-
   function referencedText(element, attribute) {
-    return metadataPart(element?.getAttribute?.(attribute))
-      .split(/\s+/u)
-      .filter(Boolean)
-      .slice(0, MAX_ASSOCIATED_LABELS)
-      .map((id) => metadataPart(element?.ownerDocument?.getElementById?.(id)?.textContent));
+    return metadataPart(element?.getAttribute?.(attribute)).split(/\s+/u).filter(Boolean).slice(0, MAX_ASSOCIATED_LABELS).map((id) => metadataPart(element?.ownerDocument?.getElementById?.(id)?.textContent));
   }
-
   function associatedLabelText(element) {
-    const explicitLabels = Array.from(element?.labels || [])
-      .slice(0, MAX_ASSOCIATED_LABELS)
-      .map((label) => metadataPart(label?.textContent));
+    const explicitLabels = Array.from(element?.labels || []).slice(0, MAX_ASSOCIATED_LABELS).map((label) => metadataPart(label?.textContent));
     const wrappingLabel = metadataPart(element?.closest?.("label")?.textContent);
-    return [
-      ...explicitLabels,
-      wrappingLabel,
-      ...referencedText(element, "aria-labelledby"),
-      ...referencedText(element, "aria-describedby"),
-    ].filter(Boolean).join(" ");
+    return [...explicitLabels, wrappingLabel, ...referencedText(element, "aria-labelledby"), ...referencedText(element, "aria-describedby")].filter(Boolean).join(" ");
   }
-
   function metadataParts(element) {
     const form = element?.closest?.("form");
-    return [
-      element?.name,
-      element?.id,
-      element?.type,
-      element?.getAttribute?.("autocomplete"),
-      element?.getAttribute?.("aria-label"),
-      element?.getAttribute?.("placeholder"),
-      element?.getAttribute?.("title"),
-      associatedLabelText(element),
-      form?.name,
-      form?.id,
-      form?.getAttribute?.("aria-label"),
-      form?.getAttribute?.("autocomplete"),
-    ].map(normaliseMetadataPart).filter(Boolean);
+    return [element?.name, element?.id, element?.type, element?.getAttribute?.("autocomplete"), element?.getAttribute?.("aria-label"), element?.getAttribute?.("placeholder"), element?.getAttribute?.("title"), associatedLabelText(element), form?.name, form?.id, form?.getAttribute?.("aria-label"), form?.getAttribute?.("autocomplete"), form?.getAttribute?.("action")].map(normaliseMetadataPart).filter(Boolean);
   }
-
-  function metadataTokens(element) {
-    return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
-  }
-
-  function hasAny(tokens, values) {
-    return values.some((value) => tokens.includes(value));
-  }
-
+  function metadataTokens(element) { return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean); }
+  function hasAny(tokens, values) { return values.some((value) => tokens.includes(value)); }
   function hasSensitivePhrase(element) {
-    return metadataParts(element).some((part) => {
-      const value = part.toLocaleLowerCase();
-      return /(?:api\s*key|access\s*token|private\s*key|credit\s*card|bank\s*account|routing\s*number|sort\s*code|one\s*time\s*code)/u.test(value);
-    });
+    return metadataParts(element).some((part) => /(?:api\s*key|access\s*token|private\s*key|credit\s*card|bank\s*account|routing\s*number|sort\s*code|one\s*time\s*code)/u.test(part.toLocaleLowerCase()));
   }
-
   function isSensitiveField(element) {
     if (!element || element.disabled || element.readOnly || element.hidden || element.getAttribute?.("aria-hidden") === "true") return true;
     const type = String(element.type || "").toLocaleLowerCase();
@@ -134,6 +61,5 @@
     if (tokens.includes("one") && tokens.includes("time") && tokens.includes("code")) return true;
     return false;
   }
-
   globalThis.DraftwiseFieldClassifier = Object.freeze({ isSensitiveField, metadataTokens });
 })();

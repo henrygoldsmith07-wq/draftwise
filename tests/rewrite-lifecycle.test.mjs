@@ -6,12 +6,15 @@ const rewriteUrl = new URL("../hooks/useRewrite.ts", import.meta.url);
 
 test("cancelling a rewrite invalidates the logical run and releases its controller", async () => {
   const source = await readFile(rewriteUrl, "utf8");
-  const cancel = source.match(/const cancel = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[\]\);/u);
-  assert.ok(cancel, "cancel callback should exist");
-  assert.match(cancel[1], /runId\.current \+= 1/u);
-  assert.match(cancel[1], /abort\.current\?\.abort\(\)/u);
-  assert.match(cancel[1], /abort\.current = null/u);
-  assert.match(cancel[1], /setPreview\(null\)/u);
+  const cancelStart = source.indexOf("const cancel = useCallback(() => {");
+  const cancelEnd = source.indexOf("\n  }, []);", cancelStart);
+  assert.notEqual(cancelStart, -1, "cancel callback should exist");
+  assert.notEqual(cancelEnd, -1, "cancel callback should have a stable boundary");
+  const cancel = source.slice(cancelStart, cancelEnd);
+  assert.match(cancel, /runId\.current \+= 1/u);
+  assert.match(cancel, /abort\.current\?\.abort\(\)/u);
+  assert.match(cancel, /abort\.current = null/u);
+  assert.match(cancel, /setPreview\(null\)/u);
 });
 
 test("settled and unmounted rewrites release transport state and invalidate stale work", async () => {

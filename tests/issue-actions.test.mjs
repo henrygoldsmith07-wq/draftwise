@@ -42,6 +42,21 @@ test("dismissal keys preserve boundaries in suggestion text", () => {
   assert.deepEqual(getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.original), ["bad"]);
 });
 
+test("dismissing one repeated suggestion does not hide the same edit at another location", () => {
+  const first = issue({ id: "repeated", start: 0, end: 3 });
+  const second = issue({ id: "repeated", start: 8, end: 11 });
+  const dismissed = [getIssueDismissalKey(first)];
+  assert.notEqual(getIssueDismissalKey(first), getIssueDismissalKey(second));
+  assert.deepEqual(getOpenIssues([first, second], dismissed).map((item) => item.start), [8]);
+});
+
+test("dismissal identity includes the rule that produced an otherwise identical edit", () => {
+  const first = issue({ ruleId: "clarity-a" });
+  const second = issue({ ruleId: "clarity-b" });
+  assert.notEqual(getIssueDismissalKey(first), getIssueDismissalKey(second));
+  assert.deepEqual(getOpenIssues([first, second], [getIssueDismissalKey(first)]).map((item) => item.ruleId), ["clarity-b"]);
+});
+
 test("bulk acceptance skips stale and non-actionable suggestions", () => {
   const issues = [issue({ id: "stale", original: "old", replacement: "new" }), issue({ id: "same", start: 4, end: 8, original: "word", replacement: "word" })];
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");

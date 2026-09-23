@@ -13,10 +13,10 @@ function loadClassifier() {
   });
 }
 
-function field({ name = "", id = "", aria = "", placeholder = "", title = "", describedBy = "", referenced = {}, formAction = "", formName = "", formId = "", formAria = "" } = {}) {
+function field({ name = "", id = "", aria = "", placeholder = "", title = "", autocomplete = "", describedBy = "", referenced = {}, formAction = "", formName = "", formId = "", formAria = "" } = {}) {
   return {
     type: "text", name, id, labels: [], disabled: false, readOnly: false, hidden: false,
-    getAttribute(key) { return ({ "aria-label": aria, placeholder, title, autocomplete: "", "aria-labelledby": "", "aria-describedby": describedBy, "aria-hidden": "" })[key] || ""; },
+    getAttribute(key) { return ({ "aria-label": aria, placeholder, title, autocomplete, "aria-labelledby": "", "aria-describedby": describedBy, "aria-hidden": "" })[key] || ""; },
     closest(selector) {
       if (selector !== "form") return null;
       return { name: formName, id: formId, getAttribute(key) { return ({ "aria-label": formAria, autocomplete: "", action: formAction })[key] || ""; } };
@@ -37,6 +37,20 @@ test("sensitive accessible helper text and title metadata block analysis", async
   assert.equal(isSensitiveField(field({ describedBy: "hint privacy", referenced: { hint: "Enter your access token", privacy: "Account credential" } })), true);
   assert.equal(isSensitiveField(field({ describedBy: "card-help", referenced: { "card-help": "Your credit card number" } })), true);
   assert.equal(isSensitiveField(field({ title: "API key" })), true);
+});
+
+test("personal autocomplete semantics block analysis even on generic text inputs", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const autocomplete of [
+    "bday", "bday-day", "bday-month", "bday-year",
+    "address-level1", "address-level2", "address-level3", "address-level4",
+    "sex", "photo", "impp",
+    "section-profile bday", "section-shipping shipping address-level2",
+  ]) assert.equal(isSensitiveField(field({ name: "value", autocomplete })), true, autocomplete);
+
+  for (const autocomplete of ["off", "on", "organization", "organization-title", "language"]) {
+    assert.equal(isSensitiveField(field({ name: "articleBody", autocomplete })), false, autocomplete);
+  }
 });
 
 test("sensitive form context blocks generic fields", async () => {

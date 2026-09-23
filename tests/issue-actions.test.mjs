@@ -47,12 +47,30 @@ test("bulk acceptance rejects malformed or out-of-bounds suggestion ranges", () 
   assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
 });
 
-test("overlapping suggestions cannot compound into a corrupt replacement", () => {
+test("bulk acceptance skips all overlapping suggestions rather than choosing one implicitly", () => {
   const issues = [
     issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),
     issue({ id: "inner", start: 1, end: 2, original: "a", replacement: "x" }),
   ];
-  assert.equal(applyIssueReplacements("bad word", issues), "bxd word");
+  assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+});
+
+test("overlap conflicts do not block independent suggestions", () => {
+  const issues = [
+    issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),
+    issue({ id: "inner", start: 1, end: 2, original: "a", replacement: "x" }),
+    issue({ id: "independent", start: 4, end: 8, original: "word", replacement: "term" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad term");
+});
+
+test("adjacent suggestions can still be applied together", () => {
+  const issues = [
+    issue({ id: "first", start: 0, end: 3, original: "bad", replacement: "good" }),
+    issue({ id: "second", start: 3, end: 4, original: " ", replacement: "-" }),
+    issue({ id: "third", start: 4, end: 8, original: "word", replacement: "term" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "good-term");
 });
 
 test("a changed suggestion at the same rule and range does not inherit an old dismissal", () => {

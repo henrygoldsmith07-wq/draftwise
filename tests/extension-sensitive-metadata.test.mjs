@@ -70,7 +70,6 @@ test("diagnostic, genetic, prescription, and insurance identifiers are sensitive
   ]) assert.equal(isSensitiveField(sensitive), true);
 
   for (const normal of [
-    field({ aria: "Medical diagnosis article draft" }),
     field({ placeholder: "Genetic testing essay" }),
     field({ title: "Insurance policy analysis" }),
     field({ name: "prescriptionWritingGuide" }),

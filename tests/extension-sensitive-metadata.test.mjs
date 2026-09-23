@@ -39,6 +39,25 @@ test("sensitive accessible helper text and title metadata block analysis", async
   assert.equal(isSensitiveField(field({ title: "API key" })), true);
 });
 
+test("health and identity-document metadata block extension analysis", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const sensitive of [
+    field({ aria: "Medical history" }),
+    field({ placeholder: "Health record" }),
+    field({ name: "patientIdentifier" }),
+    field({ title: "Passport number" }),
+    field({ describedBy: "licence-help", referenced: { "licence-help": "Enter your driving licence number" } }),
+    field({ formAria: "Medical record" }),
+  ]) assert.equal(isSensitiveField(sensitive), true);
+
+  for (const normal of [
+    field({ aria: "Health article draft" }),
+    field({ name: "medicalEssay" }),
+    field({ placeholder: "Passport travel article" }),
+    field({ title: "Driving lesson notes" }),
+  ]) assert.equal(isSensitiveField(normal), false);
+});
+
 test("personal autocomplete semantics block analysis even on generic text inputs", async () => {
   const { isSensitiveField } = await loadClassifier();
   for (const autocomplete of [

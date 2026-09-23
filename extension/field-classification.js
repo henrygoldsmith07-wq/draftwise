@@ -70,7 +70,7 @@
     ].filter(Boolean).join(" ");
   }
 
-  function metadataTokens(element) {
+  function metadataParts(element) {
     const form = element?.closest?.("form");
     return [
       element?.name,
@@ -85,11 +85,22 @@
       form?.id,
       form?.getAttribute?.("aria-label"),
       form?.getAttribute?.("autocomplete"),
-    ].map(normaliseMetadataPart).filter(Boolean).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
+    ].map(normaliseMetadataPart).filter(Boolean);
+  }
+
+  function metadataTokens(element) {
+    return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
   }
 
   function hasAny(tokens, values) {
     return values.some((value) => tokens.includes(value));
+  }
+
+  function hasSensitivePhrase(element) {
+    return metadataParts(element).some((part) => {
+      const value = part.toLocaleLowerCase();
+      return /(?:api\s*key|access\s*token|private\s*key|credit\s*card|bank\s*account|routing\s*number|sort\s*code|one\s*time\s*code)/u.test(value);
+    });
   }
 
   function isSensitiveField(element) {
@@ -99,6 +110,7 @@
     const autocomplete = String(element.getAttribute?.("autocomplete") || "").toLocaleLowerCase();
     const autocompleteTokens = autocomplete.split(/\s+/u).filter(Boolean);
     if (autocompleteTokens.some((token) => sensitiveAutocomplete.has(token))) return true;
+    if (hasSensitivePhrase(element)) return true;
     const tokens = metadataTokens(element);
     if (hasAny(tokens, ["password", "passwd", "passcode", "credential", "username", "login", "signin", "payment", "checkout", "banking", "cardholder", "iban", "swift", "pin", "otp", "cvv", "cvc", "ssn", "secret"])) return true;
     if ((tokens.includes("sign") || tokens.includes("log")) && tokens.includes("in")) return true;

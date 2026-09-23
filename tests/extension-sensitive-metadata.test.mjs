@@ -58,6 +58,25 @@ test("health and identity-document metadata block extension analysis", async () 
   ]) assert.equal(isSensitiveField(normal), false);
 });
 
+test("government identifiers and birth dates are treated as sensitive metadata", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const sensitive of [
+    field({ aria: "Social Security Number" }),
+    field({ name: "socialSecurityId" }),
+    field({ placeholder: "National Insurance number" }),
+    field({ title: "NHS number" }),
+    field({ aria: "Date of birth" }),
+    field({ name: "birthDate" }),
+    field({ describedBy: "identity-help", referenced: { "identity-help": "Enter your date of birth" } }),
+  ]) assert.equal(isSensitiveField(sensitive), true);
+
+  for (const normal of [
+    field({ aria: "Social security policy essay" }),
+    field({ title: "Birth announcement draft" }),
+    field({ placeholder: "NHS funding article" }),
+  ]) assert.equal(isSensitiveField(normal), false);
+});
+
 test("personal autocomplete semantics block analysis even on generic text inputs", async () => {
   const { isSensitiveField } = await loadClassifier();
   for (const autocomplete of [

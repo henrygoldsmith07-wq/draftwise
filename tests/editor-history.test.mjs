@@ -38,6 +38,14 @@ test("history always retains the newest draft when it alone exceeds the budget",
   assert.deepEqual(state, { values: ["x".repeat(20)], index: 0 });
 });
 
+test("structured history can enforce the same memory budget", () => {
+  const weight = (value) => value.draft.length + value.title.length;
+  let state = { values: [{ title: "A", draft: "aaaa" }], index: 0 };
+  state = commitHistory(state, { title: "B", draft: "bbbbb" }, 80, 12, weight);
+  state = commitHistory(state, { title: "C", draft: "cccccc" }, 80, 12, weight);
+  assert.deepEqual(state, { values: [{ title: "C", draft: "cccccc" }], index: 0 });
+});
+
 test("selection ranges clamp to the current document length", () => {
   assert.deepEqual(clampSelection({ start: 8, end: 20 }, 10), { start: 8, end: 10 });
   assert.deepEqual(clampSelection({ start: 20, end: 30 }, 10), { start: 10, end: 10 });

@@ -48,9 +48,14 @@ export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterab
     && !semanticallyDismissed.has(getSemanticDismissalKey(issue)));
 }
 
-function hasValidIssueRange(text: string, issue: WritingIssue) {
+export function hasActionableReplacement(issue: WritingIssue) {
   return typeof issue.original === "string"
     && typeof issue.replacement === "string"
+    && issue.replacement !== issue.original;
+}
+
+function hasValidIssueRange(text: string, issue: WritingIssue) {
+  return hasActionableReplacement(issue)
     && Number.isSafeInteger(issue.start)
     && Number.isSafeInteger(issue.end)
     && issue.start >= 0
@@ -104,15 +109,13 @@ function withoutOverlappingRanges(issues: WritingIssue[]) {
 }
 
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
-  const candidates = issues.filter(
-    (issue) => hasValidIssueRange(text, issue) && issue.replacement !== issue.original,
-  );
+  const candidates = issues.filter((issue) => hasValidIssueRange(text, issue));
   const actionable = withoutOverlappingRanges(withoutDuplicateEdits(candidates))
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;
   for (const issue of actionable) {
-    if (!hasValidIssueRange(next, issue) || issue.replacement === issue.original || next.slice(issue.start, issue.end) !== issue.original) continue;
+    if (!hasValidIssueRange(next, issue) || next.slice(issue.start, issue.end) !== issue.original) continue;
     next = `${next.slice(0, issue.start)}${issue.replacement}${next.slice(issue.end)}`;
   }
   return next;

@@ -1,7 +1,15 @@
 import type { WritingIssue } from "@/packages/types/src";
 
 export function getIssueDismissalKey(issue: WritingIssue) {
-  return JSON.stringify([issue.id, issue.source, issue.original, issue.replacement]);
+  return JSON.stringify([
+    issue.id,
+    issue.ruleId,
+    issue.source,
+    issue.start,
+    issue.end,
+    issue.original,
+    issue.replacement,
+  ]);
 }
 
 export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterable<string>) {

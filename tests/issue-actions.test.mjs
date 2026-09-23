@@ -36,6 +36,24 @@ test("bulk acceptance skips stale and non-actionable suggestions", () => {
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
 });
 
+test("bulk acceptance rejects malformed or out-of-bounds suggestion ranges", () => {
+  const malformed = [
+    issue({ id: "negative", start: -3, end: 0 }),
+    issue({ id: "reversed", start: 3, end: 0 }),
+    issue({ id: "fractional", start: 0.5, end: 3.5 }),
+    issue({ id: "past-end", start: 6, end: 9, original: "bad" }),
+    issue({ id: "length-mismatch", start: 0, end: 2, original: "bad" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
+});
+
+test("overlapping suggestions cannot compound into a corrupt replacement", () => {
+  const issues = [
+    issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),
+    issue({ id: "inner", start: 1, end: 2, original: "a", replacement: "x" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "bxd word");
+});
 
 test("a changed suggestion at the same rule and range does not inherit an old dismissal", () => {
   const oldIssue = issue({ id: "same-range", original: "bad", replacement: "good" });

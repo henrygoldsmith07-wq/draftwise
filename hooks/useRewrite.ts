@@ -46,11 +46,17 @@ export function useRewrite() {
     } catch (reason: unknown) {
       if (controller.signal.aborted || currentRun !== runId.current) return;
       setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: "", explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local", failed: true });
+    } finally {
+      if (currentRun === runId.current && abort.current === controller) abort.current = null;
     }
   }, []);
 
   const cancel = useCallback(() => {
+    // Invalidate the logical run as well as aborting its transport. This keeps a
+    // provider that resolves despite AbortSignal from resurrecting a cancelled preview.
+    runId.current += 1;
     abort.current?.abort();
+    abort.current = null;
     setPreview(null);
   }, []);
 
@@ -61,7 +67,11 @@ export function useRewrite() {
     });
   }, []);
 
-  useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => () => {
+    runId.current += 1;
+    abort.current?.abort();
+    abort.current = null;
+  }, []);
 
   return { preview, run, cancel, selectAlternative };
 }

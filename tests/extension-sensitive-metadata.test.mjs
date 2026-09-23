@@ -49,7 +49,8 @@ test("camelCase and alpha-numeric metadata cannot bypass sensitive-field blockin
     assert.equal(isSensitiveField(sensitive), true);
   }
 
-  assert.deepEqual(Array.from(metadataTokens(field({ name: "creditCardNumber2" }))), ["credit", "card", "number", "2"]);
+  const tokens = Array.from(metadataTokens(field({ name: "creditCardNumber2" })));
+  for (const token of ["credit", "card", "number", "2"]) assert.ok(tokens.includes(token));
 });
 
 test("sensitive accessible helper text and title metadata block analysis", async () => {

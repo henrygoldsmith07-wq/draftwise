@@ -55,6 +55,19 @@ test("bulk acceptance skips all overlapping suggestions rather than choosing one
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
 });
 
+test("bulk acceptance skips competing insertions at the same position", () => {
+  const issues = [
+    issue({ id: "insert-a", start: 3, end: 3, original: "", replacement: "!" }),
+    issue({ id: "insert-b", start: 3, end: 3, original: "", replacement: "?" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+});
+
+test("a single insertion remains actionable", () => {
+  const issues = [issue({ id: "insert", start: 3, end: 3, original: "", replacement: "!" })];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad! word");
+});
+
 test("overlap conflicts do not block independent suggestions", () => {
   const issues = [
     issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),

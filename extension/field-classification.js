@@ -25,9 +25,16 @@
   function frameworkMetadata(element) {
     return FRAMEWORK_METADATA_ATTRIBUTES.map((attribute) => element?.getAttribute?.(attribute));
   }
+  function containerMetadata(container) {
+    if (!container) return [];
+    return [container?.name, container?.id, container?.getAttribute?.("aria-label"), container?.getAttribute?.("autocomplete"), container?.getAttribute?.("action"), ...frameworkMetadata(container)];
+  }
   function metadataParts(element) {
     const form = element?.closest?.("form");
-    return [element?.name, element?.id, element?.type, element?.getAttribute?.("autocomplete"), element?.getAttribute?.("aria-label"), element?.getAttribute?.("placeholder"), element?.getAttribute?.("title"), associatedLabelText(element), ...frameworkMetadata(element), form?.name, form?.id, form?.getAttribute?.("aria-label"), form?.getAttribute?.("autocomplete"), form?.getAttribute?.("action"), ...frameworkMetadata(form)].map(normaliseMetadataPart).filter(Boolean);
+    const roleForm = form ? null : element?.closest?.('[role="form"]');
+    const fieldset = element?.closest?.("fieldset");
+    const legend = metadataPart(fieldset?.querySelector?.(":scope > legend")?.textContent);
+    return [element?.name, element?.id, element?.type, element?.getAttribute?.("autocomplete"), element?.getAttribute?.("aria-label"), element?.getAttribute?.("placeholder"), element?.getAttribute?.("title"), associatedLabelText(element), ...frameworkMetadata(element), ...containerMetadata(form || roleForm), legend, ...frameworkMetadata(fieldset)].map(normaliseMetadataPart).filter(Boolean);
   }
   function metadataTokens(element) { return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean); }
   function hasAny(tokens, values) { return values.some((value) => tokens.includes(value)); }

@@ -28,11 +28,25 @@ test("dismissed suggestions stay excluded from bulk acceptance", () => {
   assert.equal(applyIssueReplacements("bad word", openIssues), "good word");
 });
 
+test("dismissing a suggestion suppresses the same edit from another analysis source", () => {
+  const local = issue({ id: "local-copy", source: "local" });
+  const ai = issue({ id: "ai-copy", source: "ai" });
+  const openIssues = getOpenIssues([local, ai], [getIssueDismissalKey(local)]);
+  assert.deepEqual(openIssues, []);
+  assert.equal(applyIssueReplacements("bad word", openIssues), "bad word");
+});
+
+test("malformed persisted dismissal keys are ignored without hiding suggestions", () => {
+  const candidate = issue();
+  assert.doesNotThrow(() => getOpenIssues([candidate], ["not-json", "{}", "[1,2,3]"]));
+  assert.deepEqual(getOpenIssues([candidate], ["not-json", "{}", "[1,2,3]"]), [candidate]);
+});
+
 test("dismissal keys cannot collide when issue fields contain separators", () => {
   const dismissedIssue = issue({ id: "a:b", source: "c", original: "bad", replacement: "good" });
   const distinctIssue = issue({ id: "a", source: "b:c", original: "bad", replacement: "good" });
   assert.notEqual(getIssueDismissalKey(dismissedIssue), getIssueDismissalKey(distinctIssue));
-  assert.deepEqual(getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.id), ["a"]);
+  assert.deepEqual(getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]), []);
 });
 
 test("dismissal keys preserve boundaries in suggestion text", () => {

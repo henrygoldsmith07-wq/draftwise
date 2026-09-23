@@ -66,14 +66,14 @@ function withoutOverlappingRanges(issues: WritingIssue[]) {
 
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
   const candidates = issues.filter(
-    (issue) => hasValidIssueRange(text, issue) && issue.replacement.length > 0 && issue.replacement !== issue.original,
+    (issue) => hasValidIssueRange(text, issue) && issue.replacement !== issue.original,
   );
   const actionable = withoutOverlappingRanges(withoutDuplicateEdits(candidates))
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;
   for (const issue of actionable) {
-    if (!hasValidIssueRange(next, issue) || issue.replacement.length === 0 || next.slice(issue.start, issue.end) !== issue.original) continue;
+    if (!hasValidIssueRange(next, issue) || issue.replacement === issue.original || next.slice(issue.start, issue.end) !== issue.original) continue;
     next = `${next.slice(0, issue.start)}${issue.replacement}${next.slice(issue.end)}`;
   }
   return next;

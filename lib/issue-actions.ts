@@ -12,9 +12,40 @@ export function getIssueDismissalKey(issue: WritingIssue) {
   ]);
 }
 
+function getSemanticDismissalKey(issue: WritingIssue) {
+  return JSON.stringify([
+    issue.ruleId,
+    issue.start,
+    issue.end,
+    issue.original,
+    issue.replacement,
+  ]);
+}
+
+function getSemanticDismissalKeyFromStoredKey(key: string) {
+  try {
+    const parsed = JSON.parse(key);
+    if (!Array.isArray(parsed) || parsed.length !== 7) return null;
+    const [, ruleId, , start, end, original, replacement] = parsed;
+    if (!Number.isSafeInteger(start)
+      || !Number.isSafeInteger(end)
+      || typeof original !== "string"
+      || typeof replacement !== "string") return null;
+    return JSON.stringify([ruleId, start, end, original, replacement]);
+  } catch {
+    return null;
+  }
+}
+
 export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterable<string>) {
   const dismissed = new Set(dismissedIssueKeys);
-  return issues.filter((issue) => !dismissed.has(getIssueDismissalKey(issue)));
+  const semanticallyDismissed = new Set<string>();
+  for (const key of dismissed) {
+    const semanticKey = getSemanticDismissalKeyFromStoredKey(key);
+    if (semanticKey !== null) semanticallyDismissed.add(semanticKey);
+  }
+  return issues.filter((issue) => !dismissed.has(getIssueDismissalKey(issue))
+    && !semanticallyDismissed.has(getSemanticDismissalKey(issue)));
 }
 
 function hasValidIssueRange(text: string, issue: WritingIssue) {

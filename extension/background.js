@@ -182,6 +182,12 @@ async function initialise() {
   await syncRegisteredSites();
 }
 
+function clearAiRuntimeState() {
+  for (const controller of activeRequests.values()) controller.abort();
+  activeRequests.clear();
+  analysisCache.clear();
+}
+
 chrome.runtime.onInstalled.addListener(() => { void initialise(); });
 chrome.runtime.onStartup.addListener(() => { void initialise(); });
 chrome.storage.onChanged.addListener((changes, area) => {

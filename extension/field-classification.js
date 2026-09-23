@@ -8,6 +8,7 @@
 
   const MAX_METADATA_PART_CHARS = 512;
   const MAX_ASSOCIATED_LABELS = 8;
+  const FRAMEWORK_METADATA_ATTRIBUTES = ["data-testid", "data-test", "data-field", "data-name", "data-purpose"];
 
   function metadataPart(value) { return String(value || "").slice(0, MAX_METADATA_PART_CHARS); }
   function normaliseMetadataPart(value) {
@@ -21,9 +22,12 @@
     const wrappingLabel = metadataPart(element?.closest?.("label")?.textContent);
     return [...explicitLabels, wrappingLabel, ...referencedText(element, "aria-labelledby"), ...referencedText(element, "aria-describedby")].filter(Boolean).join(" ");
   }
+  function frameworkMetadata(element) {
+    return FRAMEWORK_METADATA_ATTRIBUTES.map((attribute) => element?.getAttribute?.(attribute));
+  }
   function metadataParts(element) {
     const form = element?.closest?.("form");
-    return [element?.name, element?.id, element?.type, element?.getAttribute?.("autocomplete"), element?.getAttribute?.("aria-label"), element?.getAttribute?.("placeholder"), element?.getAttribute?.("title"), associatedLabelText(element), form?.name, form?.id, form?.getAttribute?.("aria-label"), form?.getAttribute?.("autocomplete"), form?.getAttribute?.("action")].map(normaliseMetadataPart).filter(Boolean);
+    return [element?.name, element?.id, element?.type, element?.getAttribute?.("autocomplete"), element?.getAttribute?.("aria-label"), element?.getAttribute?.("placeholder"), element?.getAttribute?.("title"), associatedLabelText(element), ...frameworkMetadata(element), form?.name, form?.id, form?.getAttribute?.("aria-label"), form?.getAttribute?.("autocomplete"), form?.getAttribute?.("action"), ...frameworkMetadata(form)].map(normaliseMetadataPart).filter(Boolean);
   }
   function metadataTokens(element) { return metadataParts(element).join(" ").toLocaleLowerCase().split(/[^a-z0-9]+/u).filter(Boolean); }
   function hasAny(tokens, values) { return values.some((value) => tokens.includes(value)); }

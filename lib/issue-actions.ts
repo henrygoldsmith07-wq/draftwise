@@ -18,9 +18,16 @@ function hasValidIssueRange(text: string, issue: WritingIssue) {
     && issue.end - issue.start === issue.original.length;
 }
 
+function rangesOverlap(left: WritingIssue, right: WritingIssue) {
+  return left.start < right.end && right.start < left.end;
+}
+
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
-  const actionable = [...issues]
-    .filter((issue) => issue.replacement && issue.replacement !== issue.original && hasValidIssueRange(text, issue))
+  const candidates = issues.filter(
+    (issue) => issue.replacement && issue.replacement !== issue.original && hasValidIssueRange(text, issue),
+  );
+  const actionable = candidates
+    .filter((issue, index) => !candidates.some((other, otherIndex) => otherIndex !== index && rangesOverlap(issue, other)))
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;

@@ -58,6 +58,25 @@ test("health and identity-document metadata block extension analysis", async () 
   ]) assert.equal(isSensitiveField(normal), false);
 });
 
+test("diagnostic, genetic, prescription, and insurance identifiers are sensitive", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const sensitive of [
+    field({ aria: "Medical diagnosis" }),
+    field({ name: "prescriptionNumber" }),
+    field({ placeholder: "Genetic test result" }),
+    field({ title: "Insurance policy number" }),
+    field({ name: "insuranceMemberId" }),
+    field({ describedBy: "subscriber-help", referenced: { "subscriber-help": "Enter insurance subscriber ID" } }),
+  ]) assert.equal(isSensitiveField(sensitive), true);
+
+  for (const normal of [
+    field({ aria: "Medical diagnosis article draft" }),
+    field({ placeholder: "Genetic testing essay" }),
+    field({ title: "Insurance policy analysis" }),
+    field({ name: "prescriptionWritingGuide" }),
+  ]) assert.equal(isSensitiveField(normal), false);
+});
+
 test("government identifiers and birth dates are treated as sensitive metadata", async () => {
   const { isSensitiveField } = await loadClassifier();
   for (const sensitive of [

@@ -32,7 +32,11 @@ test("rewrite-context changes cancel stale previews and requests", async () => {
 
   const rewrite = await readFile(rewriteUrl, "utf8");
   assert.match(rewrite, /replacement: "", explanation:/u);
-  assert.match(rewrite, /useEffect\(\(\) => \(\) => abort\.current\?\.abort\(\), \[\]\)/u);
+  const cleanup = rewrite.match(/useEffect\(\(\) => \(\) => \{([\s\S]*?)\n  \}, \[\]\);/u);
+  assert.ok(cleanup, "rewrite unmount cleanup should exist");
+  assert.match(cleanup[1], /runId\.current \+= 1/u);
+  assert.match(cleanup[1], /abort\.current\?\.abort\(\)/u);
+  assert.match(cleanup[1], /abort\.current = null/u);
 });
 
 

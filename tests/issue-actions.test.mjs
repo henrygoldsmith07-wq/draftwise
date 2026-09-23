@@ -47,6 +47,25 @@ test("bulk acceptance rejects malformed or out-of-bounds suggestion ranges", () 
   assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
 });
 
+test("bulk acceptance fails closed on malformed runtime text payloads", () => {
+  const malformed = [
+    issue({ id: "null-original", original: null }),
+    issue({ id: "object-original", original: { text: "bad" } }),
+    issue({ id: "number-replacement", replacement: 123 }),
+    issue({ id: "object-replacement", replacement: { text: "good" } }),
+  ];
+  assert.doesNotThrow(() => applyIssueReplacements("bad word", malformed));
+  assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
+});
+
+test("malformed runtime payloads do not block independent valid suggestions", () => {
+  const issues = [
+    issue({ id: "malformed", original: null }),
+    issue({ id: "valid", start: 4, end: 8, original: "word", replacement: "term" }),
+  ];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad term");
+});
+
 test("bulk acceptance skips all overlapping suggestions rather than choosing one implicitly", () => {
   const issues = [
     issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),

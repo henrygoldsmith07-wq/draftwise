@@ -47,6 +47,14 @@ test("bulk acceptance skips stale and non-actionable suggestions", () => {
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
 });
 
+test("bulk acceptance applies a valid deletion suggestion", () => {
+  assert.equal(applyIssueReplacements("very very clear", [issue({ start: 5, end: 10, original: "very ", replacement: "" })]), "very clear");
+});
+
+test("deletion suggestions still require an exact current-text match", () => {
+  assert.equal(applyIssueReplacements("very quite clear", [issue({ start: 5, end: 10, original: "very ", replacement: "" })]), "very quite clear");
+});
+
 test("bulk acceptance rejects malformed or out-of-bounds suggestion ranges", () => {
   const malformed = [issue({ start: -3, end: 0 }), issue({ start: 3, end: 0 }), issue({ start: 0.5, end: 3.5 }), issue({ start: 6, end: 9 }), issue({ start: 0, end: 2 })];
   assert.equal(applyIssueReplacements("bad word", malformed), "bad word");

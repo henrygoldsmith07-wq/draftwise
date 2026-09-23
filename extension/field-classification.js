@@ -3,7 +3,7 @@
 
   const sensitiveTypes = new Set(["password", "hidden", "file", "checkbox", "radio", "submit", "button", "email", "tel", "number", "date", "datetime-local", "month", "week", "time", "url", "range", "color"]);
   const sensitiveAutocomplete = new Set([
-    "current-password", "new-password", "one-time-code", "webauthn", "cc-number", "cc-exp", "cc-exp-month", "cc-exp-year", "cc-csc", "security-code", "email", "tel", "name", "given-name", "additional-name", "family-name", "street-address", "address-line1", "address-line2", "address-line3", "postal-code", "country", "country-name", "cc-name", "cc-given-name", "cc-additional-name", "cc-family-name", "cc-type", "transaction-currency", "transaction-amount",
+    "current-password", "new-password", "one-time-code", "webauthn", "cc-number", "cc-exp", "cc-exp-month", "cc-exp-year", "cc-csc", "security-code", "email", "tel", "name", "given-name", "additional-name", "family-name", "street-address", "address-line1", "address-line2", "address-line3", "address-level1", "address-level2", "address-level3", "address-level4", "postal-code", "country", "country-name", "cc-name", "cc-given-name", "cc-additional-name", "cc-family-name", "cc-type", "transaction-currency", "transaction-amount", "bday", "bday-day", "bday-month", "bday-year", "sex", "photo", "impp",
   ]);
 
   const MAX_METADATA_PART_CHARS = 512;

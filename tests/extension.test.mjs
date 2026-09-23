@@ -486,3 +486,11 @@ test("stale extension AI responses are rejected before shared state mutation", a
   assert.ok(errorMutationIndex > staleGuardIndex);
   assert.ok(coverageMutationIndex > staleGuardIndex);
 });
+
+
+test("extension AI cache invalidates on provider, classifier, and AI-enabled storage changes", async () => {
+  const background = await readFile(file("extension/background.js"), "utf8");
+  assert.match(background, /function clearAiRuntimeState\(\) \{[\s\S]*?activeRequests\.values\(\)[\s\S]*?analysisCache\.clear\(\);[\s\S]*?\}/u);
+  assert.match(background, /if \(changes\.aiEnabled \|\| changes\.provider \|\| changes\.classifier\) clearAiRuntimeState\(\);/u);
+  assert.match(background, /if \(message\?\.type === "clear-ai-cache"\) \{\s*clearAiRuntimeState\(\);/u);
+});

@@ -26,7 +26,14 @@
   }
 
   function siteScriptId(value) {
-    return `draftwise-site-${normaliseHostname(value).replace(/[^a-z0-9]+/gu, "-")}`.slice(0, 80);
+    const hostname = normaliseHostname(value);
+    let hash = 2_166_136_261;
+    for (let index = 0; index < hostname.length; index += 1) {
+      hash ^= hostname.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    const readable = hostname.replace(/[^a-z0-9]+/gu, "-").slice(0, 48);
+    return `draftwise-site-${readable}-${(hash >>> 0).toString(36)}`.slice(0, 80);
   }
 
   globalThis.DraftwisePermissions = Object.freeze({ normaliseHostname, sitePatterns, providerPattern, siteScriptId });

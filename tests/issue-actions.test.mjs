@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyIssueReplacements, getOpenIssues } from "../lib/issue-actions.ts";
+import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "../lib/issue-actions.ts";
 
 const issue = (patch = {}) => ({
   id: "issue",
@@ -23,7 +23,7 @@ test("dismissed suggestions stay excluded from bulk acceptance", () => {
     issue({ id: "keep", start: 0, end: 3, original: "bad", replacement: "good" }),
     issue({ id: "dismissed", start: 4, end: 8, original: "word", replacement: "term" }),
   ];
-  const openIssues = getOpenIssues(issues, ["dismissed"]);
+  const openIssues = getOpenIssues(issues, [getIssueDismissalKey(issues[1])]);
   assert.deepEqual(openIssues.map((item) => item.id), ["keep"]);
   assert.equal(applyIssueReplacements("bad word", openIssues), "good word");
 });
@@ -34,4 +34,13 @@ test("bulk acceptance skips stale and non-actionable suggestions", () => {
     issue({ id: "same", start: 4, end: 8, original: "word", replacement: "word" }),
   ];
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+});
+
+
+test("a changed suggestion at the same rule and range does not inherit an old dismissal", () => {
+  const oldIssue = issue({ id: "same-range", original: "bad", replacement: "good" });
+  const changedIssue = issue({ id: "same-range", original: "odd", replacement: "better" });
+  const dismissed = [getIssueDismissalKey(oldIssue)];
+  assert.deepEqual(getOpenIssues([oldIssue], dismissed), []);
+  assert.deepEqual(getOpenIssues([changedIssue], dismissed).map((item) => item.original), ["odd"]);
 });

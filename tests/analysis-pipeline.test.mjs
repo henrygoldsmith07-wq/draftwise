@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   createAnalysisChunks,
@@ -31,6 +32,17 @@ test("analysis cache fingerprints are deterministic and exclude raw credential t
   const cacheKey = createAnalysisCacheKey("draft text", first, null);
   assert.ok(cacheKey.includes(first));
   assert.ok(!cacheKey.includes("sk-secret"));
+});
+
+test("analysis cache keys stay bounded and do not retain raw draft text", () => {
+  const text = "private draft sentence ".repeat(2_000);
+  const first = createAnalysisCacheKey(text, "settings-test", null);
+  const second = createAnalysisCacheKey(text, "settings-test", null);
+  const changed = createAnalysisCacheKey(`${text.slice(0, -1)}!`, "settings-test", null);
+  assert.equal(first, second);
+  assert.notEqual(first, changed);
+  assert.ok(first.length < 120, `cache key unexpectedly grew to ${first.length} characters`);
+  assert.equal(first.includes("private draft sentence"), false);
 });
 
 test("analysis settings invalidate for provider, classifier, policy, goals, and style changes", () => {
@@ -186,4 +198,11 @@ test("issue merging stays deterministic for thousands of candidates", () => {
   const elapsed = performance.now() - start;
   assert.equal(merged.length, issues.length);
   assert.ok(elapsed < 1_500, `merge took ${elapsed.toFixed(1)}ms`);
+});
+
+
+test("web analysis cache is cleared when private credential material changes", async () => {
+  const hook = await readFile(new URL("../hooks/useAnalysis.ts", import.meta.url), "utf8");
+  assert.match(hook, /cache\.current\.clear\(\);\s*\}, \[classifier\?\.apiKey, settings\.apiKey, settings\.customHeaders\]\);/u);
+  assert.doesNotMatch(hook, /settingsFingerprint[\s\S]{0,500}apiKey:\s*settings\.apiKey/u);
 });

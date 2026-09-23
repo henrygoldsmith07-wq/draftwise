@@ -39,7 +39,6 @@ interface EditorWorkspaceProps {
   activeIssueId: string | null;
   filter: IssueFilter;
   analyzing: boolean;
-  statusLabel: string;
   analysisStatusLabel: string;
   analysisError?: string | null;
   savedLabel: string;
@@ -125,7 +124,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="heading-actions">
             <Button variant="outline" size="sm" onClick={props.onNewDocument}><FileText size={14} /> New</Button>
             <Button variant="outline" size="sm" onClick={props.onRestoreSample}><RotateCw size={14} /> Sample</Button>
-            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.openIssues.some((issue) => issue.replacement && issue.replacement !== issue.original)}><CheckCheck size={14} /> Accept all</Button>
+            <Button size="sm" onClick={props.onAcceptAll} disabled={!props.visibleIssues.some((issue) => issue.replacement && issue.replacement !== issue.original)}><CheckCheck size={14} /> {props.filter === "all" ? "Accept all" : "Accept visible"}</Button>
           </div>
         </div>
 
@@ -213,7 +212,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             </Tabs>
           </div>
           <div className="suggestions-list">
-            {props.visibleIssues.length ? props.visibleIssues.map((issue) => <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} />) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.statusLabel === "Saved locally" ? "Clean so far" : "Checking your draft"}</h3><p>{props.statusLabel === "Saved locally" ? "Your draft has no open suggestions in this view." : "Local checks appear immediately while deeper analysis runs."}</p></div>}
+            {props.visibleIssues.length ? props.visibleIssues.map((issue) => <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} />) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
           </div>
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>

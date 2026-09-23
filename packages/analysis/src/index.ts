@@ -336,9 +336,20 @@ export class LruCache<T> {
   }
 }
 
+function fingerprintText(text: string) {
+  let first = 2_166_136_261;
+  let second = 2_654_435_761;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = Math.imul(first ^ code, 16_777_619);
+    second = Math.imul(second ^ (code + ((index & 255) << 8)), 2_246_822_519);
+  }
+  return `${text.length}-${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
+}
+
 export function createAnalysisCacheKey(text: string, settingsKey: string, range: ChangedRange | null) {
   const rangeKey = range ? `${range.start}:${range.end}:${range.previousEnd}` : "full";
-  return `${settingsKey}:${rangeKey}:${text}`;
+  return `${settingsKey}:${rangeKey}:text-${fingerprintText(text)}`;
 }
 
 function stableSerialize(value: unknown): string {

@@ -58,6 +58,8 @@ const CATEGORY_ALIASES: Record<string, IssueCategory> = {
 
 const VALID_SEVERITIES = new Set<IssueSeverity>(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
+const MAX_PROVIDER_ISSUES_PER_RESPONSE = 250;
+const MAX_PROVIDER_ERROR_RESPONSE_BYTES = 16_384;
 
 function providerAnalysisNow() {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -78,7 +80,6 @@ interface ProviderIssue {
 interface ProviderPayload {
   issues: ProviderIssue[];
   tone: string[];
-  scores: Partial<Record<"correctness" | "clarity" | "conciseness" | "readability" | "engagement" | "consistency" | "goalAlignment" | "overall", number>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -88,7 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseProviderPayload(value: unknown): ProviderPayload | null {
   const parsed = parseJsonContent(value);
   if (!isRecord(parsed) || !Array.isArray(parsed.issues)) return null;
-  const rawIssues = parsed.issues;
+  const rawIssues = parsed.issues.slice(0, MAX_PROVIDER_ISSUES_PER_RESPONSE);
   const issues = rawIssues.flatMap((raw): ProviderIssue[] => {
     if (!isRecord(raw) || typeof raw.start !== "number" || !Number.isFinite(raw.start) || typeof raw.end !== "number" || !Number.isFinite(raw.end) || typeof raw.original !== "string" || typeof raw.category !== "string" || typeof raw.severity !== "string") return [];
     return [{
@@ -104,9 +105,10 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
       ruleId: typeof raw.ruleId === "string" ? raw.ruleId : undefined,
     }];
   });
-  const rawScores = isRecord(parsed.scores) ? parsed.scores : {};
-  const scores = Object.fromEntries(Object.entries(rawScores).filter(([, score]) => typeof score === "number" && Number.isFinite(score))) as ProviderPayload["scores"];
-  return { issues, tone: Array.isArray(parsed.tone) ? parsed.tone.filter((tone): tone is string => typeof tone === "string") : [], scores };
+  const tone = Array.isArray(parsed.tone)
+    ? parsed.tone.filter((item): item is string => typeof item === "string").slice(0, 8)
+    : [];
+  return { issues, tone };
 }
 
 export class ProviderError extends Error {
@@ -131,7 +133,7 @@ export function parseCustomHeaders(value: string): Record<string, string> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
       Object.entries(parsed)
-        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|set-cookie|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
+        .filter(([key, item]) => typeof item === "string" && key.length < 80 && !/^(authorization|cookie|host|content-length|content-type|origin|set-cookie|transfer-encoding|proxy-authorization|proxy-authenticate|x-api-key)$/iu.test(key))
         .map(([key, item]) => [key, String(item).slice(0, 500)]),
     );
   } catch {
@@ -216,6 +218,40 @@ function validateProviderContent(content: string | null, kind: ProviderResponseK
     throw new ProviderError("invalid-json", "The provider returned an invalid Draftwise rewrite.");
   }
   return content;
+}
+
+async function readResponseTextLimited(response: Response, maxBytes: number) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    return { text: "", truncated: true };
+  }
+
+  if (!response.body || typeof response.body.getReader !== "function") {
+    const text = await response.text();
+    return { text: text.slice(0, maxBytes), truncated: text.length > maxBytes };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { text, truncated: true };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return { text, truncated: false };
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function providerErrorForStatus(status: number) {
@@ -333,19 +369,19 @@ async function requestProvider(
       { service: "provider", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry },
     );
     if (!response.ok) {
-      const responseText = await response.text().catch(() => "");
-      if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(responseText)) return call(false);
+      const errorBody = await readResponseTextLimited(response, MAX_PROVIDER_ERROR_RESPONSE_BYTES).catch(() => ({ text: "", truncated: true }));
+      if (includeResponseFormat && response.status === 400 && /response_format|json_object|unsupported/iu.test(errorBody.text)) return call(false);
       throw providerErrorForStatus(response.status);
     }
-    const declaredLength = Number(response.headers.get("content-length") || 0);
-    if (declaredLength > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
     let responseText: string;
     try {
-      responseText = await response.text();
-    } catch {
+      const body = await readResponseTextLimited(response, MAX_PROVIDER_RESPONSE_CHARS);
+      if (body.truncated) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
+      responseText = body.text;
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
       throw new ProviderError("invalid-json", "The provider returned a response that was not valid JSON.");
     }
-    if (responseText.length > MAX_PROVIDER_RESPONSE_CHARS) throw new ProviderError("invalid-json", "The provider response was too large to process safely.");
     let payload: unknown;
     try {
       payload = JSON.parse(responseText);
@@ -393,10 +429,20 @@ function normaliseCategory(value: string): IssueCategory | null {
   return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
 }
 
+function aiIssueFingerprint(ruleId: string, original: string, replacement: string) {
+  const value = `${ruleId}\u001f${original}\u001f${replacement}`;
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?: string): WritingIssue[] {
   const parsed = parseProviderPayload(value);
   if (!parsed) return [];
-  return parsed.issues.flatMap((candidate, index) => {
+  return parsed.issues.flatMap((candidate) => {
     const start = Math.max(0, Math.floor(candidate.start));
     const end = Math.min(sourceText.length, Math.floor(candidate.end));
     const category = normaliseCategory(candidate.category);
@@ -405,14 +451,16 @@ export function parseAnalysisIssues(value: unknown, sourceText: string, chunkId?
     const original = sourceText.slice(start, end);
     if (!original || original !== candidate.original) return [];
     const confidence = Math.max(0, Math.min(1, candidate.confidence ?? 0.72));
+    const ruleId = candidate.ruleId?.slice(0, 80) || "ai-suggestion";
+    const replacement = candidate.replacement.slice(0, 1000);
     return [{
-      id: `ai-${chunkId ?? "full"}-${start}-${end}-${index}`,
-      ruleId: candidate.ruleId?.slice(0, 80) || "ai-suggestion",
+      id: `ai-${chunkId ?? "full"}-${start}-${end}-${aiIssueFingerprint(ruleId, original, replacement)}`,
+      ruleId,
       chunkId,
       start,
       end,
       original,
-      replacement: candidate.replacement.slice(0, 1000),
+      replacement,
       category,
       severity,
       confidence,
@@ -651,51 +699,192 @@ export async function analyzeWithProvider(
 
 function localRewrite(text: string, instruction: string): string {
   const lower = instruction.toLocaleLowerCase();
-  let result = text.replace(/\s{2,}/gu, " ").trim();
+  let result = text;
+
   if (lower.includes("shorten") || lower.includes("concise")) {
-    result = result.replace(/\b(?:actually|basically|just|really|quite|very|perhaps|simply)\b\s*/giu, "").replace(/\bin order to\b/giu, "to").replace(/\bat this point in time\b/giu, "now");
+    result = result
+      .replace(/\bin order to\b/giu, "to")
+      .replace(/\bat this point in time\b/giu, "now")
+      .replace(/\bdue to the fact that\b/giu, "because")
+      .replace(/\bin the event that\b/giu, "if");
   }
-  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) result = result.replace(/\bcan't\b/giu, "cannot").replace(/\bwon't\b/giu, "will not").replace(/\bget\b/giu, "receive");
-  if (lower.includes("casual") || lower.includes("friendly")) result = result.replace(/\bcannot\b/giu, "can't").replace(/\bwill not\b/giu, "won't");
-  if (lower.includes("confident")) result = result.replace(/\b(might|maybe|perhaps|could)\b/giu, "can");
-  if (lower.includes("simplify")) result = result.replace(/\butilize\b/giu, "use").replace(/\bapproximately\b/giu, "about");
+
+  if (lower.includes("formal") || lower.includes("professional") || lower.includes("academic")) {
+    result = result
+      .replace(/\bcan't\b/giu, "cannot")
+      .replace(/\bwon't\b/giu, "will not")
+      .replace(/\bdon't\b/giu, "do not")
+      .replace(/\bdoesn't\b/giu, "does not")
+      .replace(/\bdidn't\b/giu, "did not")
+      .replace(/\bisn't\b/giu, "is not")
+      .replace(/\baren't\b/giu, "are not")
+      .replace(/\bwasn't\b/giu, "was not")
+      .replace(/\bweren't\b/giu, "were not")
+      .replace(/\bcouldn't\b/giu, "could not")
+      .replace(/\bwouldn't\b/giu, "would not")
+      .replace(/\bshouldn't\b/giu, "should not");
+  }
+
+  if (lower.includes("casual") || lower.includes("friendly")) {
+    result = result
+      .replace(/\bcannot\b/giu, "can't")
+      .replace(/\bwill not\b/giu, "won't")
+      .replace(/\bdo not\b/giu, "don't")
+      .replace(/\bdoes not\b/giu, "doesn't")
+      .replace(/\bis not\b/giu, "isn't")
+      .replace(/\bare not\b/giu, "aren't");
+  }
+
+  if (lower.includes("simplify")) {
+    result = result
+      .replace(/\butilize\b/giu, "use")
+      .replace(/\bcommence\b/giu, "start")
+      .replace(/\bpurchase\b/giu, "buy")
+      .replace(/\bassist\b/giu, "help");
+  }
+
   return result || text;
 }
 
-function protectedTokens(text: string) {
-  const patterns = [
-    /https?:\/\/[^\s)]+/giu,
-    /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu,
-    /\b(?:\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu,
-    /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu,
-    /\b\d[\d,.]*%/gu,
-    /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b/giu,
-    /\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/g,
-    /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu,
-    /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu,
-    /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu,
-    /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu,
-    /\b\d[\d,.]*\b/gu,
-  ];
-  return [...new Set(patterns.flatMap((pattern) => [...text.matchAll(pattern)].map((match) => match[0])))];
+type ProtectedTokenKind =
+  | "url"
+  | "email"
+  | "date"
+  | "currency"
+  | "percentage"
+  | "identifier"
+  | "uuid"
+  | "filename"
+  | "model"
+  | "quote"
+  | "number";
+
+const PROTECTED_TOKEN_PATTERNS: Array<{ kind: Exclude<ProtectedTokenKind, "quote" | "number">; pattern: RegExp }> = [
+  { kind: "url", pattern: /https?:\/\/[^\s)]+/giu },
+  { kind: "email", pattern: /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu },
+  { kind: "date", pattern: /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu },
+  { kind: "currency", pattern: /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu },
+  { kind: "percentage", pattern: /\b\d[\d,.]*%/gu },
+  { kind: "identifier", pattern: /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b|\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/giu },
+  { kind: "uuid", pattern: /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu },
+  { kind: "filename", pattern: /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu },
+  { kind: "model", pattern: /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu },
+];
+
+const QUOTED_PASSAGE_PATTERN = /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu;
+const GENERIC_NUMBER_PATTERN = /\b\d[\d,.]*\b/gu;
+
+interface ProtectedRange {
+  start: number;
+  end: number;
 }
 
-function explicitlyAllowsProtectedChanges(request: RewriteRequest) {
-  if (request.allowProtectedChanges) return true;
-  return /\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,80}\b(?:number|date|percentage|percent|currency|url|email|id|identifier|quote|filename|model|version|value)s?\b/iu.test(request.instruction);
+function rangesOverlap(left: ProtectedRange, right: ProtectedRange) {
+  return left.start < right.end && left.end > right.start;
 }
 
-function validateRewrite(original: string, replacement: string, allowProtectedChanges = false) {
-  if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
-  if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
-  if (!allowProtectedChanges) {
-    for (const token of protectedTokens(original)) {
-      const originalCount = original.split(token).length - 1;
-      const replacementCount = replacement.split(token).length - 1;
-      if (replacementCount < originalCount) throw new ProviderError("invalid-json", "The rewrite changed a protected URL, value, identifier, or quoted passage. Nothing was changed.");
+function protectedKindsAllowedByInstruction(instruction: string) {
+  const value = String(instruction || "");
+  const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
+  const directNegation = String.raw`\b(?:do\s+not|don't|dont|never)\s+(?:change|update|replace|adjust|convert|reformat|correct)\b(?:(?![,.;!?]).){0,100}`;
+  const withoutChange = String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting)\b(?:(?![,.;!?]).){0,100}`;
+  const allowed = new Set<ProtectedTokenKind>();
+  const permits = (target: string) => {
+    const denied = new RegExp(directNegation + target, "iu").test(value) || new RegExp(withoutChange + target, "iu").test(value);
+    return !denied && new RegExp(edit + target, "iu").test(value);
+  };
+  if (permits(String.raw`\bdates?\b`)) allowed.add("date");
+  if (permits(String.raw`\b(?:percentage|percent)s?\b`)) allowed.add("percentage");
+  if (permits(String.raw`\bcurrenc(?:y|ies)\b`)) allowed.add("currency");
+  if (permits(String.raw`\b(?:url|link)s?\b`)) allowed.add("url");
+  if (permits(String.raw`\bemail(?:\s+address)?s?\b`)) allowed.add("email");
+  if (permits(String.raw`\b(?:id|identifier|ticket|reference|case)s?\b`)) {
+    allowed.add("identifier");
+    allowed.add("uuid");
+  }
+  if (permits(String.raw`\b(?:quote|quotation|quoted\s+passage)s?\b`)) allowed.add("quote");
+  if (permits(String.raw`\b(?:filename|file\s+name)s?\b`)) allowed.add("filename");
+  if (permits(String.raw`\b(?:model|version)s?\b`)) allowed.add("model");
+  if (permits(String.raw`\b(?:number|value)s?\b`)) allowed.add("number");
+  return allowed;
+}
+
+function normaliseAllowedTokensInQuote(value: string, allowedKinds: Set<ProtectedTokenKind>) {
+  let result = value;
+  for (const { kind, pattern } of PROTECTED_TOKEN_PATTERNS) {
+    if (!allowedKinds.has(kind)) continue;
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, `[${kind}]`);
+  }
+  if (allowedKinds.has("number")) {
+    GENERIC_NUMBER_PATTERN.lastIndex = 0;
+    result = result.replace(GENERIC_NUMBER_PATTERN, "[number]");
+  }
+  return result;
+}
+
+function protectedTokenCounts(text: string, allowedKinds = new Set<ProtectedTokenKind>()) {
+  const counts = new Map<string, number>();
+  const claimed: ProtectedRange[] = [];
+  const add = (kind: ProtectedTokenKind, token: string) => {
+    if (allowedKinds.has(kind)) return;
+    const key = `${kind}\u001f${token}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  };
+
+  for (const { kind, pattern } of PROTECTED_TOKEN_PATTERNS) {
+    pattern.lastIndex = 0;
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      const range = { start, end: start + match[0].length };
+      if (claimed.some((existing) => rangesOverlap(existing, range))) continue;
+      claimed.push(range);
+      add(kind, match[0]);
     }
   }
-  return replacement.trim();
+
+  const quotedRanges: ProtectedRange[] = [];
+  QUOTED_PASSAGE_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(QUOTED_PASSAGE_PATTERN)) {
+    const start = match.index ?? 0;
+    const range = { start, end: start + match[0].length };
+    quotedRanges.push(range);
+    if (!allowedKinds.has("quote")) add("quote", normaliseAllowedTokensInQuote(match[0], allowedKinds));
+  }
+
+  GENERIC_NUMBER_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(GENERIC_NUMBER_PATTERN)) {
+    const start = match.index ?? 0;
+    const range = { start, end: start + match[0].length };
+    if (claimed.some((existing) => rangesOverlap(existing, range)) || quotedRanges.some((existing) => rangesOverlap(existing, range))) continue;
+    add("number", match[0]);
+  }
+  return counts;
+}
+
+function hasExactProtectedTokenMultiset(original: string, replacement: string, allowedKinds: Set<ProtectedTokenKind>) {
+  const originalTokens = protectedTokenCounts(original, allowedKinds);
+  const replacementTokens = protectedTokenCounts(replacement, allowedKinds);
+  if (originalTokens.size !== replacementTokens.size) return false;
+  for (const [token, count] of originalTokens) {
+    if (replacementTokens.get(token) !== count) return false;
+  }
+  return true;
+}
+
+function preserveBoundaryWhitespace(original: string, replacement: string) {
+  const leading = original.match(/^\s*/u)?.[0] ?? "";
+  const trailing = original.match(/\s*$/u)?.[0] ?? "";
+  return `${leading}${replacement.trim()}${trailing}`;
+}
+
+function validateRewrite(original: string, replacement: string, options: { allowAllProtectedChanges?: boolean; allowedKinds?: Set<ProtectedTokenKind> } = {}) {
+  if (!replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an empty rewrite. Nothing was changed.");
+  if (/<[^>]+>/u.test(replacement)) throw new ProviderError("invalid-json", "The provider returned markup. Nothing was changed.");
+  if (!options.allowAllProtectedChanges && !hasExactProtectedTokenMultiset(original, replacement, options.allowedKinds ?? new Set())) {
+    throw new ProviderError("invalid-json", "The rewrite changed, removed, duplicated, or introduced a protected URL, value, identifier, or quoted passage outside the requested change. Nothing was changed.");
+  }
+  return preserveBoundaryWhitespace(original, replacement);
 }
 
 export async function rewriteWithProvider(
@@ -711,15 +900,18 @@ export async function rewriteWithProvider(
   const parsed = parseJsonContent(response);
   if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
   const explanation = typeof parsed.explanation === "string" ? parsed.explanation : "";
-  const allowProtectedChanges = explicitlyAllowsProtectedChanges(request);
-  const replacement = validateRewrite(request.text, parsed.replacement, allowProtectedChanges);
+  const rewriteProtection = {
+    allowAllProtectedChanges: request.allowProtectedChanges === true,
+    allowedKinds: request.allowProtectedChanges === true ? new Set<ProtectedTokenKind>() : protectedKindsAllowedByInstruction(request.instruction),
+  };
+  const replacement = validateRewrite(request.text, parsed.replacement, rewriteProtection);
   const alternatives = Array.isArray(parsed.alternatives)
     ? parsed.alternatives
       .filter((alternative): alternative is string => typeof alternative === "string" && Boolean(alternative.trim()) && alternative.trim() !== replacement)
       .slice(0, 2)
       .flatMap((alternative) => {
         try {
-          return [validateRewrite(request.text, alternative, allowProtectedChanges)];
+          return [validateRewrite(request.text, alternative, rewriteProtection)];
         } catch {
           return [];
         }
@@ -893,11 +1085,21 @@ export function normaliseTriageDecision(value: unknown): TriageDecision | null {
 /** Minimise transmitted text: truncate to a word boundary and redact structured tokens. */
 export function redactExcerptForClassifier(text: string) {
   return String(text || "")
+    .replace(/-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----[\s\S]*?-----END (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----/gu, "[private-key]")
+    .replace(/-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*?-----END PGP PRIVATE KEY BLOCK-----/gu, "[private-key]")
+    .replace(/-----BEGIN (?:(?:RSA|EC|DSA|OPENSSH) )?PRIVATE KEY-----[\s\S]*/gu, "[private-key]")
+    .replace(/-----BEGIN PGP PRIVATE KEY BLOCK-----[\s\S]*/gu, "[private-key]")
+    .replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s<>"']+/giu, "[connection-string]")
     .replace(/https?:\/\/[^\s<>"']+/giu, "[url]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/giu, "[email]")
     .replace(/["“'](?:sk[-_][A-Za-z0-9_-]{8,}|[A-Za-z0-9+/=_-]{24,})["”']/gu, "[quoted-secret]")
     .replace(/\b(?:sk|pk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gu, "[token]")
-    .replace(/\b(?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=:-]{6,}["']?/giu, "[secret]")
+    .replace(/\b(?:github_pat|npm)_[A-Za-z0-9_-]{12,}\b/gu, "[token]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu, "[token]")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/gu, "[token]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/giu, "[bearer-token]")
+    .replace(/\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/gu, "[jwt]")
+    .replace(/\b(?:api[_ -]?key|access[_ -]?token|secret|password|authorization)\s*[:=]\s*["']?[A-Za-z0-9_./+=:-]{6,}["']?/giu, "[secret]")
     .replace(/\b(?:GPT|Claude|Gemini|Llama|OpenAI)\s*[-_ ]?\d+[A-Za-z]?(?:\.\d+){0,3}(?:[-_][A-Za-z0-9]+)?\b/giu, "[model]")
     .replace(/\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|tsv|json|xml|md|png|jpe?g|zip|tar|gz)\b/giu, "[filename]")
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu, "[uuid]")
@@ -1235,15 +1437,15 @@ async function requestClassifierDecisions(
       { service: "classifier", signal: timeoutController.signal, onRequest: options.onRequest, onRetry: options.onRetry },
     );
     if (!response.ok) throw classifierErrorForStatus(response.status);
-    const declaredLength = Number(response.headers.get("content-length") || 0);
-    if (declaredLength > 500_000) throw new ClassifierError("invalid-json", "The classifier response was too large.");
     let responseText: string;
     try {
-      responseText = await response.text();
-    } catch {
+      const body = await readResponseTextLimited(response, 500_000);
+      if (body.truncated) throw new ClassifierError("invalid-json", "The classifier response was too large.");
+      responseText = body.text;
+    } catch (error) {
+      if (error instanceof ClassifierError) throw error;
       throw new ClassifierError("invalid-json", "The classifier returned an unreadable response.");
     }
-    if (responseText.length > 500_000) throw new ClassifierError("invalid-json", "The classifier response was too large.");
     let payload: unknown;
     try {
       payload = JSON.parse(responseText);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeDocument, analyzeLocally, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
+import { analyzeDocument, analyzeLocally, analyzeLocallyIncremental, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
 
 test("local analysis catches typos, punctuation, and repetition", () => {
   const result = analyzeLocally("This is repeatd  wording wording, recieve it!!");
@@ -110,4 +110,50 @@ test("debug analysis diagnostics expose timing without changing normal issue met
 test("readability keeps a legitimate zero score instead of falling back", () => {
   const stats = { words: 10, characters: 40, sentences: 1, paragraphs: 1, readingTime: 1, readability: 0, longSentences: 0, fillerWords: 0, passiveVoice: 0, passiveVoicePercentage: 0, averageSentenceLength: 10, longestSentence: "", sentenceLengths: [10], paragraphLengths: [10], vocabularyDiversity: 0.8, repeatedWords: [], repeatedPhrases: [], fillerWordFrequency: [], commonWords: [] };
   assert.equal(scoreWriting(stats, [], { audience: "general", intent: "inform", tone: "neutral" }, "Short text.").readability, 0);
+});
+
+
+test("issue IDs change when different text produces the same rule at the same span", () => {
+  const first = analyzeLocally("repeatd").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  const second = analyzeLocally("recieve").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  const repeated = analyzeLocally("repeatd").issues.find((issue) => issue.ruleId === "spelling-common-typo");
+  assert.ok(first);
+  assert.ok(second);
+  assert.ok(repeated);
+  assert.equal(first.start, second.start);
+  assert.equal(first.end, second.end);
+  assert.notEqual(first.original, second.original);
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.id, repeated.id);
+});
+
+test("passive voice percentage measures affected sentences and never exceeds 100", () => {
+  const repeatedPassive = getWritingStats("The draft was written and was edited.");
+  assert.equal(repeatedPassive.passiveVoice, 2);
+  assert.equal(repeatedPassive.passiveVoicePercentage, 100);
+
+  const mixed = getWritingStats("The draft was written. We review it.");
+  assert.equal(mixed.passiveVoice, 1);
+  assert.equal(mixed.sentences, 2);
+  assert.equal(mixed.passiveVoicePercentage, 50);
+});
+
+test("incremental analysis rekeys shifted retained issues to match full analysis", () => {
+  const previousText = `${"context ".repeat(120)}repeatd`;
+  const previous = analyzeLocally(previousText);
+  const nextText = `Intro. ${previousText}`;
+  const incremental = analyzeLocallyIncremental(
+    previousText,
+    nextText,
+    previous.issues,
+    { start: 0, end: 7, previousEnd: 0 },
+  );
+  const full = analyzeLocally(nextText);
+  const incrementalIssue = incremental.issues.find((issue) => issue.original === "repeatd");
+  const fullIssue = full.issues.find((issue) => issue.original === "repeatd");
+  assert.ok(incrementalIssue);
+  assert.ok(fullIssue);
+  assert.equal(incrementalIssue.start, fullIssue.start);
+  assert.equal(incrementalIssue.end, fullIssue.end);
+  assert.equal(incrementalIssue.id, fullIssue.id);
 });

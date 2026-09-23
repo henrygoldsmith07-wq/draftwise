@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { rewriteWithProvider, ProviderError } from "@/packages/ai/src";
 import type { ProviderSettings, RewriteResult, StylePreferences, WritingGoals } from "@/packages/types/src";
 export { createRewriteRetryArgs } from "@/lib/rewrite-retry";
@@ -14,6 +14,7 @@ export interface RewritePreviewState extends RewriteResult {
   style: StylePreferences;
   aiEnabled: boolean;
   loading?: boolean;
+  failed?: boolean;
 }
 
 export function useRewrite() {
@@ -44,12 +45,18 @@ export function useRewrite() {
       setPreview({ ...result, label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled });
     } catch (reason: unknown) {
       if (controller.signal.aborted || currentRun !== runId.current) return;
-      setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: args.text, explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local" });
+      setPreview({ label: args.label, instruction: args.instruction, original: args.text, selection: args.selection, goals: args.goals, style: args.style, aiEnabled: args.aiEnabled, replacement: "", explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local", failed: true });
+    } finally {
+      if (currentRun === runId.current && abort.current === controller) abort.current = null;
     }
   }, []);
 
   const cancel = useCallback(() => {
+    // Invalidate the logical run as well as aborting its transport. This keeps a
+    // provider that resolves despite AbortSignal from resurrecting a cancelled preview.
+    runId.current += 1;
     abort.current?.abort();
+    abort.current = null;
     setPreview(null);
   }, []);
 
@@ -58,6 +65,12 @@ export function useRewrite() {
       const alternative = current?.alternatives?.[index];
       return current && alternative ? { ...current, replacement: alternative } : current;
     });
+  }, []);
+
+  useEffect(() => () => {
+    runId.current += 1;
+    abort.current?.abort();
+    abort.current = null;
   }, []);
 
   return { preview, run, cancel, selectAlternative };

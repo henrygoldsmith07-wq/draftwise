@@ -1,8 +1,12 @@
 import type { WritingIssue } from "@/packages/types/src";
 
-export function getOpenIssues(issues: WritingIssue[], dismissedIssueIds: Iterable<string>) {
-  const dismissed = new Set(dismissedIssueIds);
-  return issues.filter((issue) => !dismissed.has(issue.id));
+export function getIssueDismissalKey(issue: WritingIssue) {
+  return `${issue.id}:${issue.source}:${issue.original}:${issue.replacement}`;
+}
+
+export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterable<string>) {
+  const dismissed = new Set(dismissedIssueKeys);
+  return issues.filter((issue) => !dismissed.has(getIssueDismissalKey(issue)));
 }
 
 export function applyIssueReplacements(text: string, issues: WritingIssue[]) {

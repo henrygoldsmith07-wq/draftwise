@@ -257,9 +257,19 @@ class LruCache {
         return this.values.size;
     }
 }
+function fingerprintText(text) {
+    let first = 2_166_136_261;
+    let second = 2_654_435_761;
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        first = Math.imul(first ^ code, 16_777_619);
+        second = Math.imul(second ^ (code + ((index & 255) << 8)), 2_246_822_519);
+    }
+    return `${text.length}-${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
+}
 function createAnalysisCacheKey(text, settingsKey, range) {
     const rangeKey = range ? `${range.start}:${range.end}:${range.previousEnd}` : "full";
-    return `${settingsKey}:${rangeKey}:${text}`;
+    return `${settingsKey}:${rangeKey}:text-${fingerprintText(text)}`;
 }
 function stableSerialize(value) {
     if (value === null || typeof value !== "object")
@@ -566,6 +576,17 @@ function preserveCase(original, replacement) {
         return replacement[0].toUpperCase() + replacement.slice(1);
     return replacement;
 }
+function issueTextFingerprint(text) {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0).toString(36);
+}
+function createIssueId(ruleId, start, end, original) {
+    return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+}
 function boundedEditDistance(left, right, limit = 2) {
     if (Math.abs(left.length - right.length) > limit)
         return limit + 1;
@@ -784,7 +805,7 @@ function makeIssue(ruleId, start, end, original, replacement, category, severity
     if (!original || end <= start || shouldIgnore(ruleId, original, preferences))
         return null;
     return {
-        id: `${ruleId}-${start}-${end}`,
+        id: createIssueId(ruleId, start, end, original),
         ruleId,
         start,
         end,
@@ -1090,7 +1111,9 @@ function getWritingStats(text, document = parseDocument(text)) {
     const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
     const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
     const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] });
+    const passiveVoicePattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
     const passiveVoice = [...text.matchAll(/\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu)].length;
+    const passiveVoiceSentences = sentences.filter((sentence) => passiveVoicePattern.test(sentence.text)).length;
     return {
         words,
         characters: text.length,
@@ -1101,7 +1124,7 @@ function getWritingStats(text, document = parseDocument(text)) {
         longSentences: sentenceLengths.filter((length) => length > 32).length,
         fillerWords: sentenceWordValues.filter((word) => FILLER_WORDS.has(word)).length,
         passiveVoice,
-        passiveVoicePercentage: sentences.length ? Math.round((passiveVoice / sentences.length) * 100) : 0,
+        passiveVoicePercentage: sentences.length ? Math.round((passiveVoiceSentences / sentences.length) * 100) : 0,
         averageSentenceLength: sentenceLengths.length ? Math.round((words / sentenceLengths.length) * 10) / 10 : 0,
         longestSentence: longest.text,
         sentenceLengths,
@@ -1287,12 +1310,14 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
         const shift = issue.start >= previousRegion.end ? delta : 0;
         const start = issue.start + shift;
         const end = issue.end + shift;
-        return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original ? [{ ...issue, start, end }] : [];
+        return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original
+            ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
+            : [];
     });
     const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
     const recalculated = region.issues.map((issue) => ({
         ...issue,
-        id: `${issue.ruleId}-${issue.start + nextRegion.start}-${issue.end + nextRegion.start}`,
+        id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
         start: issue.start + nextRegion.start,
         end: issue.end + nextRegion.start,
     }));

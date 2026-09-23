@@ -29,6 +29,9 @@
 | Sensitive-field leakage | Extension tokenises field metadata, blocks explicit password/payment/OTP/credential patterns, skips hidden/disabled/read-only fields, and lets users exclude or disable sites. |
 | Local storage overwrite on hydration | Persistence writes only after the versioned workspace has loaded. |
 | Provider URL interception | HTTPS is required except for explicit localhost development hosts. |
+| Clickjacking / framing | Web responses deny framing with CSP `frame-ancestors 'none'` and `X-Frame-Options: DENY`. |
+| Referrer leakage and MIME sniffing | Web responses use `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff`. |
+| Unneeded browser capabilities | A restrictive Permissions-Policy disables camera, microphone, geolocation, payment, and USB access. |
 
 ## Residual risk
 

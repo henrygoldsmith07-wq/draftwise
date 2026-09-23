@@ -4,19 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, CircleHelp, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
 import { categoryMatches } from "@/components/draftwise/EditorPrimitives";
-import { applyIssueReplacements, getOpenIssues } from "@/lib/issue-actions";
+import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
+import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { useHistory } from "@/hooks/useHistory";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
-import { getAiReviewStatus, type WritingGoals, type WritingIssue } from "@/packages/types/src";
+import { getAiReviewStatus, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
 
 const SAMPLE_DOCUMENT = `The best writing systems make the next sentence easier to write. Draftwise keeps your words private by default, then gives you a clear path from rough idea to finished copy.
@@ -31,7 +32,7 @@ type IssueFilter = "all" | "grammar" | "style";
 function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const shortcuts = [
     ["Save locally", "⌘ / Ctrl + S"],
-    ["Accept all suggestions", "⌘ / Ctrl + Enter"],
+    ["Accept visible suggestions", "⌘ / Ctrl + Enter"],
     ["Close rewrite preview", "Esc"],
     ["Open shortcuts", "?"],
   ];
@@ -48,9 +49,47 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   );
 }
 
+function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Start a new draft?</DialogTitle>
+          <DialogDescription>
+            This replaces the current local document with a blank draft. The current text remains available through Undo during this session.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Start new draft</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Clear all local Draftwise data?</DialogTitle>
+          <DialogDescription>
+            This removes the local draft, preferences, provider and classifier credentials, and migrated Draftwise storage from this browser. This action cannot be undone after the page is closed.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Clear local data</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
-  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
+  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   const { commit, undo: undoHistory, redo: redoHistory, reset: resetHistory, canUndo, canRedo } = useHistory(workspace.draft);
   const historyReady = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -60,9 +99,11 @@ export default function Home() {
   const [view, setView] = useState<WorkspaceView>("write");
   const [filter, setFilter] = useState<IssueFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
-  const [dismissedIssueIds, setDismissedIssueIds] = useState<string[]>([]);
+  const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [newDraftOpen, setNewDraftOpen] = useState(false);
+  const [clearDataOpen, setClearDataOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [customInstruction, setCustomInstruction] = useState("");
@@ -93,16 +134,37 @@ export default function Home() {
   }, [commit, updateWorkspace]);
 
   const updateGoals = useCallback((patch: Partial<WritingGoals>) => {
+    cancelRewrite();
     updateWorkspace((current) => ({ ...current, goals: { ...current.goals, ...patch } }));
-  }, [updateWorkspace]);
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateStyle = useCallback((style: StylePreferences) => {
+    cancelRewrite();
+    updateWorkspace({ style });
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateProvider = useCallback((provider: ProviderSettings) => {
+    cancelRewrite();
+    updateWorkspace({ provider });
+  }, [cancelRewrite, updateWorkspace]);
+
+  const updateAiEnabled = useCallback((aiEnabled: boolean) => {
+    if (!aiEnabled) cancelRewrite();
+    updateWorkspace({ aiEnabled });
+  }, [cancelRewrite, updateWorkspace]);
 
   const openIssues = useMemo(
-    () => getOpenIssues(issues, dismissedIssueIds),
-    [issues, dismissedIssueIds],
+    () => getOpenIssues(issues, dismissedIssueKeys),
+    [issues, dismissedIssueKeys],
   );
   const visibleIssues = useMemo(
     () => openIssues.filter((issue) => categoryMatches(issue, filter)),
     [openIssues, filter],
+  );
+
+  const currentActiveIssueId = useMemo(
+    () => activeIssueId && openIssues.some((issue) => issue.id === activeIssueId) ? activeIssueId : null,
+    [activeIssueId, openIssues],
   );
 
   const acceptIssue = useCallback((issue: WritingIssue) => {
@@ -113,17 +175,19 @@ export default function Home() {
   }, [updateDraft, workspace.draft]);
 
   const acceptAll = useCallback(() => {
-    const next = applyIssueReplacements(workspace.draft, openIssues);
+    const next = applyIssueReplacements(workspace.draft, visibleIssues);
     if (next !== workspace.draft) updateDraft(next);
     setActiveIssueId(null);
-  }, [openIssues, updateDraft, workspace.draft]);
+  }, [updateDraft, visibleIssues, workspace.draft]);
 
   const applyHistory = useCallback((next: string | undefined) => {
     if (next !== undefined) {
+      cancelRewrite();
       updateDraft(next, false);
+      setSelection({ start: 0, end: 0 });
       setActiveIssueId(null);
     }
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const undo = useCallback(() => applyHistory(undoHistory()), [applyHistory, undoHistory]);
   const redo = useCallback(() => applyHistory(redoHistory()), [applyHistory, redoHistory]);
@@ -134,7 +198,7 @@ export default function Home() {
   }, [requestRewrite, selectedText, selection, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
 
   const applyRewrite = useCallback((insert: boolean) => {
-    if (!rewritePreview || rewritePreview.loading) return;
+    if (!rewritePreview || !canApplyRewritePreview(rewritePreview)) return;
     const { start, end } = rewritePreview.selection;
     if (workspace.draft.slice(start, end) !== rewritePreview.original) { cancelRewrite(); return; }
     const next = insert ? `${workspace.draft.slice(0, end)}\n${rewritePreview.replacement}${workspace.draft.slice(end)}` : `${workspace.draft.slice(0, start)}${rewritePreview.replacement}${workspace.draft.slice(end)}`;
@@ -150,33 +214,47 @@ export default function Home() {
   }, [requestRewrite, rewritePreview, workspace.provider]);
 
   const copyRewrite = useCallback(() => {
-    if (rewritePreview?.replacement) void navigator.clipboard?.writeText(rewritePreview.replacement);
+    if (rewritePreview && canApplyRewritePreview(rewritePreview)) void navigator.clipboard?.writeText(rewritePreview.replacement);
   }, [rewritePreview]);
 
-  const newDocument = useCallback(() => {
+  const startNewDocument = useCallback(() => {
+    cancelRewrite();
     updateWorkspace({ title: "Untitled draft", draft: "" });
-    resetHistory("");
-    setDismissedIssueIds([]);
+    commit("");
+    setSelection({ start: 0, end: 0 });
+    setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [resetHistory, updateWorkspace]);
+  }, [cancelRewrite, commit, setSelection, updateWorkspace]);
+
+  const newDocument = useCallback(() => {
+    if (!workspace.draft.trim()) {
+      startNewDocument();
+      return;
+    }
+    setNewDraftOpen(true);
+  }, [startNewDocument, workspace.draft]);
 
   const clearDocument = useCallback(() => {
+    cancelRewrite();
     updateDraft("");
-    setDismissedIssueIds([]);
+    setSelection({ start: 0, end: 0 });
+    setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const restoreSample = useCallback(() => {
+    cancelRewrite();
     updateDraft(SAMPLE_DOCUMENT);
-    setDismissedIssueIds([]);
+    setSelection({ start: 0, end: 0 });
+    setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [updateDraft]);
+  }, [cancelRewrite, setSelection, updateDraft]);
 
   const onAddToDictionary = useCallback((word: string) => {
     const value = word.trim();
     if (!value) return;
     updateWorkspace((current) => ({ ...current, style: { ...current.style, personalDictionary: [...new Set([...current.style.personalDictionary, value])] } }));
-    setDismissedIssueIds((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map((issue) => issue.id)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map(getIssueDismissalKey)])]);
   }, [issues, updateWorkspace]);
 
   const scrollEditor = useCallback(() => {
@@ -196,20 +274,25 @@ export default function Home() {
     clearPersistedData();
     resetHistory(SAMPLE_DOCUMENT);
     setSettingsOpen(false);
-    setDismissedIssueIds([]);
-  }, [cancelRewrite, clearPersistedData, resetHistory]);
+    setNewDraftOpen(false);
+    setClearDataOpen(false);
+    setSelection({ start: 0, end: 0 });
+    setDismissedIssueKeys([]);
+    setActiveIssueId(null);
+  }, [cancelRewrite, clearPersistedData, resetHistory, setSelection]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
-      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); return; }
+      if (modifier && event.key.toLowerCase() === "s") { event.preventDefault(); saveNow(); return; }
+      if (settingsOpen || shortcutsOpen || newDraftOpen || clearDataOpen) return;
       if (modifier && event.key === "Enter") { event.preventDefault(); acceptAll(); return; }
       if (event.key === "Escape" && rewritePreview) { cancelRewrite(); return; }
       if (event.key === "?" && !modifier && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); setShortcutsOpen(true); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [acceptAll, cancelRewrite, rewritePreview]);
+  }, [acceptAll, cancelRewrite, clearDataOpen, newDraftOpen, rewritePreview, saveNow, settingsOpen, shortcutsOpen]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
   const savedLabel = !hydrated
@@ -221,7 +304,6 @@ export default function Home() {
         : saveStatus === "saved"
           ? "Saved locally"
           : "Not saved yet";
-  const statusLabel = analysisState.status === "error" ? "Local checks active" : savedLabel;
   const providerConfigured = Boolean(workspace.provider.apiKey.trim() && workspace.provider.baseUrl.trim() && workspace.provider.model.trim());
   const analysisStatusLabel = getAiReviewStatus(analysis.aiCoverage, workspace.aiEnabled, providerConfigured, analysisState.status);
 
@@ -242,14 +324,16 @@ export default function Home() {
         </aside>
 
         <div className="app-content">
-          {view === "write" ? <EditorWorkspace draft={workspace.draft} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} activeIssueId={activeIssueId} filter={filter} analyzing={analysisState.isAnalysing} statusLabel={statusLabel} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={canUndo} canRedo={canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={(issue) => { setDismissedIssueIds((current) => [...new Set([...current, issue.id])]); setActiveIssueId(null); }} onAddToDictionary={onAddToDictionary} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
+          {view === "write" ? <EditorWorkspace draft={workspace.draft} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={canUndo} canRedo={canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={(issue) => { setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue)])]); setActiveIssueId(null); }} onAddToDictionary={onAddToDictionary} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={(provider) => updateWorkspace({ provider })} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={(style) => updateWorkspace({ style })} onAiEnabledChange={(aiEnabled) => updateWorkspace({ aiEnabled })} onForgetKeys={cancelRewrite} onClearData={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
+      <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
     </main>
   );
 }

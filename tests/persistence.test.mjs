@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isClassifierSettings, isWorkspace, readWorkspaceFromStorage, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
+import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
 import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
@@ -86,4 +86,58 @@ test("failed local writes return an error instead of a false saved state", () =>
     },
   });
   assert.deepEqual(result, { ok: false, error: "Local storage is full." });
+});
+
+
+test("clear local storage removes both current and legacy workspace keys", () => {
+  const target = storage({
+    [WORKSPACE_STORAGE_KEY]: "current",
+    ...Object.fromEntries(LEGACY_STORAGE_KEYS.map((key) => [key, "legacy"])),
+    "unrelated:key": "keep",
+  });
+  assert.deepEqual(clearWorkspaceStorage(target), { ok: true });
+  assert.equal(target.getItem(WORKSPACE_STORAGE_KEY), null);
+  for (const key of LEGACY_STORAGE_KEYS) assert.equal(target.getItem(key), null);
+  assert.equal(target.getItem("unrelated:key"), "keep");
+});
+
+test("autosave delay is intentionally debounced instead of per-keystroke", () => {
+  assert.ok(AUTO_SAVE_DELAY_MS >= 250);
+  assert.ok(AUTO_SAVE_DELAY_MS <= 1_000);
+});
+
+
+test("clear attempts every Draftwise key even when one removal fails", () => {
+  const removed = [];
+  const target = {
+    ...storage(),
+    removeItem(key) {
+      removed.push(key);
+      if (key === LEGACY_STORAGE_KEYS[0]) throw new Error("blocked removal");
+    },
+  };
+  const result = clearWorkspaceStorage(target);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /blocked removal/u);
+  assert.deepEqual(removed, [WORKSPACE_STORAGE_KEY, ...LEGACY_STORAGE_KEYS]);
+});
+
+
+test("corrupt versioned storage falls back to recoverable legacy data", () => {
+  const initial = DEFAULT_WORKSPACE("initial draft");
+  const loaded = readWorkspaceFromStorage(initial, storage({
+    [WORKSPACE_STORAGE_KEY]: "{not-json",
+    "draftwise:draft": "legacy recovery draft",
+    "draftwise:ai-enabled": "true",
+  }));
+  assert.equal(loaded.draft, "legacy recovery draft");
+  assert.equal(loaded.aiEnabled, true);
+});
+
+test("pre-hydration edits win over a late local-storage read", () => {
+  const initial = DEFAULT_WORKSPACE("initial");
+  const current = { ...initial, draft: "typed before hydration" };
+  const loaded = { ...initial, draft: "older saved draft" };
+  assert.equal(resolveHydratedWorkspace(current, loaded, true).draft, "typed before hydration");
+  assert.equal(resolveHydratedWorkspace(current, loaded, false).draft, "older saved draft");
 });

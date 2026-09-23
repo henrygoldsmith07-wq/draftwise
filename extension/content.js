@@ -6,14 +6,30 @@
   const dom = globalThis.DraftwiseDom;
   if (!grammar || typeof grammar.analyzeLocally !== "function" || !classifier || !dom) return;
 
-  const settings = {
+  const defaultSettings = {
     excludedSites: [],
     disabledSites: [],
     disabledFields: [],
+    siteAccess: [],
     aiEnabled: false,
     goals: { audience: "general", intent: "inform", tone: "professional" },
     style: { dialect: "en-GB", personalDictionary: [], names: [], ignoredWords: [], ignoredRuleIds: [], preferredTerminology: {}, oxfordComma: true, allowContractions: true, passiveVoiceSensitivity: "normal", preferredSentenceLength: "balanced", blockedWords: [] },
   };
+  const settings = {
+    ...defaultSettings,
+    excludedSites: [],
+    disabledSites: [],
+    disabledFields: [],
+    siteAccess: [],
+    goals: { ...defaultSettings.goals },
+    style: { ...defaultSettings.style },
+  };
+
+  function defaultSetting(key) {
+    const value = defaultSettings[key];
+    if (Array.isArray(value)) return [];
+    return value && typeof value === "object" ? { ...value } : value;
+  }
   let activeField = null;
   let activeIssues = [];
   let scanTimer = 0;
@@ -22,22 +38,49 @@
   let button = null;
   let panel = null;
   let cache = new Map();
+  let fieldState = new WeakMap();
+  let observer = null;
+  const boundElements = new WeakSet();
   let aiTimer = 0;
   let aiPending = false;
   let aiError = "";
   let aiCoverage = null;
 
   const host = () => location.hostname.replace(/^www\./u, "");
-  const siteIsDisabled = () => settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)) || settings.disabledSites.includes(host());
+  const siteHasAccess = () => Array.isArray(settings.siteAccess) && settings.siteAccess.includes(host());
+  const siteIsDisabled = () => !siteHasAccess()
+    || (Array.isArray(settings.excludedSites) && settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)))
+    || (Array.isArray(settings.disabledSites) && settings.disabledSites.includes(host()));
   const fieldSignature = (element) => `${host()}|${element.name || element.id || element.getAttribute("aria-label") || element.tagName}`;
-  const fieldIsDisabled = (element) => settings.disabledFields.includes(fieldSignature(element));
+  const fieldIsDisabled = (element) => Array.isArray(settings.disabledFields) && settings.disabledFields.includes(fieldSignature(element));
   const isSensitive = (element) => classifier.isSensitiveField(element);
   const isEditable = (element) => Boolean(element && !isSensitive(element) && !fieldIsDisabled(element) && element.matches(dom.EDITABLE_SELECTOR));
   const textOf = (element) => element.isContentEditable ? dom.buildEditableTextMap(element).text : element.value;
   const issueColor = { spelling: "#e25d70", grammar: "#ef9f55", punctuation: "#8b78e6", repetition: "#d46191", conciseness: "#d8944a", clarity: "#4a9a9d", consistency: "#6a8f68" };
 
+  function fingerprintText(text) {
+    let first = 2_166_136_261;
+    let second = 2_654_435_761;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first = Math.imul(first ^ code, 16_777_619);
+      second = Math.imul(second ^ (code + ((index & 255) << 8)), 2_246_822_519);
+    }
+    return `${text.length}-${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
+  }
+
+  function fingerprintStyle(style) {
+    const serialised = JSON.stringify(style || {});
+    let hash = 2_166_136_261;
+    for (let index = 0; index < serialised.length; index += 1) {
+      hash ^= serialised.charCodeAt(index);
+      hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0).toString(16);
+  }
+
   function localAnalysis(text, previous, previousResult) {
-    const key = `${text}|${JSON.stringify(settings.style)}`;
+    const key = `${fingerprintText(text)}:${fingerprintStyle(settings.style)}`;
     const cached = cache.get(key);
     if (cached) return cached;
     const changed = previous !== text && grammar.detectChangedRange ? grammar.detectChangedRange(previous, text) : null;
@@ -55,6 +98,34 @@
 
   function clearPanel() { while (panel?.firstChild) panel.removeChild(panel.firstChild); }
   function textNode(tag, value, className) { const element = document.createElement(tag); element.textContent = value; if (className) element.className = className; return element; }
+
+  function startObserver() {
+    if (observer || siteIsDisabled()) return;
+    observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function stopObserver() {
+    observer?.disconnect();
+    observer = null;
+  }
+
+  function deactivateCurrentPage() {
+    stopObserver();
+    if (scanTimer) window.clearTimeout(scanTimer);
+    if (aiTimer) window.clearTimeout(aiTimer);
+    scanTimer = 0;
+    aiTimer = 0;
+    requestId += 1;
+    activeIssues = [];
+    aiPending = false;
+    aiError = "";
+    aiCoverage = null;
+    fieldState = new WeakMap();
+    activeField = null;
+    if (button) button.hidden = true;
+    if (panel) panel.hidden = true;
+  }
 
   function aiStateLabel() {
     if (!settings.aiEnabled) return "Local";
@@ -92,7 +163,7 @@
       const dismiss = textNode("button", "×", "dw-dismiss"); dismiss.type = "button"; dismiss.setAttribute("aria-label", `Dismiss ${item.title || "suggestion"}`); dismiss.addEventListener("click", () => { activeIssues = activeIssues.filter((candidate) => candidate.id !== item.id); render(); }); fix.append(dismiss); issue.append(fix); panel.append(issue);
     });
     const footer = document.createElement("div"); footer.className = "dw-footer"; footer.append(textNode("span", aiStateLabel()));
-    const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; chrome.storage.local.set({ disabledSites: settings.disabledSites }); panel.hidden = true; button.hidden = true; }); footer.append(disable); panel.append(footer);
+    const disable = textNode("button", "Disable on this site"); disable.type = "button"; disable.addEventListener("click", () => { settings.disabledSites = [...new Set([...settings.disabledSites, host()])]; deactivateCurrentPage(); chrome.storage.local.set({ disabledSites: settings.disabledSites }); }); footer.append(disable); panel.append(footer);
     if (actionable.length) panel.setAttribute("aria-label", `${actionable.length} actionable writing suggestions`);
   }
 
@@ -137,11 +208,21 @@
     // NOTE: message contains text/goals/style/requestId only. Provider and
     // classifier keys stay in the service worker and never enter page context.
     const response = await chrome.runtime.sendMessage({ type: "analyse", requestId: currentRequest, text, changedRange, goals: settings.goals, style: settings.style }).catch(() => ({ issues: null, error: "AI analysis is unavailable; local suggestions are still active." }));
-    aiPending = false; aiError = response?.error || ""; aiCoverage = response?.aiCoverage || null; element.__draftwiseAiCoverage = aiCoverage;
-    if (!response || currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
+    if (currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;
+    aiPending = false;
+    aiError = response?.error || "";
+    aiCoverage = response?.aiCoverage || null;
+    const currentState = fieldState.get(element) || {};
+    fieldState.set(element, { ...currentState, aiCoverage });
+    if (!response) {
+      aiError = "AI analysis is unavailable; local suggestions are still active.";
+      render();
+      place();
+      return;
+    }
     if (Array.isArray(response.issues)) {
       const aiIssues = response.issues.filter((issue) => issue && issue.source === "ai");
-      element.__draftwiseAiIssues = aiIssues;
+      fieldState.set(element, { ...(fieldState.get(element) || {}), aiIssues });
       activeIssues = [...(local.issues || []), ...aiIssues];
     }
     render(); place();
@@ -149,11 +230,13 @@
 
   async function scan(element) {
     if (!isEditable(element) || siteIsDisabled()) return;
-    const text = textOf(element); const previous = element.__draftwiseText || ""; const previousResult = element.__draftwiseLocalResult || null; element.__draftwiseText = text; activeField = element;
+    const text = textOf(element);
+    const previousState = fieldState.get(element) || {};
+    const previous = previousState.text || "";
+    const previousResult = previousState.localResult || null;
+    activeField = element;
     const local = localAnalysis(text, previous, previousResult);
-    element.__draftwiseLocalResult = local;
-    element.__draftwiseAiIssues = [];
-    element.__draftwiseAiCoverage = null;
+    fieldState.set(element, { text, localResult: local, aiIssues: [], aiCoverage: null });
     activeIssues = local.issues || []; aiError = ""; aiCoverage = null; aiPending = false; render(); place();
     // Cancel any pending cloud triage from rapid typing (cancellation support).
     if (aiTimer) window.clearTimeout(aiTimer);
@@ -162,10 +245,22 @@
   }
 
   function bind(element) {
-    if (!isEditable(element) || element.dataset.draftwiseBound) return;
-    element.dataset.draftwiseBound = "true";
-    element.addEventListener("focus", () => { activeField = element; button.hidden = false; window.setTimeout(() => scan(element), 80); });
-    element.addEventListener("input", () => { window.clearTimeout(scanTimer); scanTimer = window.setTimeout(() => scan(element), 360); });
+    if (siteIsDisabled() || !isEditable(element) || boundElements.has(element)) return;
+    boundElements.add(element);
+    element.addEventListener("focus", () => {
+      if (siteIsDisabled() || !isEditable(element)) {
+        deactivateCurrentPage();
+        return;
+      }
+      activeField = element;
+      if (button) button.hidden = false;
+      window.setTimeout(() => scan(element), 80);
+    });
+    element.addEventListener("input", () => {
+      if (siteIsDisabled() || !isEditable(element)) return;
+      window.clearTimeout(scanTimer);
+      scanTimer = window.setTimeout(() => scan(element), 360);
+    });
     element.addEventListener("blur", () => { window.setTimeout(() => { if (document.activeElement !== element && panel) panel.hidden = true; }, 120); });
   }
 
@@ -180,20 +275,30 @@
   function init(stored) {
     Object.assign(settings, stored || {});
     if (siteIsDisabled()) return;
-    initShadow(); dom.bindEditableSubtree(document.documentElement, bind);
-    const observer = new MutationObserver((records) => dom.handleAddedNodes(records, bind));
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    chrome.storage.onChanged.addListener((changes) => {
-      for (const [key, value] of Object.entries(changes)) settings[key] = value.newValue;
-      cache.clear(); requestId += 1;
+    initShadow();
+    dom.bindEditableSubtree(document.documentElement, bind);
+    startObserver();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area && area !== "local") return;
+      for (const [key, value] of Object.entries(changes)) {
+        if (!(key in defaultSettings)) continue;
+        settings[key] = value.newValue === undefined ? defaultSetting(key) : value.newValue;
+      }
+      cache.clear();
+      requestId += 1;
+      if (aiTimer) window.clearTimeout(aiTimer);
+      aiTimer = 0;
       if (siteIsDisabled() || (activeField && !isEditable(activeField))) {
-        activeIssues = []; aiPending = false; aiError = ""; aiCoverage = null; button.hidden = true; panel.hidden = true;
+        deactivateCurrentPage();
       } else {
+        startObserver();
         dom.bindEditableSubtree(document.documentElement, bind);
-        if (activeField) void scan(activeField);
+        const focused = document.activeElement;
+        if (isEditable(focused)) void scan(focused);
+        else if (activeField) void scan(activeField);
       }
     });
   }
 
-  chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "aiEnabled", "goals", "style"], init);
+  chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "siteAccess", "aiEnabled", "goals", "style"], init);
 })();

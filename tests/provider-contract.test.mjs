@@ -6,6 +6,7 @@ import {
   mapWithConcurrency,
   PROVIDER_CONCURRENCY,
   parseAnalysisIssues,
+  parseAnalysisResponse,
   parseCustomHeaders,
   ProviderError,
   rewriteWithProvider,
@@ -62,7 +63,15 @@ test("provider URL validation requires HTTPS except for localhost", () => {
 });
 
 test("custom headers cannot override credential or transport headers", () => {
-  const headers = parseCustomHeaders(JSON.stringify({ "X-Trace": "test", Authorization: "bad", Cookie: "secret", "Content-Length": "1" }));
+  const headers = parseCustomHeaders(JSON.stringify({
+    "X-Trace": "test",
+    Authorization: "bad",
+    Cookie: "secret",
+    "Content-Length": "1",
+    "Content-Type": "text/plain",
+    Origin: "https://attacker.example",
+    "Transfer-Encoding": "chunked",
+  }));
   assert.deepEqual(headers, { "X-Trace": "test" });
 });
 
@@ -77,6 +86,28 @@ test("malformed provider issues are discarded while exact ranges survive", () =>
   }, source);
   assert.equal(issues.length, 1);
   assert.equal(source.slice(issues[0].start, issues[0].end), issues[0].original);
+});
+
+test("provider issue parsing caps valid suggestion cardinality", () => {
+  const source = "repeatd";
+  const issue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const issues = parseAnalysisIssues({ issues: Array.from({ length: 400 }, () => ({ ...issue })) }, source, "chunk-0-7");
+  assert.equal(issues.length, 250);
+});
+
+test("provider tone metadata is bounded and model score claims are ignored", () => {
+  const source = "repeatd";
+  const issue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", title: "Spelling", explanation: "Fix it." };
+  const result = parseAnalysisResponse({
+    issues: [issue],
+    tone: Array.from({ length: 30 }, (_, index) => `tone-${index}`),
+    scores: { correctness: 999, overall: 999, injected: 999 },
+  }, source);
+  assert.ok(result);
+  assert.notEqual(result.scores.correctness, 999);
+  assert.notEqual(result.scores.overall, 999);
+  assert.equal("injected" in result.scores, false);
+  assert.ok(result.tone.length <= 4);
 });
 
 test("long-document provider calls keep the full analysed text", async () => {
@@ -253,6 +284,32 @@ test("transient external failures retry with bounded attempts while client error
   assert.equal(calls, 1);
 });
 
+test("provider response bodies are bounded before full buffering", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("x".repeat(2_050_000), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text: "A short sentence.", instruction: "Make this clearer.", goals }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json" && /too large/iu.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("oversized provider error bodies keep the HTTP failure classification", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("bad request ".repeat(10_000), { status: 400 });
+  try {
+    await assert.rejects(
+      () => analyzeWithProvider("A short sentence.", goals, settings),
+      (error) => error instanceof ProviderError && error.code === "unknown" && error.status === 400,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("provider timeout and invalid model are explicit failures", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
@@ -296,6 +353,217 @@ test("rewrite protection keeps currencies, percentages, dates, identifiers, mode
   globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ replacement: "Budget £1,250.00 is 20% for 18 September 2026; contact user@example.com about GPT-5.6 in report-v2.pdf under ABC-123." }) } }] }), { status: 200 });
   try {
     await assert.rejects(() => rewriteWithProvider({ text: protectedText, instruction: "Make this concise.", goals, allowProtectedChanges: false }, settings), (error) => error instanceof ProviderError && error.code === "invalid-json");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("AI suggestion IDs stay stable when provider issue order changes", () => {
+  const source = "repeatd and recieve";
+  const firstIssue = { start: 0, end: 7, original: "repeatd", replacement: "repeated", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const secondIssue = { start: 12, end: 19, original: "recieve", replacement: "receive", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const forward = parseAnalysisIssues({ issues: [firstIssue, secondIssue] }, source, "chunk-0-19");
+  const reversed = parseAnalysisIssues({ issues: [secondIssue, firstIssue] }, source, "chunk-0-19");
+  const forwardIds = new Map(forward.map((issue) => [issue.original, issue.id]));
+  const reversedIds = new Map(reversed.map((issue) => [issue.original, issue.id]));
+  assert.equal(forwardIds.get("repeatd"), reversedIds.get("repeatd"));
+  assert.equal(forwardIds.get("recieve"), reversedIds.get("recieve"));
+});
+
+test("AI suggestion IDs change when the proposed change materially changes", () => {
+  const source = "repeatd";
+  const base = { start: 0, end: 7, original: "repeatd", category: "spelling", severity: "high", confidence: 0.99, ruleId: "spelling-common-typo", title: "Spelling", explanation: "Fix it." };
+  const first = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeated" }] }, source, "chunk-0-7")[0];
+  const second = parseAnalysisIssues({ issues: [{ ...base, replacement: "repeat" }] }, source, "chunk-0-7")[0];
+  assert.ok(first);
+  assert.ok(second);
+  assert.notEqual(first.id, second.id);
+});
+
+test("local formal rewrites expand contractions without changing unrelated verbs", async () => {
+  const result = await rewriteWithProvider(
+    { text: "I get tired, but I can't rest.", instruction: "Make this formal.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.source, "local");
+  assert.equal(result.replacement, "I get tired, but I cannot rest.");
+});
+
+test("local confident rewrites do not inflate uncertainty into certainty", async () => {
+  const text = "It could rain tomorrow, and the plan might change.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Make this sound more confident.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("local concise rewrites preserve meaningful intensifiers and limiting words", async () => {
+  const text = "I just need very little time in order to finish at this point in time.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Shorten this.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, "I just need very little time to finish now.");
+});
+
+test("local rewrites preserve paragraph and line-break structure", async () => {
+  const text = "First paragraph.\n\nSecond paragraph.\n  Indented line.";
+  const result = await rewriteWithProvider(
+    { text, instruction: "Make this more confident.", goals },
+    { ...settings, apiKey: "" },
+  );
+  assert.equal(result.replacement, text);
+});
+
+test("AI rewrites preserve the selected text boundary whitespace", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "\n  The draft can't ship.\n\n";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The draft cannot ship.",
+      explanation: "Expanded the contraction.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider(
+      { text, instruction: "Make this formal.", goals, allowProtectedChanges: false },
+      settings,
+    );
+    assert.equal(result.replacement, "\n  The draft cannot ship.\n\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rewrite protection rejects changed values even when the original token is reinserted elsewhere", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "The approved budget is £100 for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "The approved budget is £200 for ticket ABC-123 (previously £100).",
+      explanation: "Clarified the budget.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rewrite protection rejects duplicated or newly introduced protected values", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Send report.pdf to user@example.com by 18 September 2026.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "Send report.pdf and backup.pdf to user@example.com by 18 September 2026, with a second copy on 19 September 2026.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Make this clearer.", goals, allowProtectedChanges: false }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("natural-language protected change permission is scoped to the requested token kind", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: "Meet on 2026-09-19 at https://evil.example for ticket ABC-999.",
+      explanation: "Updated the date.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    await assert.rejects(
+      () => rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings),
+      (error) => error instanceof ProviderError && error.code === "invalid-json",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("natural-language protected change permission allows only the requested date change", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com for ticket ABC-123.";
+  const replacement = "Meet on 2026-09-19 at https://example.com for ticket ABC-123.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement,
+      explanation: "Updated the date.",
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings);
+    assert.equal(result.replacement, replacement);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("date edits inside quotes preserve the rest of the quoted passage", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = 'The note says "Meet on 2026-09-18 at https://example.com".';
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({
+      replacement: 'The note says "Meet on 2026-09-19 at https://example.com".',
+    }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider({ text, instruction: "Change the date to 2026-09-19.", goals }, settings);
+    assert.match(result.replacement, /2026-09-19/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("negated protected-value instructions remain protected", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "The deadline is 18 September 2026.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ replacement: "The deadline is 19 September 2026." }) } }],
+  }), { status: 200 });
+  try {
+    for (const instruction of [
+      "Do not change the date; just make this clearer.",
+      "Don't change the date. Improve the wording.",
+      "Rewrite this without changing the date.",
+    ]) {
+      await assert.rejects(
+        () => rewriteWithProvider({ text, instruction, goals, allowProtectedChanges: false }, settings),
+        (error) => error instanceof ProviderError && error.code === "invalid-json",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("negating one protected kind does not authorize it when another kind is changed", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "Meet on 2026-09-18 at https://example.com.";
+  const replacement = "Meet on 2026-09-18 at https://example.org.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ replacement }) } }],
+  }), { status: 200 });
+  try {
+    const result = await rewriteWithProvider(
+      { text, instruction: "Do not change the date; change the URL to https://example.org.", goals },
+      settings,
+    );
+    assert.equal(result.replacement, replacement);
   } finally {
     globalThis.fetch = originalFetch;
   }

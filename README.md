@@ -12,7 +12,7 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 
 ## What is included
 
-- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, writing goals, dark mode, keyboard shortcuts, and local persistence.
+- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing.
 - Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.

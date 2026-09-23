@@ -86,6 +86,23 @@ test("classifier excerpts minimise transmitted text and redact structured tokens
   assert.equal(redactExcerptForClassifier("The account request references the previous study.").includes("[identifier]"), false);
 });
 
+test("classifier excerpts redact private keys and credential connection strings", () => {
+  const privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + "A".repeat(120) + "\n-----END OPENSSH PRIVATE KEY-----";
+  const pgpKey = "-----BEGIN PGP PRIVATE KEY BLOCK-----\n" + "B".repeat(120) + "\n-----END PGP PRIVATE KEY BLOCK-----";
+  const databaseUrl = "postgres://user:super-secret@example.com:5432/app";
+  const redisUrl = "redis://:password@example.com:6379/0";
+  const truncatedKey = "-----BEGIN PRIVATE KEY-----\n" + "C".repeat(600);
+  const redacted = redactExcerptForClassifier(`Secrets:\n${privateKey}\n${pgpKey}\n${databaseUrl}\n${redisUrl}\n${truncatedKey}`);
+
+  assert.equal(redacted.includes("BEGIN OPENSSH PRIVATE KEY"), false);
+  assert.equal(redacted.includes("BEGIN PGP PRIVATE KEY BLOCK"), false);
+  assert.equal(redacted.includes("BEGIN PRIVATE KEY"), false);
+  assert.equal(redacted.includes("super-secret"), false);
+  assert.equal(redacted.includes("redis://"), false);
+  assert.match(redacted, /\[private-key\]/u);
+  assert.match(redacted, /\[connection-string\]/u);
+});
+
 test("classifier responses never rewrite: replacement fields are discarded", () => {
   const inputs = [{ chunkId: "chunk-0", excerpt: "hello", startOffset: 0, endOffset: 5, signals: { localIssueCount: 0, localCategories: [], hasLongSentence: false, hasVagueOrFiller: false, hasPassiveOrWordiness: false }, categories: ["clarity"] }];
   const decisions = parseClassifierDecisions({
@@ -223,6 +240,33 @@ test("classifier.dev request uses the official keyless ordered payload", async (
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("oversized classifier responses fall back without silent downgrade", async () => {
+  const text = "This thing is really useful for various aspects of the work and stuff.";
+  const local = analyzeLocally(text, { dialect: "en-GB" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("x".repeat(550_000), { status: 200 });
+  try {
+    const outcome = await triageChunks(createAnalysisChunks(text), local.issues, {
+      classifier: { baseUrl: "https://classifier.dev" },
+      uncertainPolicy: "provider",
+    });
+    assert.equal(outcome.metrics.classifierFailures, 1);
+    assert.ok(outcome.decisions.some((decision) => decision.fallback === true && decision.decision === "ai-needed"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("classifier response parsing uses the bounded streaming reader", async () => {
+  const source = await readFile(new URL("../packages/ai/src/index.ts", import.meta.url), "utf8");
+  const classifierStart = source.indexOf("async function requestClassifierDecisions");
+  const boundedRead = source.indexOf("readResponseTextLimited(response, 500_000)", classifierStart);
+  const parse = source.indexOf("JSON.parse(responseText)", classifierStart);
+  assert.ok(classifierStart >= 0);
+  assert.ok(boundedRead > classifierStart);
+  assert.ok(parse > boundedRead);
 });
 
 test("uncertain policy can keep low-confidence classifier results local", async () => {
@@ -378,4 +422,32 @@ test("background keeps provider and classifier keys in the service worker", asyn
   assert.match(background, /analyzeWithTriage/);
   assert.match(background, /classifier/iu);
   assert.match(background, /providerPattern/);
+});
+
+
+test("AI review status prioritises active and failed phases before coverage exists", () => {
+  assert.equal(getAiReviewStatus(undefined, true, true, "analysing"), "AI review in progress");
+  assert.equal(getAiReviewStatus(undefined, true, true, "error"), "AI review encountered errors");
+  assert.equal(getAiReviewStatus(undefined, false, true, "analysing"), "Local analysis only");
+  assert.equal(getAiReviewStatus(undefined, true, false, "analysing"), "Local analysis only");
+});
+
+test("AI review status reports progress when coverage exists during analysis", () => {
+  const coverage = { requestedChunks: 4, attemptedChunks: 4, successfulChunks: 2, failedChunks: 2, skippedChunks: 0 };
+  assert.equal(getAiReviewStatus(coverage, true, true, "analysing"), "AI review in progress - 2/4 sections reviewed");
+});
+
+test("classifier excerpts redact common bearer and API credential formats", () => {
+  const secrets = [
+    "Bearer abcdefghijklmnopqrstuvwxyz0123456789",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signatureABCDE",
+    "AKIAABCDEFGHIJKLMNOP",
+    "AIzaABCDEFGHIJKLMNOPQRSTUVWXYZ123456",
+    "github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "npm_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "Authorization=abcdefghijklmnopqrstuvwxyz123456",
+  ];
+  const redacted = redactExcerptForClassifier(`Credentials: ${secrets.join(" | ")}`);
+  for (const secret of secrets) assert.equal(redacted.includes(secret), false, secret);
+  assert.match(redacted, /\[(?:bearer-token|jwt|token|secret)\]/u);
 });

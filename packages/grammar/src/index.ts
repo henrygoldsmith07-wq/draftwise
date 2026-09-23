@@ -336,6 +336,19 @@ function preserveCase(original: string, replacement: string) {
   if (original[0] === original[0]?.toUpperCase()) return replacement[0].toUpperCase() + replacement.slice(1);
   return replacement;
 }
+function issueTextFingerprint(text: string) {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function createIssueId(ruleId: string, start: number, end: number, original: string) {
+  return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+}
+
 
 function boundedEditDistance(left: string, right: string, limit = 2) {
   if (Math.abs(left.length - right.length) > limit) return limit + 1;
@@ -544,7 +557,7 @@ function makeIssue(
 ): WritingIssue | null {
   if (!original || end <= start || shouldIgnore(ruleId, original, preferences)) return null;
   return {
-    id: `${ruleId}-${start}-${end}`,
+    id: createIssueId(ruleId, start, end, original),
     ruleId,
     start,
     end,
@@ -856,7 +869,9 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
   const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
   const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
   const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] } as SentenceSpan);
+  const passiveVoicePattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
   const passiveVoice = [...text.matchAll(/\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu)].length;
+  const passiveVoiceSentences = sentences.filter((sentence) => passiveVoicePattern.test(sentence.text)).length;
   return {
     words,
     characters: text.length,
@@ -867,7 +882,7 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
     longSentences: sentenceLengths.filter((length) => length > 32).length,
     fillerWords: sentenceWordValues.filter((word) => FILLER_WORDS.has(word)).length,
     passiveVoice,
-    passiveVoicePercentage: sentences.length ? Math.round((passiveVoice / sentences.length) * 100) : 0,
+    passiveVoicePercentage: sentences.length ? Math.round((passiveVoiceSentences / sentences.length) * 100) : 0,
     averageSentenceLength: sentenceLengths.length ? Math.round((words / sentenceLengths.length) * 10) / 10 : 0,
     longestSentence: longest.text,
     sentenceLengths,
@@ -1060,12 +1075,14 @@ export function analyzeLocallyIncremental(
     const shift = issue.start >= previousRegion.end ? delta : 0;
     const start = issue.start + shift;
     const end = issue.end + shift;
-    return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original ? [{ ...issue, start, end }] : [];
+    return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original
+      ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
+      : [];
   });
   const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
   const recalculated = region.issues.map((issue) => ({
     ...issue,
-    id: `${issue.ruleId}-${issue.start + nextRegion.start}-${issue.end + nextRegion.start}`,
+    id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
     start: issue.start + nextRegion.start,
     end: issue.end + nextRegion.start,
   }));

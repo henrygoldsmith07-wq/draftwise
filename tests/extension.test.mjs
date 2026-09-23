@@ -10,7 +10,9 @@ const file = (name) => new URL(name, root);
 
 function browserLikeContext() {
   const listeners = { installed: [], startup: [], changed: [], removed: [], clicked: [], message: [] };
-  const storage = { values: { siteAccess: [], disabledSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
+  const storage = { values: { siteAccess: [], disabledSites: [], excludedSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
+  const scripting = { registered: new Map(), unregistered: [] };
+  const permissionState = { deniedOrigins: new Set() };
   const event = (name) => ({ addListener(handler) { listeners[name].push(handler); } });
   const context = {
     URL,
@@ -35,16 +37,26 @@ function browserLikeContext() {
       onChanged: event("changed"),
     },
     permissions: {
-      contains(_value, callback) { callback(true); },
+      contains(value, callback) { callback(!(value?.origins || []).some((origin) => permissionState.deniedOrigins.has(origin))); },
       getAll(callback) { callback({ origins: [] }); },
       onRemoved: event("removed"),
     },
     scripting: {
-      registerContentScripts(_value, callback) { callback?.(); },
-      unregisterContentScripts(_value, callback) { callback?.(); },
+      registerContentScripts(value, callback) {
+        for (const script of value || []) scripting.registered.set(script.id, script);
+        callback?.();
+      },
+      unregisterContentScripts(value, callback) {
+        for (const id of value?.ids || []) {
+          scripting.registered.delete(id);
+          scripting.unregistered.push(id);
+        }
+        callback?.();
+      },
+      getRegisteredContentScripts(_filter, callback) { callback([...scripting.registered.values()]); },
     },
   };
-  return { context, listeners, storage };
+  return { context, listeners, storage, scripting, permissionState };
 }
 
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
@@ -76,6 +88,93 @@ test("generated bundles load at runtime and the service worker starts without re
   assert.ok(serviceWorker.storage.writes >= 1);
 });
 
+test("clearing site access unregisters stale dynamically registered scripts", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    siteAccess: [],
+    disabledSites: [],
+    excludedSites: [],
+  };
+  runtime.scripting.registered.set("draftwise-site-example-com", {
+    id: "draftwise-site-example-com",
+    matches: ["https://example.com/*"],
+  });
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  assert.equal(runtime.listeners.changed.length, 1);
+  runtime.listeners.changed[0]({ siteAccess: { oldValue: ["example.com"], newValue: undefined } }, "local");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.scripting.registered.has("draftwise-site-example-com"), false);
+  assert.ok(runtime.scripting.unregistered.includes("draftwise-site-example-com"));
+});
+
+
+test("external host-permission revocation removes stale stored site access", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    siteAccess: ["example.com"],
+    disabledSites: [],
+    excludedSites: [],
+  };
+  runtime.permissionState.deniedOrigins.add("https://example.com/*");
+  runtime.permissionState.deniedOrigins.add("http://example.com/*");
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  assert.equal(runtime.listeners.removed.length, 1);
+  runtime.listeners.removed[0]({ origins: ["https://example.com/*", "http://example.com/*"] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.storage.values.siteAccess.length, 0);
+});
+
+test("disabling AI aborts an in-flight extension cloud request", async () => {
+  const runtime = browserLikeContext();
+  runtime.storage.values = {
+    ...runtime.storage.values,
+    aiEnabled: true,
+    provider: {
+      provider: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+      model: "test-model",
+      apiKey: "secret",
+      temperature: 0.2,
+      maxTokens: 900,
+      customHeaders: "",
+    },
+  };
+
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+  let aborted = false;
+  runtime.context.DraftwiseProvider.analyzeWithTriage = (_text, _goals, _provider, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => {
+      aborted = true;
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+
+  const handler = runtime.listeners.message[0];
+  handler(
+    {
+      type: "analyse",
+      requestId: 1,
+      text: "This is a long draft sentence that is currently being reviewed by the configured provider.",
+      goals: { audience: "general", intent: "inform", tone: "neutral" },
+      style: {},
+    },
+    { tab: { id: 1 }, frameId: 0 },
+    () => undefined,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  runtime.listeners.changed[0]({ aiEnabled: { oldValue: true, newValue: false } }, "local");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(aborted, true);
+});
+
 test("extension scripts parse and keep provider secrets out of the content script", async () => {
   for (const name of ["extension/content.js", "extension/background.js", "extension/options.js", "extension/field-classification.js", "extension/permissions.js", "extension/dom-utils.js", "extension/shared-analysis.js", "extension/shared-provider.js"]) {
     const result = spawnSync(process.execPath, ["--check", name], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
@@ -85,12 +184,23 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.ok(!/apiKey|innerHTML|dangerouslySetInnerHTML/iu.test(content));
   assert.match(content, /textContent/iu);
   assert.match(content, /analyzeLocallyIncremental/iu);
-  assert.match(content, /__draftwiseAiIssues/iu);
-  assert.match(content, /__draftwiseAiCoverage/iu);
+  assert.match(content, /let fieldState = new WeakMap\(\)/iu);
+  assert.match(content, /fieldState\.get\(/iu);
+  assert.match(content, /fieldState\.set\(/iu);
+  assert.doesNotMatch(content, /__draftwise(?:Text|LocalResult|AiIssues|AiCoverage)/iu);
   assert.match(content, /Partial AI/iu);
   assert.match(content, /AI unavailable/iu);
   assert.match(content, /Checking AI\.\.\./iu);
   assert.match(content, /filter\(\(issue\) => issue && issue\.source === "ai"\)/iu);
+  assert.match(content, /siteAccess/iu);
+  assert.match(content, /value\.newValue === undefined \? defaultSetting\(key\)/iu);
+  assert.match(content, /deactivateCurrentPage/iu);
+  assert.match(content, /const boundElements = new WeakSet\(\)/iu);
+  assert.match(content, /observer\?\.disconnect\(\)/iu);
+  assert.match(content, /if \(siteIsDisabled\(\) \|\| !isEditable\(element\) \|\| boundElements\.has\(element\)\) return;/iu);
+  assert.match(content, /const key = `\$\{fingerprintText\(text\)\}:\$\{fingerprintStyle\(settings\.style\)\}`/u);
+  assert.doesNotMatch(content, /dataset\.draftwiseBound/iu);
+  assert.doesNotMatch(content, /const key = `\$\{text\}\|/u);
   assert.doesNotMatch(content, /__draftwiseLocalResult\s*=\s*\{\s*\.\.\.local,\s*issues:\s*response\.issues/iu);
   const background = await readFile(file("extension/background.js"), "utf8");
   assert.match(background, /chrome\.storage\.local\.get/iu);
@@ -99,11 +209,26 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.match(background, /providerPattern/iu);
   assert.match(background, /aiCoverage/iu);
   assert.match(background, /clear-ai-cache/iu);
+  assert.match(background, /reconcileSiteAccessWithPermissions/iu);
+  assert.match(background, /textFingerprint:\s*textFingerprint\(text\)/iu);
+  assert.match(background, /contextFingerprint:\s*settingsFingerprint\(\{ goals: message\.goals, style: message\.style \}\)/iu);
+  assert.doesNotMatch(background, /const cacheKey = JSON\.stringify\(\{\s*text,/iu);
+  assert.doesNotMatch(background, /\n\s{8}goals:\s*message\.goals,\s*\n\s{8}style:\s*message\.style,/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");
   assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);
   assert.match(options, /classifier:\s*\{\s*\.\.\.state\.classifier,\s*apiKey:\s*""/iu);
   assert.match(options, /clear-ai-cache/iu);
+  assert.match(options, /previousCloudPatterns/iu);
+  assert.match(options, /desiredCloudPatterns/iu);
+  assert.match(options, /for \(const site of state\.siteAccess\)/u);
+  assert.match(options, /if \(!desiredCloudPatterns\.has\(pattern\)\) await permissionRemove\(\{ origins: \[pattern\] \}\);/u);
+  assert.match(options, /function siteAccessUsesPattern\(state, pattern\)/u);
+  assert.match(options, /still required for writing-site access\. Revoke that site first\./u);
+  assert.match(options, /const alreadyGranted = await permissionContains\(\{ origins \}\);/u);
+  assert.match(options, /await storageSet\(\{ siteAccess: state\.siteAccess, disabledSites: state\.disabledSites \}\);/u);
+  assert.match(options, /if \(!alreadyGranted\) await permissionRemove\(\{ origins \}\);/u);
+  assert.match(options, /if \(!result\?\.ok\) \{ await storageSet\(\{ disabledSites: state\.disabledSites \}\)/u);
   assert.doesNotMatch(options, /draftwise-triage-v1|classifierModel/iu);
 });
 
@@ -184,7 +309,136 @@ test("sensitive field classification uses explicit tokens without blocking norma
     closest() { return { getAttribute: () => "" }; },
   });
   for (const normal of [field({ name: "author" }), field({ name: "authority" }), field({ placeholder: "Authentication explanation" }), field({ name: "notes" }), field({ name: "search" }), field({ name: "title" })]) assert.equal(classify(normal), false);
-  for (const sensitive of [field({ type: "password" }), field({ name: "auth_token" }), field({ name: "api_key" }), field({ name: "cvv" }), field({ name: "otp" }), field({ name: "pin" })]) assert.equal(classify(sensitive), true);
+  for (const sensitive of [field({ type: "password" }), field({ type: "email" }), field({ type: "tel" }), field({ type: "date" }), field({ autocomplete: "street-address" }), field({ autocomplete: "cc-name" }), field({ name: "auth_token" }), field({ name: "api_key" }), field({ name: "cvv" }), field({ name: "otp" }), field({ name: "pin" }), field({ name: "email" }), field({ name: "phone_number" })]) assert.equal(classify(sensitive), true);
+});
+
+test("sensitive field classification includes associated label metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const label = { textContent: "API key" };
+  const ariaLabel = { textContent: "One time code" };
+  const ownerDocument = { getElementById(id) { return id === "secret-label" ? ariaLabel : null; } };
+  const field = ({ labels = [], labelledBy = "" } = {}) => ({
+    type: "text",
+    name: "field-123",
+    id: "field-123",
+    labels,
+    ownerDocument,
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute(key) { return key === "aria-labelledby" ? labelledBy : ""; },
+    closest(selector) { return selector === "form" ? { getAttribute: () => "" } : null; },
+  });
+
+  assert.equal(classify(field({ labels: [label] })), true);
+  assert.equal(classify(field({ labelledBy: "secret-label" })), true);
+  assert.equal(classify(field()), false);
+});
+
+test("sensitive field classification uses surrounding form metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const fieldInForm = (form) => ({
+    type: "text",
+    name: "field-123",
+    id: "field-123",
+    labels: [],
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute() { return ""; },
+    closest(selector) { return selector === "form" ? form : null; },
+  });
+  const form = (id, name = "", aria = "") => ({
+    id,
+    name,
+    getAttribute(key) { return key === "aria-label" ? aria : ""; },
+  });
+
+  assert.equal(classify(fieldInForm(form("login-form"))), true);
+  assert.equal(classify(fieldInForm(form("generated", "checkout"))), true);
+  assert.equal(classify(fieldInForm(form("generated", "", "Payment details"))), true);
+  assert.equal(classify(fieldInForm(form("writing-form", "draft"))), false);
+});
+
+test("sensitive field classification covers financial and identity metadata", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+
+  const field = (label) => ({
+    type: "text",
+    name: "generated",
+    id: "generated",
+    labels: [{ textContent: label }],
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute() { return ""; },
+    closest() { return null; },
+  });
+
+  for (const label of [
+    "Sign-in name",
+    "IBAN",
+    "Sort code",
+    "Bank account",
+    "Account number",
+    "Routing number",
+    "National Insurance number",
+    "Tax ID",
+  ]) {
+    assert.equal(classify(field(label)), true, label);
+  }
+  assert.equal(classify(field("Account summary")), false);
+});
+
+test("dynamic site script IDs stay distinct for long similar hostnames", async () => {
+  const source = await readFile(file("extension/permissions.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const permissions = context.DraftwisePermissions;
+  const shared = "a".repeat(60);
+  const first = `${shared}.one.example.com`;
+  const second = `${shared}.two.example.com`;
+  const firstId = permissions.siteScriptId(first);
+  const secondId = permissions.siteScriptId(second);
+  assert.notEqual(firstId, secondId);
+  assert.ok(firstId.length <= 80);
+  assert.ok(secondId.length <= 80);
+  assert.equal(firstId, permissions.siteScriptId(first));
+});
+
+test("field privacy classification bounds untrusted metadata size", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classifier = context.DraftwiseFieldClassifier;
+  const huge = "x".repeat(100_000);
+  const labels = Array.from({ length: 100 }, (_, index) => ({ textContent: index === 0 ? "API key" + huge : huge }));
+  const field = {
+    type: "text",
+    name: huge,
+    id: huge,
+    labels,
+    disabled: false,
+    readOnly: false,
+    hidden: false,
+    getAttribute(key) { return key === "placeholder" ? huge : ""; },
+    closest() { return null; },
+  };
+  assert.equal(classifier.isSensitiveField(field), true);
+  const tokens = Array.from(classifier.metadataTokens(field));
+  assert.ok(tokens.length < 100);
+  assert.ok(tokens.every((token) => token.length <= 512));
 });
 
 test("permission helpers derive narrow site and provider origins", async () => {
@@ -195,4 +449,40 @@ test("permission helpers derive narrow site and provider origins", async () => {
   assert.deepEqual(Array.from(permissions.sitePatterns("www.example.com")), ["https://example.com/*", "http://example.com/*"]);
   assert.equal(permissions.providerPattern("https://api.openai.com/v1"), "https://api.openai.com/*");
   assert.throws(() => permissions.normaliseHostname("example.com/path"));
+});
+
+
+test("sensitive autocomplete tokens remain blocked when section prefixes are present", async () => {
+  const source = await readFile(file("extension/field-classification.js"), "utf8");
+  const context = { URL, console };
+  vm.runInNewContext(source, context);
+  const classify = context.DraftwiseFieldClassifier.isSensitiveField;
+  const field = (autocomplete) => ({
+    type: "text", name: "", id: "", disabled: false, readOnly: false, hidden: false,
+    getAttribute(key) { return key === "autocomplete" ? autocomplete : ""; },
+    closest() { return { getAttribute: () => "" }; },
+  });
+  for (const autocomplete of [
+    "section-checkout cc-number",
+    "shipping cc-csc",
+    "section-billing cc-name",
+    "billing transaction-amount",
+    "section-login current-password webauthn",
+    "section-auth one-time-code",
+  ]) assert.equal(classify(field(autocomplete)), true, autocomplete);
+  assert.equal(classify(field("section-profile organization-title")), false);
+});
+
+test("stale extension AI responses are rejected before shared state mutation", async () => {
+  const content = await readFile(file("extension/content.js"), "utf8");
+  const responseIndex = content.indexOf("const response = await chrome.runtime.sendMessage");
+  const staleGuardIndex = content.indexOf("if (currentRequest !== requestId || activeField !== element || textOf(element) !== text) return;", responseIndex);
+  const pendingMutationIndex = content.indexOf("aiPending = false;", responseIndex);
+  const errorMutationIndex = content.indexOf("aiError = response?.error", responseIndex);
+  const coverageMutationIndex = content.indexOf("aiCoverage = response?.aiCoverage", responseIndex);
+  assert.ok(responseIndex >= 0);
+  assert.ok(staleGuardIndex > responseIndex);
+  assert.ok(pendingMutationIndex > staleGuardIndex);
+  assert.ok(errorMutationIndex > staleGuardIndex);
+  assert.ok(coverageMutationIndex > staleGuardIndex);
 });

@@ -22,3 +22,18 @@ export function createRewriteRetryArgs(preview: RewriteRetryPreview, settings: P
     aiEnabled: preview.aiEnabled,
   };
 }
+
+
+export interface RewriteApplyPreview {
+  original: string;
+  replacement: string;
+  loading?: boolean;
+  failed?: boolean;
+}
+
+export function canApplyRewritePreview(preview: RewriteApplyPreview) {
+  return !preview.loading
+    && !preview.failed
+    && preview.replacement.trim().length > 0
+    && preview.replacement !== preview.original;
+}

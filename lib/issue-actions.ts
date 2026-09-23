@@ -18,6 +18,16 @@ function hasValidIssueRange(text: string, issue: WritingIssue) {
     && issue.end - issue.start === issue.original.length;
 }
 
+function withoutDuplicateEdits(issues: WritingIssue[]) {
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = JSON.stringify([issue.start, issue.end, issue.original, issue.replacement]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function withoutOverlappingRanges(issues: WritingIssue[]) {
   if (issues.length < 2) return issues;
 
@@ -46,7 +56,7 @@ export function applyIssueReplacements(text: string, issues: WritingIssue[]) {
   const candidates = issues.filter(
     (issue) => issue.replacement && issue.replacement !== issue.original && hasValidIssueRange(text, issue),
   );
-  const actionable = withoutOverlappingRanges(candidates)
+  const actionable = withoutOverlappingRanges(withoutDuplicateEdits(candidates))
     .sort((left, right) => right.start - left.start || right.end - left.end);
 
   let next = text;

@@ -29,7 +29,10 @@ function withoutOverlappingRanges(issues: WritingIssue[]) {
 
   for (let index = 1; index < ordered.length; index += 1) {
     const current = ordered[index];
-    if (current.issue.start < furthest.issue.end) {
+    const competingInsertions = current.issue.start === current.issue.end
+      && furthest.issue.start === furthest.issue.end
+      && current.issue.start === furthest.issue.start;
+    if (current.issue.start < furthest.issue.end || competingInsertions) {
       conflicting.add(current.index);
       conflicting.add(furthest.index);
     }

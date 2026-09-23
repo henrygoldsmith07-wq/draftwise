@@ -13,13 +13,25 @@ function loadClassifier() {
   });
 }
 
-function field({ name = "", id = "", aria = "", placeholder = "", title = "", autocomplete = "", describedBy = "", referenced = {}, formAction = "", formName = "", formId = "", formAria = "" } = {}) {
+function field({ name = "", id = "", aria = "", placeholder = "", title = "", autocomplete = "", describedBy = "", referenced = {}, formAction = "", formName = "", formId = "", formAria = "", roleFormAria = "", roleFormPurpose = "", fieldsetLegend = "", fieldsetPurpose = "" } = {}) {
+  const roleForm = roleFormAria || roleFormPurpose ? {
+    name: "", id: "", getAttribute(key) { return ({ "aria-label": roleFormAria, "data-purpose": roleFormPurpose, autocomplete: "", action: "" })[key] || ""; },
+  } : null;
+  const fieldset = fieldsetLegend || fieldsetPurpose ? {
+    getAttribute(key) { return ({ "data-purpose": fieldsetPurpose })[key] || ""; },
+    querySelector(selector) { return selector === ":scope > legend" && fieldsetLegend ? { textContent: fieldsetLegend } : null; },
+  } : null;
   return {
     type: "text", name, id, labels: [], disabled: false, readOnly: false, hidden: false,
     getAttribute(key) { return ({ "aria-label": aria, placeholder, title, autocomplete, "aria-labelledby": "", "aria-describedby": describedBy, "aria-hidden": "" })[key] || ""; },
     closest(selector) {
-      if (selector !== "form") return null;
-      return { name: formName, id: formId, getAttribute(key) { return ({ "aria-label": formAria, autocomplete: "", action: formAction })[key] || ""; } };
+      if (selector === "form") {
+        if (!(formAction || formName || formId || formAria)) return null;
+        return { name: formName, id: formId, getAttribute(key) { return ({ "aria-label": formAria, autocomplete: "", action: formAction })[key] || ""; } };
+      }
+      if (selector === '[role="form"]') return roleForm;
+      if (selector === "fieldset") return fieldset;
+      return null;
     },
     ownerDocument: { getElementById(referenceId) { return Object.prototype.hasOwnProperty.call(referenced, referenceId) ? { textContent: referenced[referenceId] } : null; } },
   };
@@ -119,6 +131,21 @@ test("sensitive form context blocks generic fields", async () => {
   ]) assert.equal(isSensitiveField(sensitive), true);
 
   assert.equal(isSensitiveField(field({ name: "body", formAction: "/articles/publish", formName: "editor" })), false);
+});
+
+test("semantic form and fieldset context protect generic fields on modern forms", async () => {
+  const { isSensitiveField } = await loadClassifier();
+  for (const sensitive of [
+    field({ name: "value", roleFormAria: "Payment details" }),
+    field({ id: "entry", roleFormPurpose: "accountLogin" }),
+    field({ name: "answer", fieldsetLegend: "Security question" }),
+    field({ name: "value", fieldsetPurpose: "bankAccount" }),
+  ]) assert.equal(isSensitiveField(sensitive), true);
+
+  for (const normal of [
+    field({ name: "body", roleFormAria: "Article editor" }),
+    field({ name: "notes", fieldsetLegend: "Writing details" }),
+  ]) assert.equal(isSensitiveField(normal), false);
 });
 
 test("normal writing metadata remains eligible and described-by lookup is bounded", async () => {

@@ -32,136 +32,87 @@ test("dismissal keys cannot collide when issue fields contain separators", () =>
   const dismissedIssue = issue({ id: "a:b", source: "c", original: "bad", replacement: "good" });
   const distinctIssue = issue({ id: "a", source: "b:c", original: "bad", replacement: "good" });
   assert.notEqual(getIssueDismissalKey(dismissedIssue), getIssueDismissalKey(distinctIssue));
-  assert.deepEqual(
-    getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.id),
-    ["a"],
-  );
+  assert.deepEqual(getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.id), ["a"]);
 });
 
 test("dismissal keys preserve boundaries in suggestion text", () => {
   const dismissedIssue = issue({ original: "bad:word", replacement: "good" });
   const distinctIssue = issue({ original: "bad", replacement: "word:good" });
   assert.notEqual(getIssueDismissalKey(dismissedIssue), getIssueDismissalKey(distinctIssue));
-  assert.deepEqual(
-    getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.original),
-    ["bad"],
-  );
+  assert.deepEqual(getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.original), ["bad"]);
 });
 
 test("bulk acceptance skips stale and non-actionable suggestions", () => {
-  const issues = [
-    issue({ id: "stale", start: 0, end: 3, original: "old", replacement: "new" }),
-    issue({ id: "same", start: 4, end: 8, original: "word", replacement: "word" }),
-  ];
+  const issues = [issue({ id: "stale", original: "old", replacement: "new" }), issue({ id: "same", start: 4, end: 8, original: "word", replacement: "word" })];
   assert.equal(applyIssueReplacements("bad word", issues), "bad word");
 });
 
 test("bulk acceptance rejects malformed or out-of-bounds suggestion ranges", () => {
-  const malformed = [
-    issue({ id: "negative", start: -3, end: 0 }),
-    issue({ id: "reversed", start: 3, end: 0 }),
-    issue({ id: "fractional", start: 0.5, end: 3.5 }),
-    issue({ id: "past-end", start: 6, end: 9, original: "bad" }),
-    issue({ id: "length-mismatch", start: 0, end: 2, original: "bad" }),
-  ];
+  const malformed = [issue({ start: -3, end: 0 }), issue({ start: 3, end: 0 }), issue({ start: 0.5, end: 3.5 }), issue({ start: 6, end: 9 }), issue({ start: 0, end: 2 })];
   assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
 });
 
 test("bulk acceptance fails closed on malformed runtime text payloads", () => {
-  const malformed = [
-    issue({ id: "null-original", original: null }),
-    issue({ id: "object-original", original: { text: "bad" } }),
-    issue({ id: "number-replacement", replacement: 123 }),
-    issue({ id: "object-replacement", replacement: { text: "good" } }),
-  ];
+  const malformed = [issue({ original: null }), issue({ original: { text: "bad" } }), issue({ replacement: 123 }), issue({ replacement: { text: "good" } })];
   assert.doesNotThrow(() => applyIssueReplacements("bad word", malformed));
   assert.equal(applyIssueReplacements("bad word", malformed), "bad word");
 });
 
 test("malformed runtime payloads do not block independent valid suggestions", () => {
-  const issues = [
-    issue({ id: "malformed", original: null }),
-    issue({ id: "valid", start: 4, end: 8, original: "word", replacement: "term" }),
-  ];
-  assert.equal(applyIssueReplacements("bad word", issues), "bad term");
+  assert.equal(applyIssueReplacements("bad word", [issue({ original: null }), issue({ start: 4, end: 8, original: "word", replacement: "term" })]), "bad term");
 });
 
 test("bulk acceptance skips all overlapping suggestions rather than choosing one implicitly", () => {
-  const issues = [
-    issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),
-    issue({ id: "inner", start: 1, end: 2, original: "a", replacement: "x" }),
-  ];
-  assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+  assert.equal(applyIssueReplacements("bad word", [issue({ start: 0, end: 3, original: "bad", replacement: "great" }), issue({ start: 1, end: 2, original: "a", replacement: "x" })]), "bad word");
 });
 
 test("identical duplicate replacements are applied once instead of being treated as a conflict", () => {
+  assert.equal(applyIssueReplacements("bad word", [issue({ source: "local" }), issue({ source: "ai" })]), "good word");
+});
+
+test("bulk acceptance skips competing insertions at the same position", () => {
+  const issues = [issue({ start: 3, end: 3, original: "", replacement: "!" }), issue({ start: 3, end: 3, original: "", replacement: "?" })];
+  assert.equal(applyIssueReplacements("bad word", issues), "bad word");
+});
+
+test("competing insertions remain conflicting when an adjacent range ends at their position", () => {
   const issues = [
-    issue({ id: "local-copy", source: "local", replacement: "good" }),
-    issue({ id: "ai-copy", source: "ai", replacement: "good" }),
+    issue({ id: "range", start: 0, end: 3, original: "bad", replacement: "good" }),
+    issue({ id: "insert-a", start: 3, end: 3, original: "", replacement: "!" }),
+    issue({ id: "insert-b", start: 3, end: 3, original: "", replacement: "?" }),
   ];
   assert.equal(applyIssueReplacements("bad word", issues), "good word");
 });
 
-test("bulk acceptance skips competing insertions at the same position", () => {
-  const issues = [
-    issue({ id: "insert-a", start: 3, end: 3, original: "", replacement: "!" }),
-    issue({ id: "insert-b", start: 3, end: 3, original: "", replacement: "?" }),
-  ];
-  assert.equal(applyIssueReplacements("bad word", issues), "bad word");
-});
-
 test("identical duplicate insertions are applied once", () => {
-  const issues = [
-    issue({ id: "insert-a", source: "local", start: 3, end: 3, original: "", replacement: "!" }),
-    issue({ id: "insert-b", source: "ai", start: 3, end: 3, original: "", replacement: "!" }),
-  ];
+  const issues = [issue({ source: "local", start: 3, end: 3, original: "", replacement: "!" }), issue({ source: "ai", start: 3, end: 3, original: "", replacement: "!" })];
   assert.equal(applyIssueReplacements("bad word", issues), "bad! word");
 });
 
 test("a single insertion remains actionable", () => {
-  const issues = [issue({ id: "insert", start: 3, end: 3, original: "", replacement: "!" })];
-  assert.equal(applyIssueReplacements("bad word", issues), "bad! word");
+  assert.equal(applyIssueReplacements("bad word", [issue({ start: 3, end: 3, original: "", replacement: "!" })]), "bad! word");
 });
 
 test("overlap conflicts do not block independent suggestions", () => {
-  const issues = [
-    issue({ id: "outer", start: 0, end: 3, original: "bad", replacement: "great" }),
-    issue({ id: "inner", start: 1, end: 2, original: "a", replacement: "x" }),
-    issue({ id: "independent", start: 4, end: 8, original: "word", replacement: "term" }),
-  ];
+  const issues = [issue({ start: 0, end: 3, replacement: "great" }), issue({ start: 1, end: 2, original: "a", replacement: "x" }), issue({ start: 4, end: 8, original: "word", replacement: "term" })];
   assert.equal(applyIssueReplacements("bad word", issues), "bad term");
 });
 
 test("nested overlap clusters mark every conflicting suggestion", () => {
   const text = "abcdefghij safe";
-  const issues = [
-    issue({ id: "outer", start: 0, end: 10, original: "abcdefghij", replacement: "outer" }),
-    issue({ id: "left", start: 1, end: 2, original: "b", replacement: "B" }),
-    issue({ id: "right", start: 8, end: 9, original: "i", replacement: "I" }),
-    issue({ id: "safe", start: 11, end: 15, original: "safe", replacement: "kept" }),
-  ];
+  const issues = [issue({ start: 0, end: 10, original: "abcdefghij", replacement: "outer" }), issue({ start: 1, end: 2, original: "b", replacement: "B" }), issue({ start: 8, end: 9, original: "i", replacement: "I" }), issue({ start: 11, end: 15, original: "safe", replacement: "kept" })];
   assert.equal(applyIssueReplacements(text, issues), "abcdefghij kept");
 });
 
 test("adjacent suggestions can still be applied together", () => {
-  const issues = [
-    issue({ id: "first", start: 0, end: 3, original: "bad", replacement: "good" }),
-    issue({ id: "second", start: 3, end: 4, original: " ", replacement: "-" }),
-    issue({ id: "third", start: 4, end: 8, original: "word", replacement: "term" }),
-  ];
+  const issues = [issue(), issue({ start: 3, end: 4, original: " ", replacement: "-" }), issue({ start: 4, end: 8, original: "word", replacement: "term" })];
   assert.equal(applyIssueReplacements("bad word", issues), "good-term");
 });
 
 test("bulk acceptance handles large independent suggestion sets without quadratic conflict scanning", () => {
   const count = 2000;
   const text = "a".repeat(count);
-  const issues = Array.from({ length: count }, (_, index) => issue({
-    id: `issue-${index}`,
-    start: index,
-    end: index + 1,
-    original: "a",
-    replacement: "b",
-  }));
+  const issues = Array.from({ length: count }, (_, index) => issue({ id: `issue-${index}`, start: index, end: index + 1, original: "a", replacement: "b" }));
   assert.equal(applyIssueReplacements(text, issues), "b".repeat(count));
 });
 

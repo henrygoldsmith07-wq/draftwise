@@ -37,14 +37,24 @@ function withoutOverlappingRanges(issues: WritingIssue[]) {
     .map((issue, index) => ({ issue, index }))
     .sort((left, right) => left.issue.start - right.issue.start || right.issue.end - left.issue.end);
   const conflicting = new Set<number>();
+  const insertionAt = new Map<number, number>();
   let furthest = ordered[0];
+
+  for (const entry of ordered) {
+    if (entry.issue.start === entry.issue.end) {
+      const previousInsertion = insertionAt.get(entry.issue.start);
+      if (previousInsertion !== undefined) {
+        conflicting.add(previousInsertion);
+        conflicting.add(entry.index);
+      } else {
+        insertionAt.set(entry.issue.start, entry.index);
+      }
+    }
+  }
 
   for (let index = 1; index < ordered.length; index += 1) {
     const current = ordered[index];
-    const competingInsertions = current.issue.start === current.issue.end
-      && furthest.issue.start === furthest.issue.end
-      && current.issue.start === furthest.issue.start;
-    if (current.issue.start < furthest.issue.end || competingInsertions) {
+    if (current.issue.start < furthest.issue.end) {
       conflicting.add(current.index);
       conflicting.add(furthest.index);
     }

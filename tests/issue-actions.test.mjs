@@ -28,6 +28,26 @@ test("dismissed suggestions stay excluded from bulk acceptance", () => {
   assert.equal(applyIssueReplacements("bad word", openIssues), "good word");
 });
 
+test("dismissal keys cannot collide when issue fields contain separators", () => {
+  const dismissedIssue = issue({ id: "a:b", source: "c", original: "bad", replacement: "good" });
+  const distinctIssue = issue({ id: "a", source: "b:c", original: "bad", replacement: "good" });
+  assert.notEqual(getIssueDismissalKey(dismissedIssue), getIssueDismissalKey(distinctIssue));
+  assert.deepEqual(
+    getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.id),
+    ["a"],
+  );
+});
+
+test("dismissal keys preserve boundaries in suggestion text", () => {
+  const dismissedIssue = issue({ original: "bad:word", replacement: "good" });
+  const distinctIssue = issue({ original: "bad", replacement: "word:good" });
+  assert.notEqual(getIssueDismissalKey(dismissedIssue), getIssueDismissalKey(distinctIssue));
+  assert.deepEqual(
+    getOpenIssues([dismissedIssue, distinctIssue], [getIssueDismissalKey(dismissedIssue)]).map((item) => item.original),
+    ["bad"],
+  );
+});
+
 test("bulk acceptance skips stale and non-actionable suggestions", () => {
   const issues = [
     issue({ id: "stale", start: 0, end: 3, original: "old", replacement: "new" }),

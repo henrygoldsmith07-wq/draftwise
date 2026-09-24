@@ -100,7 +100,7 @@ async function reconcileSiteAccessWithPermissions() {
   return changed;
 }
 
-function cancelActiveAiWork() {
+function clearAiRuntimeState() {
   for (const controller of activeRequests.values()) controller.abort();
   activeRequests.clear();
   analysisCache.clear();
@@ -182,24 +182,18 @@ async function initialise() {
   await syncRegisteredSites();
 }
 
-function clearAiRuntimeState() {
-  for (const controller of activeRequests.values()) controller.abort();
-  activeRequests.clear();
-  analysisCache.clear();
-}
-
 chrome.runtime.onInstalled.addListener(() => { void initialise(); });
 chrome.runtime.onStartup.addListener(() => { void initialise(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   const changedKeys = Object.keys(changes);
   if (changedKeys.some((key) => ["aiEnabled", "provider", "classifier", "style", "goals", "siteAccess", "disabledSites", "excludedSites", "disabledFields"].includes(key))) {
-    cancelActiveAiWork();
+    clearAiRuntimeState();
   }
   if (changes.siteAccess || changes.disabledSites || changes.excludedSites) void syncRegisteredSites();
 });
 chrome.permissions.onRemoved.addListener(() => {
-  cancelActiveAiWork();
+  clearAiRuntimeState();
   void reconcileSiteAccessWithPermissions()
     .then((changed) => { if (!changed) return syncRegisteredSites(); })
     .catch(() => syncRegisteredSites());
@@ -209,12 +203,12 @@ chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "clear-ai-cache") {
-    cancelActiveAiWork();
+    clearAiRuntimeState();
     sendResponse({ ok: true });
     return true;
   }
   if (message?.type === "register-site" || message?.type === "unregister-site") {
-    if (message.type === "unregister-site") cancelActiveAiWork();
+    if (message.type === "unregister-site") clearAiRuntimeState();
     const operation = message.type === "register-site" ? registerSite(message.hostname) : unregisterSite(message.hostname);
     operation.then((hostname) => sendResponse({ ok: true, hostname })).catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Site permission update failed." }));
     return true;
@@ -245,8 +239,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ requestId: message.requestId, issues: null, error: "Grant provider access in Draftwise settings before enabling AI." });
         return;
       }
-      // Classifier origin requires a separate grant. classifier.dev itself is keyless;
-      // a workspace key is only an optional limit/identity credential.
       const classifier = stored.classifier && stored.classifier.baseUrl ? stored.classifier : null;
       if (classifier) {
         let classifierOrigin;

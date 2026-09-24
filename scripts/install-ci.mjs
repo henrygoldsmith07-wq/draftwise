@@ -69,23 +69,6 @@ const installRuntimePackage = (specifier) => {
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
 
-// React requires react and react-dom to be byte-for-byte version peers at runtime.
-const reactVersion = readInstalledVersion("react");
-let reactDomVersion = readInstalledVersion("react-dom");
-if (reactDomVersion !== reactVersion) {
-  console.warn(
-    `Normalizing CI React runtime: react=${reactVersion}, react-dom=${reactDomVersion}.`,
-  );
-  installRuntimePackage(`react-dom@${reactVersion}`);
-  reactDomVersion = readInstalledVersion("react-dom");
-}
-if (reactDomVersion !== reactVersion) {
-  console.error(
-    `React runtime mismatch after CI install: react=${reactVersion}, react-dom=${reactDomVersion}.`,
-  );
-  process.exitCode = 69;
-}
-
 // Vinext 1.0.0-beta.10's callable `use cache` plugin requires plugin-rsc >=0.5.34.
 // The committed graph currently pins 0.5.26, which lets every test/evaluation pass
 // but crashes the production build during Vite config resolution. Normalize the CI
@@ -107,6 +90,25 @@ if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
 }
 if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
   console.error(`Vinext runtime mismatch after CI install: @vitejs/plugin-rsc=${pluginRscVersion}, required>=0.5.34.`);
+  process.exitCode = 69;
+}
+
+// npm install above can re-resolve transitive peer dependencies. React requires react
+// and react-dom to be byte-for-byte version peers, so enforce and verify that invariant
+// only after every runtime normalization has completed.
+const reactVersion = readInstalledVersion("react");
+let reactDomVersion = readInstalledVersion("react-dom");
+if (reactDomVersion !== reactVersion) {
+  console.warn(
+    `Normalizing CI React runtime: react=${reactVersion}, react-dom=${reactDomVersion}.`,
+  );
+  installRuntimePackage(`react-dom@${reactVersion}`);
+  reactDomVersion = readInstalledVersion("react-dom");
+}
+if (reactDomVersion !== reactVersion) {
+  console.error(
+    `React runtime mismatch after CI install: react=${reactVersion}, react-dom=${reactDomVersion}.`,
+  );
   process.exitCode = 69;
 }
 

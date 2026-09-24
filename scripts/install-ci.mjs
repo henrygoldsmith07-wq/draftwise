@@ -55,11 +55,11 @@ const readInstalledVersion = (name) => {
   }
 };
 
-const installRuntimePackage = (specifier) => {
+const installRuntimePackages = (...specifiers) => {
   const result = spawnSync(
     process.execPath,
     [
-      process.env.npm_execpath, "install", specifier, "--no-save",
+      process.env.npm_execpath, "install", ...specifiers, "--no-save",
       "--prefix", projectRoot, "--workspaces=false", "--legacy-peer-deps",
       "--prefer-offline", "--no-audit", "--no-fund",
     ],
@@ -85,7 +85,7 @@ const versionAtLeast = (version, minimum) => {
 let pluginRscVersion = readInstalledVersion("@vitejs/plugin-rsc");
 if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
   console.warn(`Normalizing CI @vitejs/plugin-rsc runtime: installed=${pluginRscVersion}, required>=0.5.34.`);
-  installRuntimePackage("@vitejs/plugin-rsc@0.5.34");
+  installRuntimePackages("@vitejs/plugin-rsc@0.5.34");
   pluginRscVersion = readInstalledVersion("@vitejs/plugin-rsc");
 }
 if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
@@ -102,7 +102,7 @@ if (reactDomVersion !== reactVersion) {
   console.warn(
     `Normalizing CI React runtime: react=${reactVersion}, react-dom=${reactDomVersion}.`,
   );
-  installRuntimePackage(`react-dom@${reactVersion}`);
+  installRuntimePackages(`react-dom@${reactVersion}`, "@vitejs/plugin-rsc@0.5.34");
   reactDomVersion = readInstalledVersion("react-dom");
 }
 if (reactDomVersion !== reactVersion) {

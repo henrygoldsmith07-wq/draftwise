@@ -25,9 +25,9 @@ if (readExecutionProfile() === "managed-linux") {
   process.exit(result.status ?? 1);
 }
 
-// The committed lockfile contains a mixed React toolchain used by Next/Vinext.
-// npm's modern peer resolver can reject that already-locked graph before CI reaches
-// product checks, so restore the lockfile first without re-resolving peer ranges.
+// The committed lockfile contains a mixed React/Vinext toolchain. Restore it first
+// without re-resolving peer ranges, then normalize the runtime-only incompatibilities
+// below so CI can exercise the product rather than fail in dependency setup.
 const installed = spawnSync(
   process.execPath,
   [
@@ -40,39 +40,73 @@ const installed = spawnSync(
 if (installed.error) throw installed.error;
 if (installed.status !== 0) process.exit(installed.status ?? 1);
 
-// React itself requires react and react-dom to be byte-for-byte version peers at
-// runtime. The repository lock currently resolves react-dom ahead of react, which
-// makes the production server build crash before application code is evaluated.
-// Normalize the installed CI graph to the pinned React version without rewriting
-// package.json/package-lock.json; the lockfile remains the reproducible source graph.
-const readInstalledVersion = (name) => JSON.parse(
-  readFileSync(path.join(projectRoot, "node_modules", name, "package.json"), "utf8"),
-).version;
+const readInstalledVersion = (name) => {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(path.join(projectRoot, "node_modules", name, "package.json"), "utf8"),
+    );
+    if (typeof manifest.version !== "string" || !manifest.version) {
+      throw new Error("package version is missing");
+    }
+    return manifest.version;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to verify installed ${name}: ${detail}`);
+  }
+};
 
+const installRuntimePackage = (specifier) => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      process.env.npm_execpath, "install", specifier, "--no-save",
+      "--prefix", projectRoot, "--workspaces=false", "--legacy-peer-deps",
+      "--prefer-offline", "--no-audit", "--no-fund",
+    ],
+    { stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+};
+
+// React requires react and react-dom to be byte-for-byte version peers at runtime.
 const reactVersion = readInstalledVersion("react");
 let reactDomVersion = readInstalledVersion("react-dom");
 if (reactDomVersion !== reactVersion) {
   console.warn(
     `Normalizing CI React runtime: react=${reactVersion}, react-dom=${reactDomVersion}.`,
   );
-  const normalized = spawnSync(
-    process.execPath,
-    [
-      process.env.npm_execpath, "install", `react-dom@${reactVersion}`, "--no-save",
-      "--prefix", projectRoot, "--workspaces=false", "--legacy-peer-deps",
-      "--prefer-offline", "--no-audit", "--no-fund",
-    ],
-    { stdio: "inherit" },
-  );
-  if (normalized.error) throw normalized.error;
-  if (normalized.status !== 0) process.exit(normalized.status ?? 1);
+  installRuntimePackage(`react-dom@${reactVersion}`);
   reactDomVersion = readInstalledVersion("react-dom");
 }
-
 if (reactDomVersion !== reactVersion) {
   console.error(
     `React runtime mismatch after CI install: react=${reactVersion}, react-dom=${reactDomVersion}.`,
   );
+  process.exitCode = 69;
+}
+
+// Vinext 1.0.0-beta.10's callable `use cache` plugin requires plugin-rsc >=0.5.34.
+// The committed graph currently pins 0.5.26, which lets every test/evaluation pass
+// but crashes the production build during Vite config resolution. Normalize the CI
+// runtime to the minimum compatible release and verify the result fail-closed.
+const minimumPluginRsc = [0, 5, 34];
+const parseVersion = (version) => version.split(".").slice(0, 3).map((part) => Number.parseInt(part, 10));
+const versionAtLeast = (version, minimum) => {
+  const parsed = parseVersion(version);
+  if (parsed.length !== 3 || parsed.some((part) => !Number.isInteger(part))) return false;
+  return parsed.some((part, index) => part > minimum[index] && parsed.slice(0, index).every((value, prior) => value === minimum[prior]))
+    || parsed.every((part, index) => part === minimum[index]);
+};
+
+let pluginRscVersion = readInstalledVersion("@vitejs/plugin-rsc");
+if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
+  console.warn(`Normalizing CI @vitejs/plugin-rsc runtime: installed=${pluginRscVersion}, required>=0.5.34.`);
+  installRuntimePackage("@vitejs/plugin-rsc@0.5.34");
+  pluginRscVersion = readInstalledVersion("@vitejs/plugin-rsc");
+}
+if (!versionAtLeast(pluginRscVersion, minimumPluginRsc)) {
+  console.error(`Vinext runtime mismatch after CI install: @vitejs/plugin-rsc=${pluginRscVersion}, required>=0.5.34.`);
   process.exitCode = 69;
 }
 

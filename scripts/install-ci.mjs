@@ -25,12 +25,17 @@ if (readExecutionProfile() === "managed-linux") {
   process.exit(result.status ?? 1);
 }
 
+// The committed lockfile contains an intentionally mixed React toolchain used by
+// Next/Vinext. npm's modern peer resolver can reject that already-locked graph
+// before CI reaches the product checks, so install the lockfile exactly instead
+// of trying to re-resolve peer compatibility during a clean install.
 // Invoke npm's JavaScript entrypoint, avoiding platform-specific shell shims.
 const installed = spawnSync(
   process.execPath,
   [
     process.env.npm_execpath, "ci", "--prefix", projectRoot, "--workspaces=false",
-    "--include=dev", "--include=optional", "--prefer-offline", "--no-audit", "--no-fund",
+    "--include=dev", "--include=optional", "--legacy-peer-deps", "--prefer-offline",
+    "--no-audit", "--no-fund",
   ],
   { stdio: "inherit" },
 );

@@ -186,8 +186,9 @@ chrome.runtime.onInstalled.addListener(() => { void initialise(); });
 chrome.runtime.onStartup.addListener(() => { void initialise(); });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.aiEnabled || changes.provider || changes.classifier) clearAiRuntimeState();
   const changedKeys = Object.keys(changes);
-  if (changedKeys.some((key) => ["aiEnabled", "provider", "classifier", "style", "goals", "siteAccess", "disabledSites", "excludedSites", "disabledFields"].includes(key))) {
+  if (changedKeys.some((key) => ["style", "goals", "siteAccess", "disabledSites", "excludedSites", "disabledFields"].includes(key))) {
     clearAiRuntimeState();
   }
   if (changes.siteAccess || changes.disabledSites || changes.excludedSites) void syncRegisteredSites();

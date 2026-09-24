@@ -20,7 +20,20 @@ jobs:
           cache: npm
       - run: npm run install:ci
       - run: npm run type-check
-      - run: npm test
+      - name: Run tests
+        id: tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.log
+      - name: Upload test diagnostics
+        if: failure() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics-${{ github.run_id }}
+          path: test-output.log
+          if-no-files-found: error
+          retention-days: 7
       - run: npm run evaluate -- --strict
       - run: npm run evaluate:triage:offline -- --strict
       - run: npm run lint

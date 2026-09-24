@@ -39,5 +39,18 @@ jobs:
       - run: npm run lint
       - run: npm run extension:build
       - run: git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
-      - run: npm run build
+      - name: Run production build
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build-output.log
+      - name: Upload build diagnostics
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics-${{ github.run_id }}
+          path: build-output.log
+          if-no-files-found: error
+          retention-days: 7
       - run: git diff --exit-code

@@ -19,6 +19,7 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm run install:ci
+      - run: npm install --no-save --legacy-peer-deps @vitejs/plugin-rsc@0.5.34 react-dom@19.2.6
       - run: npm run type-check
       - name: Run tests
         id: tests

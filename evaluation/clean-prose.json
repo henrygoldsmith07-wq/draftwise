@@ -748,5 +748,105 @@
     "id": "marketing-025",
     "style": "marketing",
     "text": "The page helps teams choose a simple next step by showing the practical benefit first, explaining the setup clearly, and ending with one useful action."
+  },
+  {
+    "id": "prod-001",
+    "style": "product",
+    "text": "The web app loads the bundle and sends each request to the server."
+  },
+  {
+    "id": "prod-002",
+    "style": "product",
+    "text": "The load balancer routes traffic to a healthy instance in the same region."
+  },
+  {
+    "id": "prod-003",
+    "style": "product",
+    "text": "Our stats show that most users load the page before the first render finishes."
+  },
+  {
+    "id": "prod-004",
+    "style": "product",
+    "text": "The app size has grown over time, so we split the bundle into smaller pieces."
+  },
+  {
+    "id": "prod-005",
+    "style": "product",
+    "text": "The team stores each draft in local storage and keeps a short history."
+  },
+  {
+    "id": "prod-006",
+    "style": "product",
+    "text": "This setting controls whether the editor runs its checks on every keystroke."
+  },
+  {
+    "id": "prod-007",
+    "style": "product",
+    "text": "The server returns a score for each chunk so the client can show progress."
+  },
+  {
+    "id": "prod-008",
+    "style": "product",
+    "text": "We send a request to the provider only when the local rules need help."
+  },
+  {
+    "id": "prod-009",
+    "style": "product",
+    "text": "The browser renders the panel outside the page so the host cannot read it."
+  },
+  {
+    "id": "prod-010",
+    "style": "product",
+    "text": "The extension registers itself only on sites where the user grants access."
+  },
+  {
+    "id": "prod-011",
+    "style": "product",
+    "text": "A cache keeps the last result so a repeated request does not cost anything."
+  },
+  {
+    "id": "prod-012",
+    "style": "product",
+    "text": "The plugin reads the config file and builds a worker for each route."
+  },
+  {
+    "id": "prod-013",
+    "style": "product",
+    "text": "Our metrics show that the string comparison is the slowest step in the loop."
+  },
+  {
+    "id": "prod-014",
+    "style": "product",
+    "text": "The logic lives in a pure function so that it stays easy to test."
+  },
+  {
+    "id": "prod-015",
+    "style": "product",
+    "text": "The script writes a report to the output folder after the build finishes."
+  },
+  {
+    "id": "prod-016",
+    "style": "product",
+    "text": "A key stored in the browser is not a secret vault, so the docs say so plainly."
+  },
+  {
+    "id": "prod-017",
+    "style": "product",
+    "text": "The package ships a small lexicon so that the checks work without a network call."
+  },
+  {
+    "id": "prod-018",
+    "style": "product",
+    "text": "This release adds coverage for long documents and partial provider failures."
+  },
+  {
+    "id": "prod-019",
+    "style": "product",
+    "text": "The service checks the range before it applies any replacement to the draft."
+  },
+  {
+    "id": "prod-020",
+    "style": "product",
+    "text": "Every suggestion stays a preview until the writer chooses to accept it."
   }
 ]

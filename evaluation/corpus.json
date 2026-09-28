@@ -119,7 +119,7 @@
   {"id":"spelling-38","kind":"spelling","text":"The writer has responsability for the result.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
   {"id":"spelling-39","kind":"spelling","text":"The writer will repeatdly review the text.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
   {"id":"spelling-40","kind":"spelling","text":"The writer is writng a clear note.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
-  {"id":"spelling-41","kind":"spelling","text":"The writer can receeve the message.","expected":[{"ruleId":"spelling-lexicon","category":"spelling"}]},
+  {"id":"spelling-41","kind":"spelling","text":"The writer can receeve the message.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
   {"id":"spelling-42","kind":"spelling","text":"The writer can teh result.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
   {"id":"spelling-43","kind":"spelling","text":"The writer will seperately review the draft.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},
   {"id":"spelling-44","kind":"spelling","text":"The writer can expecially explain the result.","expected":[{"ruleId":"spelling-common-typo","category":"spelling"}]},

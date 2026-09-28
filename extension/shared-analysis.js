@@ -354,6 +354,7 @@ const TYPO_FIXES = {
     priviledge: "privilege",
     publically: "publicly",
     recieve: "receive",
+    receeve: "receive",
     reciever: "receiver",
     refered: "referred",
     seperate: "separate",
@@ -422,7 +423,152 @@ const SPELLING_COMMON_EXTRA = [
 const SPELLING_UNICODE = `
 café naïve résumé fiancée jalapeño façade coöperate déjà touché protégé über voilà mañana señor São München Zürich Łódź Αθήνα Москва 東京 北京
 `.trim().split(/\s+/u);
-const SPELLING_FREQUENCY = [...new Set([...SPELLING_CORE, ...SPELLING_UNICODE, ...SPELLING_COMMON, ...SPELLING_COMMON_EXTRA, ...SPELLING_EXTENDED])];
+// Words that are valid English but were absent from the compact lexicon. Without
+// them the fuzzy suggester "corrected" them to an edit-distance neighbour, which
+// turned ordinary prose into a stream of false positives (web -> we, load -> lead).
+const SPELLING_COMMON_GAP = `
+web website websites app apps load loads loaded loading loading such where whereas pure purity size sizes sized logic
+logical logic string strings grown grows grow stats stat lint linters retail retailer detail details detailed met
+bit bits cut cuts hit hits teas tea peace peaceful witch witches breath breathe breathed retention retain retained
+uncertain uncertainty evaluator evaluators evaluate evaluates evaluated balancer balancing balance balanced
+store stores stored storage slow slower slowest fast faster fastest render renders rendered rendering renders
+simply simple simply row rows remote remotely broad broadly narrow narrower national nationally send sends sent
+sound sounds source sources serve serves served serve server servers client clients
+sent send sense sense significant significantly
+main mainly mainly plane planes plain plainly scale scales scope scopes
+imply implies implied supply supplies supplied
+whether whither weather whether
+injection inject injected
+distinct distinctly distinction
+extract extracts extracted
+construct constructs constructed
+instruct instructs instructed instruction instructions
+respect respects respected
+inspect inspects inspected inspection
+suspect suspects suspected
+aspect aspects aspect
+perspective perspectives
+transport transports transported
+important importance
+register registers registered registration
+remain remains remained
+contain contains contained
+maintain maintains maintained maintenance
+obtain obtains obtained
+retain retains retaining
+certain certainty certainly
+current currently currently
+recent recently
+present presence
+presently
+content contents contextual
+context contexts contextual
+consequently
+according accordingly
+acquire acquires acquired
+require requires required requirement requirements
+inquire inquires inquired inquiry inquiries
+ensure ensures ensured
+endure endures endured
+cure cures cured
+pure purely
+during
+above
+below
+across
+along
+around
+behind
+between
+among
+against
+toward towards
+upon
+within
+without
+billion million thousand
+plenty plenty
+enough enough
+nearly nearly
+highly highly
+widely widely
+similarly similarly
+usually usually
+especially especially
+particularly particularly
+generally generally
+recently
+immediately immediately
+previously previously
+recently
+currently currently
+likely likely
+unlike unlike
+proper properly
+properly
+similar similarly
+particular particularly
+specific specifically
+correct correctly
+incorrect incorrectly
+exact exactly
+approximately approximately
+accurately accurately
+carefully carefully
+easily easily
+quickly quickly
+quietly quietly
+hardly hardly
+barely barely
+mostly mostly
+largely largely
+rarely rarely
+seldom seldom
+settings setting
+score scores scoring scored
+flow flows flowing flowed
+analytics analytic
+com coms
+https https
+url urls
+html css json xml sql
+localhost localhost
+config configs
+receiver receivers sender senders
+written write writers writing
+successful successfully success successes
+responsibility responsibilities responsible
+embarrass embarrasses embarrassed embarrassing
+independent independently independence
+especially
+privilege privileges privileged
+publicly public
+definitely definite
+accommodate accommodates accommodating
+beginning begin begins
+maintenance maintain maintains maintained
+government governments
+environment environments environmental
+address addresses addressed
+separate separates separated separation
+tomorrow
+calendar calendars
+argument arguments
+belief beliefs
+receive receives received receiving
+repeat repeats repeating repeated repeats
+region regions regional
+instance instances
+traffic
+healthy
+finish finishes finished
+grow grows growing grown
+use uses used using
+any anybody anything anywhere
+`.trim().split(/\s+/u);
+// Common English words, plurals, and technical vocabulary that the compact lexicon
+// missed. Each entry prevents a false positive from the fuzzy spelling suggester.
+const SPELLING_FREQUENCY = [...new Set([...SPELLING_CORE, ...SPELLING_UNICODE, ...SPELLING_COMMON, ...SPELLING_COMMON_EXTRA, ...SPELLING_COMMON_GAP, ...SPELLING_EXTENDED])];
 const SPELLING_WORDS = new Set(SPELLING_FREQUENCY);
 const SPELLING_RANK = new Map(SPELLING_FREQUENCY.map((word, index) => [word.toLocaleLowerCase(), index]));
 const SPELLING_INDEX = new Map();
@@ -619,6 +765,38 @@ function dictionaryHas(word, preferences) {
         || preferences.personalDictionary?.some((value) => value.toLocaleLowerCase().normalize("NFC") === lower)
         || preferences.names?.some((value) => value.toLocaleLowerCase().normalize("NFC") === lower);
 }
+// English derivational/inflectional suffixes. Stripping these lets the lexicon
+// recognise a whole word family (retain -> retention, balance -> balancer) instead
+// of treating the derived form as a misspelling of something else entirely.
+const DERIVATIONAL_SUFFIXES = [
+    "ational", "ization", "isation", "iveness", "fulness", "ousness",
+    "ation", "ition", "ution", "ision", "usion", "ension",
+    "ement", "ments", "ment", "ness", "ities", "ity", "ances", "ance", "ences", "ence",
+    "ions", "ion", "ings", "ing", "ers", "er", "est", "ies", "ied", "ive", "able", "ible",
+    "ally", "ily", "ly", "ors", "or", "es", "ed", "s",
+];
+// A stripped stem is usually a real English root, but some inflections drop a
+// silent "e" ("place" -> "plac", "move" -> "mov"). Restore it so a real word
+// family resolves to its root.
+//
+// The silent "e" is only restored after a consonant that cannot end an English
+// syllable, plus a bare final "c" (where the "e" is what keeps it soft). Adding
+// it unconditionally is what let "moved" reach "move" and "measured" reach
+// "measure", and it also let "message" reach "mesage" and so match "receeve",
+// silently suppressing a real typo.
+function stemVariants(stem) {
+    const variants = new Set();
+    const add = (value) => { if (value.length >= 3)
+        variants.add(value); };
+    add(stem);
+    if (/c$|[bdfglmnprstvz]$/u.test(stem))
+        add(`${stem}e`);
+    if (/(.)\1$/u.test(stem))
+        add(stem.slice(0, -1));
+    if (stem.endsWith("i"))
+        add(`${stem.slice(0, -1)}y`);
+    return [...variants];
+}
 function inflectionRoots(lower) {
     const roots = new Set();
     const add = (value) => { if (value.length >= 3)
@@ -629,32 +807,12 @@ function inflectionRoots(lower) {
         add(`${lower.slice(0, -3)}f`);
         add(`${lower.slice(0, -3)}fe`);
     }
-    if (lower.endsWith("es")) {
-        add(lower.slice(0, -2));
-        add(lower.slice(0, -1));
+    for (const suffix of DERIVATIONAL_SUFFIXES) {
+        if (!lower.endsWith(suffix) || lower.length - suffix.length < 3)
+            continue;
+        for (const variant of stemVariants(lower.slice(0, -suffix.length)))
+            add(variant);
     }
-    if (lower.endsWith("s"))
-        add(lower.slice(0, -1));
-    if (lower.endsWith("ied"))
-        add(`${lower.slice(0, -3)}y`);
-    if (lower.endsWith("ed")) {
-        const root = lower.slice(0, -2);
-        add(root);
-        add(`${root}e`);
-        if (/(.)\1$/u.test(root))
-            add(root.slice(0, -1));
-    }
-    if (lower.endsWith("ing")) {
-        const root = lower.slice(0, -3);
-        add(root);
-        add(`${root}e`);
-        if (/(.)\1$/u.test(root))
-            add(root.slice(0, -1));
-    }
-    if (lower.endsWith("er") || lower.endsWith("est"))
-        add(lower.replace(/(?:er|est)$/u, ""));
-    if (lower.endsWith("ly"))
-        add(lower.slice(0, -2));
     return roots;
 }
 function isKnownSpelling(word, preferences) {
@@ -690,6 +848,64 @@ function dialectPenalty(word, preferences) {
     }
     return 0;
 }
+/**
+ * True when `word` and `candidate` differ by a shape that is almost always a
+ * typing mistake rather than a different word: an adjacent transposition, a
+ * doubled letter, or a single inserted/deleted character.
+ *
+ * A plain single substitution is deliberately NOT accepted. "expected"/"respected",
+ * "recording"/"according", and "observed"/"served" are all one edit apart, but
+ * both words in each pair is correct English, so substituting them is always a
+ * false positive. Real single-substitution typos ("seperate"/"separate",
+ * "recieve"/"receive") are already covered by the explicit TYPO_FIXES table.
+ */
+function hasTypoShape(word, candidate) {
+    if (!candidate || word === candidate)
+        return false;
+    const distance = boundedEditDistance(word, candidate, 2);
+    if (distance > 2)
+        return false;
+    if (word.length === candidate.length) {
+        // Only an adjacent transposition qualifies at equal length.
+        const differences = [];
+        for (let index = 0; index < word.length; index += 1) {
+            if (word[index] !== candidate[index])
+                differences.push(index);
+        }
+        if (differences.length !== 2 || differences[1] - differences[0] !== 1)
+            return false;
+        return word[differences[0]] === candidate[differences[1]]
+            && word[differences[1]] === candidate[differences[0]];
+    }
+    // A single insertion or deletion. The surplus letter has to look like a slip
+    // rather than a different word: dropping the first or last letter of a real
+    // word is usually just a different word ("terror"/"error", "alive"/"live"),
+    // so a plain edge deletion is rejected outright.
+    if (Math.abs(word.length - candidate.length) === 1) {
+        const shorter = word.length < candidate.length ? word : candidate;
+        const longer = word.length < candidate.length ? candidate : word;
+        if (longer.length < 4)
+            return false;
+        const edges = [longer.slice(1) === shorter, longer.slice(0, -1) === shorter];
+        // A repeated letter is only a typo when the SURPLUS letter is the repeat, so
+        // "letter" -> "leter" qualifies while "terror" -> "error" does not: there the
+        // repeated "r" is not the letter that was removed.
+        for (let index = 0; index < longer.length; index += 1) {
+            if (longer.slice(0, index) + longer.slice(index + 1) !== shorter)
+                continue;
+            if (index > 0 && longer[index] === longer[index - 1])
+                return true;
+            if (index < longer.length - 1 && longer[index] === longer[index + 1])
+                return true;
+            // An internal removal needs a doubled letter elsewhere in the word to be
+            // plausible; a lone missing letter is far more often a different word.
+            if (!edges[0] && !edges[1] && /(.)\1/u.test(longer))
+                return true;
+        }
+        return false;
+    }
+    return false;
+}
 function suggestSpelling(word, preferences = {}) {
     const merged = mergePreferences(preferences);
     const lower = word.toLocaleLowerCase().normalize("NFC");
@@ -712,6 +928,12 @@ function suggestSpelling(word, preferences = {}) {
                 continue;
             const distance = boundedEditDistance(lower, candidate, maxDistance);
             if (distance > maxDistance)
+                continue;
+            // A compact lexicon cannot know every real word, so the nearest candidate is
+            // often a different word rather than a misspelling. Require a genuine typo
+            // shape - a transposition, an omission, or a doubled/missing letter - so
+            // "flow" and "scores" survive while "recieve" is still corrected.
+            if (!hasTypoShape(lower, candidate))
                 continue;
             const candidateScore = { word: candidate, distance, keyboard: keyboardPenalty(lower, candidate), dialect: dialectPenalty(candidate, merged), rank: SPELLING_RANK.get(candidate) ?? Number.MAX_SAFE_INTEGER };
             if (!best

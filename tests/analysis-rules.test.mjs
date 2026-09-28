@@ -49,6 +49,60 @@ test("spelling handles transpositions, omitted letters, inflections, hyphens, po
   assert.equal(result.issues.some((issue) => issue.category === "spelling"), false);
 });
 
+test("spelling never rewrites ordinary words to an edit-distance neighbour", () => {
+  // These are real words whose nearest lexicon neighbour is a different word.
+  // A compact lexicon must not "correct" them into a suggestion.
+  const realWords = [
+    "web", "app", "load", "such", "where", "pure", "size", "logic", "string",
+    "grown", "stats", "met", "bit", "cut", "hit", "teas", "peace", "witch",
+    "breath", "scores", "flow", "settings", "retention", "evaluator", "balancer",
+  ];
+  for (const word of realWords) {
+    assert.equal(suggestSpelling(word), null, `expected no correction for "${word}"`);
+  }
+});
+
+test("a leading-letter difference is not treated as a typo", () => {
+  // Each of these is a real word that is one letter longer than a different real
+  // word, so none may be "corrected" by deleting the first letter.
+  for (const word of ["terror", "alike", "alive", "mirror", "horror", "narrow", "borrow", "sorrow"]) {
+    assert.equal(suggestSpelling(word), null, `expected no correction for "${word}"`);
+  }
+});
+
+test("a doubled letter and an adjacent transposition are still corrected", () => {
+  assert.equal(suggestSpelling("writting"), "writing");   // doubled letter
+  assert.equal(suggestSpelling("adddress"), "address");   // doubled letter
+  assert.equal(suggestSpelling("writng"), "writing");     // internal omission
+  assert.equal(suggestSpelling("helo"), "hello");         // internal omission
+  assert.equal(suggestSpelling("taht"), "that");          // transposition
+  assert.equal(suggestSpelling("becuase"), "because");    // transposition
+});
+
+test("clean technical prose produces no spelling suggestions", () => {
+  const prose = "The web app loads the app bundle and sends a request to the server. "
+    + "The load balancer routes each request to a healthy instance. "
+    + "Retention policy is enforced by the storage team. "
+    + "Our stats show that users load pages quickly, and the app size has grown over time. "
+    + "The rules are where the value lies. Keep the string small, and keep the pure logic separate.";
+  const result = analyzeLocally(prose);
+  assert.deepEqual(
+    result.issues.filter((issue) => issue.ruleId.startsWith("spelling")).map((issue) => `${issue.original} -> ${issue.replacement}`),
+    [],
+  );
+});
+
+test("derived word families are recognised instead of flagged", () => {
+  // -er / -ion / -ment / -ness forms must resolve to a known root rather than to
+  // an unrelated neighbour.
+  for (const word of ["retention", "evaluator", "balancer", "uncertain", "receiver", "written"]) {
+    assert.equal(suggestSpelling(word), null, `expected no correction for "${word}"`);
+  }
+  // A doubled letter is the one shape that is unambiguous enough to correct
+  // without a lexicon entry, so "writting" still resolves to "writing".
+  assert.equal(suggestSpelling("writting"), "writing");
+});
+
 test("article exceptions and noun agreement cover common high-confidence cases", () => {
   const correct = analyzeLocally("An hour passed. An honest answer helps. An honour matters. A university has a user guide for a European one-time test.");
   assert.equal(correct.issues.some((issue) => issue.ruleId === "grammar-article-agreement"), false);

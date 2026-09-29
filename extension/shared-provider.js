@@ -565,6 +565,13 @@ finish finishes finished
 grow grows growing grown
 use uses used using
 any anybody anything anywhere
+top
+tree
+god
+cat
+raise raises raised raising
+steep steeper
+teen
 `.trim().split(/\s+/u);
 // Common English words, plurals, and technical vocabulary that the compact lexicon
 // missed. Each entry prevents a false positive from the fuzzy spelling suggester.

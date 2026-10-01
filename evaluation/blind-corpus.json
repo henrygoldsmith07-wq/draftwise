@@ -1,0 +1,493 @@
+[
+  {
+    "id": "blind-essay-001",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Attention is the rarest form of generosity. We spend it on people who repay it, and we call that strategy. The essays collected here argue for a less transactional account of focus, and they do so without reaching for the usual vocabulary of optimisation.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-002",
+    "style": "essay",
+    "kind": "clean",
+    "text": "A reader who has been wrong in public learns something that a reader who has been right does not. The first experience has texture. It stays with them, and it makes the next argument easier to begin, because the cost of starting has already been paid once.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-003",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Cities are argued into existence. Every street that looks inevitable was once a suggestion that somebody made out loud and somebody else refused. What survives is not the best plan but the most persistent one, which is a different and less flattering kind of merit.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-004",
+    "style": "essay",
+    "kind": "spelling",
+    "text": "The committee recieved the report three weeks late, and by then the original arguement about scope had been overtaken by events. A revised proposal was circulated, althogh nobody could say who had asked for it in the first place.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "recieved"
+      },
+      {
+        "category": "spelling",
+        "original": "arguement"
+      },
+      {
+        "category": "spelling",
+        "original": "althogh"
+      }
+    ]
+  },
+  {
+    "id": "blind-essay-005",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Historians disagree about the century in which the practice began, and the disagreement is more informative than the dating. Each side finds evidence that suits its narrative, which tells us that the evidence was never scarce. Only the framing was.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-006",
+    "style": "essay",
+    "kind": "grammar",
+    "text": "Neither the committee nor the reviewers were able to explain why the proposal had failed, and each of them had a theory that the other two considered obviously wrong. It was, by any measure, a productive afternoon.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "were"
+      }
+    ]
+  },
+  {
+    "id": "blind-essay-007",
+    "style": "essay",
+    "kind": "clean",
+    "text": "The essay argues against the premise rather than within it. That distinction matters, because an argument conducted inside a false premise can be flawless and still tell us nothing, while an argument that attacks the premise may look untidy and yet be the only useful one available.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-008",
+    "style": "essay",
+    "kind": "punctuation",
+    "text": "There are three ways to lose an argument; you can be wrong, you can be right and lose anyway, or you can be right and win. Only the first is a mistake, the other two are structural, and treating all three as failures is how people end up refusing to enter debates at all.",
+    "expected": [
+      {
+        "category": "punctuation",
+        "original": "mistake"
+      }
+    ]
+  },
+  {
+    "id": "blind-email-001",
+    "style": "email",
+    "kind": "clean",
+    "text": "Hi Sam, thanks for picking this up while I was out. I've left some notes in the shared doc, mostly about sequencing rather than wording. Nothing is urgent, but it would help to have your read before Thursday if that works for you.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-002",
+    "style": "email",
+    "kind": "clean",
+    "text": "Quick one. The supplier has come back on the delivery date and it is earlier than we planned, which is good news but creates a problem with the warehouse slot. Can you check whether Friday still works before I reply to them?",
+    "expected": []
+  },
+  {
+    "id": "blind-email-003",
+    "style": "email",
+    "kind": "spelling",
+    "text": "Apologies for the delay in replying. I recieved your message while travelling and it took longer than expected to get back to a desk. The report is now with Priya, and she should be able to send something by the end of the week.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "recieved"
+      }
+    ]
+  },
+  {
+    "id": "blind-email-004",
+    "style": "email",
+    "kind": "clean",
+    "text": "Thanks for flagging it. I agree the deadline is tight but I don't think it's unrealistic, provided we get the data by Tuesday. If that slips we'll need to talk about scope rather than quality, because I'm reluctant to cut anything that the client specifically asked for.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-005",
+    "style": "email",
+    "kind": "grammar",
+    "text": "Please let me know if either myself or my colleague are able to attend, so that we can finalise the arrangements well in advance of the meeting.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "myself"
+      }
+    ]
+  },
+  {
+    "id": "blind-email-006",
+    "style": "email",
+    "kind": "clean",
+    "text": "Following up on my last note. I've spoken to the team and the position is that we can deliver the first half on time and the second half a fortnight later. That seems like the honest version of the plan, and it's better than promising everything and missing half of it.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-007",
+    "style": "email",
+    "kind": "clean",
+    "text": "Just to confirm the details from this morning: the room is booked for two, the agenda has been circulated, and the pre-read is attached. If anyone has additions to the agenda, please send them to me before lunch on Wednesday.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-001",
+    "style": "report",
+    "kind": "clean",
+    "text": "Overall performance was stable across the quarter. Revenue grew by four per cent against the same period last year, which is below the forecast but ahead of the revised plan agreed in March. Operating costs remained flat, and headcount did not change.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-002",
+    "style": "report",
+    "kind": "clean",
+    "text": "Three risks were identified during the review. The first is supplier concentration, since two vendors account for most of our spend. The second is the ageing of the reporting stack. The third, and the hardest to quantify, is our dependence on a small number of individuals with undocumented knowledge.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-003",
+    "style": "report",
+    "kind": "spelling",
+    "text": "The audit identified several seperate issues relating to access control. In particuliar, two accounts retained permissions after the staff member had left the organisation. We recommend that quarterly reviews of this kind become standard practice.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "seperate"
+      },
+      {
+        "category": "spelling",
+        "original": "particuliar"
+      }
+    ]
+  },
+  {
+    "id": "blind-report-004",
+    "style": "report",
+    "kind": "clean",
+    "text": "Methodology. We compared the twelve sites against a common baseline, excluding sites opened for less than six months because their data was still settling. Results are therefore conservative, and we would expect the true figure to improve as the newer sites mature.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-005",
+    "style": "report",
+    "kind": "capitalization",
+    "text": "The Board approved the budget on 14 March. A subsequent review found that the contingency allocated to property costs had been understated, and the shortfall was covered by deferring planned maintenance works to the next financial year.",
+    "expected": [
+      {
+        "category": "capitalization",
+        "original": "Board"
+      }
+    ]
+  },
+  {
+    "id": "blind-report-006",
+    "style": "report",
+    "kind": "clean",
+    "text": "Recommendation. The panel recommends that the committee adopt the revised threshold, subject to the caveat that the underlying data covers only two full years. A longer series would allow the seasonal effect to be separated from the trend with reasonable confidence.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-007",
+    "style": "report",
+    "kind": "clean",
+    "text": "Appendix B sets out the assumptions behind the forecast, including the inflation rate, the staffing profile and the depreciation schedule. Where an assumption could not be evidenced, it has been marked and the sensitivity shown alongside the central case.",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-001",
+    "style": "casual",
+    "kind": "clean",
+    "text": "yeah so basically we just need to get the thing sorted before friday, i mean its not urgent but if we leave it we will just end up doing it at the last minute again which is a bit of a nightmare",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-002",
+    "style": "casual",
+    "kind": "clean",
+    "text": "honestly thats really kind of you, i was dreading that whole thing. anyway ive got to run but ill shout tomorrow. oh and dont forget to bring the thing",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-003",
+    "style": "casual",
+    "kind": "spelling",
+    "text": "i recieved your message and i will definitly have a look tomorrow. sorry for not getting back sooner, its been one of those weeks where everything takes twice as long as it should",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "recieved"
+      },
+      {
+        "category": "spelling",
+        "original": "definitly"
+      }
+    ]
+  },
+  {
+    "id": "blind-casual-004",
+    "style": "casual",
+    "kind": "clean",
+    "text": "haha thats brilliant, i completely forgot about that. ok yeah that works, see you there",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-005",
+    "style": "casual",
+    "kind": "grammar",
+    "text": "There's three people coming to the thing tomorrow, and they're bringing their partners. Could you let me know if your still able to do it, as its the last thing we need to sort out",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "your"
+      }
+    ]
+  },
+  {
+    "id": "blind-casual-006",
+    "style": "casual",
+    "kind": "clean",
+    "text": "im not sure if ill have time to look at it properly but ill give it a go. worst case we just go with what we had last time, it was fine",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-007",
+    "style": "casual",
+    "kind": "clean",
+    "text": "just realised i never actually sent you those files sorry. they should be in your inbox somewhere, let me know if they havent arrived and ill send them again",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-001",
+    "style": "technical",
+    "kind": "clean",
+    "text": "The cache key is a hash of the document text and the active settings fingerprint. When either changes, the previous entry is discarded. Because the cache is bounded and keyed on content, a stale result cannot be returned for text the writer has since modified.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-002",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Rewrites are validated against the exact original substring at the recorded offsets. If the text at those offsets has changed since the preview was generated, the rewrite is rejected rather than applied, because applying it would corrupt text the writer did not agree to change.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-003",
+    "style": "technical",
+    "kind": "spelling",
+    "text": "The worker recieves a batch of chunks and returns an ordered array of decisions. Each decision is matched back to its chunk by identifier rather than by position, so a dropped response leaves an explicit hole instead of silently shifting every later chunk.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "recieves"
+      }
+    ]
+  },
+  {
+    "id": "blind-technical-004",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Requests carry an AbortSignal. When the writer types again, the in-flight request is aborted, and any response that arrives afterwards is discarded because its run identifier no longer matches the current one.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-005",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Analysis runs in two stages. The local engine produces issues immediately and works offline. The optional provider stage runs afterwards, only for chunks that the local engine flagged, and only when the writer has explicitly enabled it and supplied their own key.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-006",
+    "style": "technical",
+    "kind": "grammar",
+    "text": "The service worker never exposes the API key to the content script. Instead the content script sends text to the worker, the worker performs the request, and only the validated issues are returned. Each of these three steps happens in a different security context.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "of"
+      }
+    ]
+  },
+  {
+    "id": "blind-technical-007",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Offsets are mapped back to absolute document positions after chunking, and any context window added for the request is trimmed again before the response is applied. This keeps highlighted ranges aligned with the text the writer actually sees.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-008",
+    "style": "technical",
+    "kind": "clean",
+    "text": "The response body is read through a bounded reader that refuses to buffer more than a fixed number of bytes. An oversized or malformed payload fails explicitly instead of degrading quietly, so the writer sees an error rather than an absence of suggestions.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-009",
+    "style": "essay",
+    "kind": "clean",
+    "text": "The habit of finishing what one begins is not a moral virtue, whatever the schools claim. It is a practical one. A person who completes small projects reliably develops an accurate estimate of what they can promise, and that estimate is the foundation of every larger undertaking.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-010",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Nothing ages faster than an explanation written by the person who already understands it. The best teaching material is produced by those who had to work it out, and it is almost always produced slowly, which is why so much of it is missing.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-011",
+    "style": "essay",
+    "kind": "clean",
+    "text": "We tend to remember the argument we won and forget the one we lost, which produces a cheerful but inaccurate picture of our own judgement. The record of the arguments we lost is a better guide to future decisions than the record of the ones we prevailed in.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-008",
+    "style": "email",
+    "kind": "clean",
+    "text": "I've attached the revised figures. The change is smaller than the headline suggests because we reclassified two sites out of the comparison, and I wanted you to see the reasoning before anyone else does, given how much of the argument rested on them.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-009",
+    "style": "email",
+    "kind": "clean",
+    "text": "If it helps, I can take the Thursday slot and leave you the Friday one. That would give us a day to recover if the morning overruns, which on past form is a reasonable assumption rather than a pessimistic one.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-010",
+    "style": "email",
+    "kind": "clean",
+    "text": "Not urgent, but I should mention that the building will be closed on the twenty-third, so anything that needs collecting needs collecting before then. The car park is also unavailable, which I found out the hard way this morning.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-008",
+    "style": "report",
+    "kind": "clean",
+    "text": "Sample size was limited to nine sites because two withdrew after the study began. We have not replaced them, as the sites were selected for their operational similarity and a less comparable site would weaken the result more than a smaller sample would.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-009",
+    "style": "report",
+    "kind": "clean",
+    "text": "The figure for the second quarter is presented net of refunds, consistent with the treatment applied in previous periods. Readers comparing across the two will otherwise see an apparent rise of about six per cent, which is an artefact rather than a change in trading.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-010",
+    "style": "report",
+    "kind": "clean",
+    "text": "Costs attributable to the restructuring were met from the existing contingency and no additional borrowing was required. We do not anticipate a material effect on the dividend, though the board reserves the right to review that position at the half year.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-011",
+    "style": "report",
+    "kind": "clean",
+    "text": "Findings are reported by region because national totals conceal the pattern. The three regions differ more from one another than any of them differs from the national average, which would be invisible if only the aggregate were published.",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-008",
+    "style": "casual",
+    "kind": "clean",
+    "text": "nah it was rubbish honestly, couldnt sit through it. me and jake left after twenty minutes and went to get food instead, much better use of an evening",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-009",
+    "style": "casual",
+    "kind": "clean",
+    "text": "ok thats sorted then. ill grab the stuff tomorrow and we can sort the rest when we get there. should be quick if nothing else goes wrong, which, knowing us",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-010",
+    "style": "casual",
+    "kind": "clean",
+    "text": "that was a proper laugh. cheers for putting it on, we ended up staying up til nearly midnight talking about it",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-009",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Storage is split by responsibility. Document bodies and revision history live in IndexedDB, while small preferences live in localStorage. Neither is synchronised, and nothing is transmitted unless the writer enables a provider and supplies their own credentials.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-010",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Protected spans are identified before any rewrite is proposed. URLs, email addresses, dates, currency amounts, identifiers and quoted material are masked, so a model cannot corrupt them, and the mask is restored only if the surrounding text is unchanged.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-011",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Concurrency is capped rather than unbounded. Requests beyond the cap are queued in order, and each is cancelled when a newer edit invalidates it, so a burst of typing produces fewer requests rather than more.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-012",
+    "style": "technical",
+    "kind": "clean",
+    "text": "The scoring model is deliberately transparent. Each dimension is derived from named signals that a reader can inspect, and no dimension is presented as a measurement. A number without a stated basis would be less honest than showing the working.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-012",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Translation is the clearest available test of whether an idea is understood. A writer who cannot restate a position in another language has usually found the shape of the words rather than the shape of the thought, and that distinction is invisible in the original.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-013",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Every institution describes itself in the present tense and its failures in the past. The tense carries the argument, and a reader who notices the shift has learned more about the institution than any of the statistics in the report.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-011",
+    "style": "email",
+    "kind": "clean",
+    "text": "One more thing before Friday. The client has asked for the summary to be shorter than originally agreed, and I think we can do that without losing the part that matters, but it does mean cutting the background section entirely rather than compressing it.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-012",
+    "style": "report",
+    "kind": "clean",
+    "text": "Data were collected between March and September, which covers one full seasonal cycle but only one. Repeating the collection next year would allow us to separate genuine variation from ordinary annual fluctuation, and we would recommend funding that if the decision is within our gift.",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-011",
+    "style": "casual",
+    "kind": "clean",
+    "text": "sounds good to me, ill grab some stuff on the way. do we need anything from the shop or have we got enough",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-013",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Host permissions are optional and granted per site. The extension registers no static content script; it asks for access to an origin only when the writer grants it, and revoking that grant unregisters the script immediately rather than at the next browser start.",
+    "expected": []
+  }
+]

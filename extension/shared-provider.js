@@ -298,6 +298,27 @@ return { createAnalysisChunks, expandRangeToContext, mapChunkIssue, mergeAnalysi
 const DraftwiseGrammarModule = (() => {
 const { mergeAnalysisIssues } = DraftwiseAnalysisModule;
 
+const clamp = (value) => Math.max(0, Math.min(100, Math.round(value)));
+function preserveCase(original, replacement) {
+    if (!replacement)
+        return replacement;
+    if (original === original.toUpperCase())
+        return replacement.toUpperCase();
+    if (original[0] === original[0]?.toUpperCase())
+        return replacement[0].toUpperCase() + replacement.slice(1);
+    return replacement;
+}
+function issueTextFingerprint(text) {
+    let hash = 2_166_136_261;
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16_777_619);
+    }
+    return (hash >>> 0).toString(36);
+}
+function createIssueId(ruleId, start, end, original) {
+    return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+}
 const DEFAULT_STYLE_PREFERENCES = {
     dialect: "en-GB",
     personalDictionary: [],
@@ -311,6 +332,18 @@ const DEFAULT_STYLE_PREFERENCES = {
     preferredSentenceLength: "balanced",
     blockedWords: [],
 };
+function mergePreferences(options = {}) {
+    return {
+        ...DEFAULT_STYLE_PREFERENCES,
+        ...options,
+        personalDictionary: options.personalDictionary ?? DEFAULT_STYLE_PREFERENCES.personalDictionary,
+        names: options.names ?? DEFAULT_STYLE_PREFERENCES.names,
+        ignoredWords: options.ignoredWords ?? DEFAULT_STYLE_PREFERENCES.ignoredWords,
+        ignoredRuleIds: options.ignoredRuleIds ?? DEFAULT_STYLE_PREFERENCES.ignoredRuleIds,
+        preferredTerminology: options.preferredTerminology ?? DEFAULT_STYLE_PREFERENCES.preferredTerminology,
+        blockedWords: options.blockedWords ?? DEFAULT_STYLE_PREFERENCES.blockedWords,
+    };
+}
 function analysisNow() {
     return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
@@ -330,7 +363,6 @@ function createAnalysisDiagnostics(issueCount, startedAt, engine, details = {}) 
         ...details,
     };
 }
-const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
 const TYPO_FIXES = {
     alot: "a lot",
     adn: "and",
@@ -401,7 +433,7 @@ javascript typescript python java rust go html css json xml sql api sdk npm node
 quick brown fox jumps lazy dog hello thanks please welcome ready carefully interesting draftwise assistant improve improvement suggestion suggestions accept dismiss rewrite rewrites alternative alternatives document documents text words word you're we're they're don't can't won't isn't it's that's couldn't wouldn't shouldn't
 `.trim().split(/\s+/u);
 const SPELLING_EXTENDED = `
-ability able absence absolute absolutely abstract abundant accelerate acceptable access accident accompany accomplish achievement acknowledge acquire across action activate activity actual adapt adequate adjust administration admire admission adopt advance advantage advertise advice advise affect afford afraid agency agenda aggressive agriculture aircraft alarm album alcohol alert allocate allowance alter alternative ambitious analyse announcement annual anticipate anxiety apartment apparent appeal appearance application appoint appreciate approach appropriate approval argue arise arrangement arrival aspect assemble assess assessment assign assistance assumption assure atmosphere attach attempt attention attitude attorney attract attractive audience author authority automatic available average avoid awareness balance barrier basic basis battery beautiful behaviour belief belong benefit beside bicycle biology boundary branch bravery breathe brilliant budget calculate campaign candidate capability capacity capture category celebrate challenge champion channel chapter character charity chemical circumstance citizen clarify classic climate clinical combine comfortable command comment commercial communicate communication competition competitive complaint complete complex component compose composition compromise concentration concept conclude condition conference confidence confirm conflict connect consequence conservative consider consistent constant construct consumer contain contemporary content contract contribute convenient coordinate corporation creative crisis criterion crucial curious current customer damage database deadline debate decade decline dedicate defend define definite demonstrate deny department depend deposit derive destination detail detect determine device diagram digital dimension direction discover discussion display distance distinct distribute district diverse document duration dynamic earn editorial efficient element eliminate emerge emphasis emotional employ employee enable encounter encourage energy engine enhance enormous ensure enterprise entertain entire enthusiasm equivalent establish estimate ethics evaluate evidence exact examine exception exchange exclude execute exhibit expand expectation expense experience experiment expert expose express extension external factor failure familiar fashion feature feedback festival fiction finance flexible flight flourish focus foreign formal foundation framework frequent function fundamental gain gallery gender generate generation generous geography global govern guidance habit handle hardware healthy hesitate highlight historical honest honour hospital household however hygiene ideal identify illustrate image imagination immediate implement implication importance impressive improve incentive incident include income indicate individual industry inevitable influence initial innovate inquiry insight inspect install instance instead institute integrate intelligence intend intense interact interest internal international interpret interrupt introduce invest investigate involve isolate issue item journey judge justice junior keyboard laboratory language launch layer legal legacy length lesson liberal library licence lifetime likely limit liquid literature locate logical loyalty maintain maintenance manage manner manual manufacture margin market material mature maximum measure mechanism media medicine mention mental method migrate minimum minor mission mobile moderate modern monitor motivate multiple mutual native natural nearby negotiate negative negotiate network neutral notice notion objective obtain obvious occasion official operate opportunity option ordinary organise outcome overall participate partner particular pattern perceive perform permission perspective phase physical policy position positive potential practice precise predict prefer prepare present previous primary principle privacy proceed process produce professional progress project promote propose protect psychology publish purchase pursue quality quarter question rapid rarely react realistic reason recommend recover reduce refer reflect region register regular reject release relevant reliable remain remove replace represent require residence resolve resource respond responsibility restrict retail reveal revise routine safety sample satisfy schedule scope secure segment select sensitive sequence separate serious significant similar simple sincere since single situation sketch solution source specific stable standard statement strategic strategy strengthen structure submit substantial succeed sufficient suggest support survey symbol technical technique technology temporary tension terminology terminal theme thorough thought throughout topic transform transition translate transport trend typical unique update useful valid value variable various vehicle version virtual visible vision visual volume volunteer warn whereas whole widely willing window within without wonder workflow worthy writing wrong youth
+ability able absence absolute absolutely abstract abundant accelerate acceptable access accident accompany accomplish achievement acknowledge acquire across action activate activity actual adapt adequate adjust administration admire admission adopt advance advantage advertise advice advise affect afford afraid agency agenda aggressive agriculture aircraft alarm album alcohol alert allocate allowance alter alternative ambitious analyse announcement annual anticipate anxiety apartment apparent appeal appearance application appoint appreciate approach appropriate approval argue arise arrangement arrival aspect assemble assess assessment assign assistance assumption assure atmosphere attach attempt attention attitude attorney attract attractive audience author authority automatic available average avoid awareness balance barrier basic basis battery beautiful behaviour belief belong benefit beside bicycle biology boundary branch bravery breathe brilliant budget calculate campaign candidate capability capacity capture category celebrate challenge champion channel chapter character charity chemical circumstance citizen clarify classic climate clinical combine comfortable command comment commercial communicate communication competition competitive complaint complete complex component compose composition compromise concentration concept conclude condition conference confidence confirm conflict connect consequence conservative consider consistent constant construct consumer contain contemporary content contract contribute convenient coordinate corporation creative crisis criterion crucial curious current customer damage database deadline debate decade decline dedicate defend define definite demonstrate deny department depend deposit derive destination detail detect determine device diagram digital dimension direction discover discussion display distance distinct distribute district diverse document duration dynamic earn editorial efficient element eliminate emerge emphasis emotional employ employee enable encounter encourage energy engine enhance enormous ensure enterprise entertain entire enthusiasm equivalent establish estimate ethics evaluate evidence exact examine exception exchange exclude execute exhibit expand expectation expense experience experiment expert export expose express extension external factor failure familiar fashion feature feedback festival fiction finance flexible flight flourish focus foreign formal foundation framework frequent function fundamental gain gallery gender generate generation generous geography global govern guidance habit handle hardware healthy hesitate highlight historical honest honour hospital household however hygiene ideal identify illustrate image imagination immediate implement implication importance impressive improve incentive incident include income indicate individual industry inevitable influence initial innovate inquiry insight inspect install instance instead institute integrate intelligence intend intense interact interest internal international interpret interrupt introduce invest investigate involve isolate issue item journey judge justice junior keyboard laboratory language launch layer legal legacy length lesson liberal library licence lifetime likely limit liquid literature locate logical loyalty maintain maintenance manage manner manual manufacture margin market material mature maximum measure mechanism media medicine mention mental method migrate minimum minor mission mobile moderate modern monitor motivate multiple mutual native natural nearby negotiate negative negotiate network neutral notice notion objective obtain obvious occasion official operate opportunity option ordinary organise outcome overall participate partner particular pattern perceive perform permission perspective phase physical policy position positive potential practice precise predict prefer prepare present previous primary principle privacy proceed process produce professional progress project promote propose protect psychology publish purchase pursue quality quarter question rapid rarely react realistic reason recommend recover reduce refer reflect region register regular reject release relevant reliable remain remove replace represent require residence resolve resource respond responsibility restrict retail reveal revise routine safety sample satisfy schedule scope secure segment select sensitive sequence separate serious significant similar simple sincere since single situation sketch solution source specific stable standard statement strategic strategy strengthen structure submit substantial succeed sufficient suggest support survey symbol technical technique technology temporary tension terminology terminal theme thorough thought throughout topic transform transition translate transport trend typical unique update useful valid value variable various vehicle version virtual visible vision visual volume volunteer warn whereas whole widely willing window within without wonder workflow worthy writing wrong youth
 `.trim().split(/\s+/u);
 const SPELLING_COMMON = `
 above across again against almost already always among another anyone anything appear around ask away become before behind below between both call called country customer enough event example effect experience family far few final find following full future great help has history important including interface interfaces later least loose lunch main matter matters message much must need never next note often once open original others own plan possible practical probably question rather reason real recent right same saw send several something sometimes specific step still sure task team tell than though through today under user users usually value was why yet are aspects act box changer close contact being
@@ -573,19 +605,6 @@ raise raises raised raising
 steep steeper
 teen
 `.trim().split(/\s+/u);
-// Common English words, plurals, and technical vocabulary that the compact lexicon
-// missed. Each entry prevents a false positive from the fuzzy spelling suggester.
-const SPELLING_FREQUENCY = [...new Set([...SPELLING_CORE, ...SPELLING_UNICODE, ...SPELLING_COMMON, ...SPELLING_COMMON_EXTRA, ...SPELLING_COMMON_GAP, ...SPELLING_EXTENDED])];
-const SPELLING_WORDS = new Set(SPELLING_FREQUENCY);
-const SPELLING_RANK = new Map(SPELLING_FREQUENCY.map((word, index) => [word.toLocaleLowerCase(), index]));
-const SPELLING_INDEX = new Map();
-SPELLING_FREQUENCY.forEach((word) => {
-    const normalized = word.toLocaleLowerCase();
-    const bucket = SPELLING_INDEX.get(normalized.length) ?? [];
-    bucket.push(normalized);
-    SPELLING_INDEX.set(normalized.length, bucket);
-});
-const SPELLING_CACHE = new Map();
 const CONTRACTIONS = new Set([
     "aren't", "can't", "couldn't", "didn't", "doesn't", "don't", "hadn't", "hasn't", "haven't", "he'd", "he'll", "he's",
     "i'd", "i'll", "i'm", "i've", "isn't", "it'd", "it'll", "it's", "let's", "mightn't", "mustn't", "shan't", "she'd",
@@ -631,41 +650,6 @@ const DIALECT_VERB_CONTEXT = new Set(["i", "you", "we", "they", "he", "she", "it
 const DIALECT_NOUN_CONTEXT = new Set(["a", "an", "the", "my", "your", "our", "their", "this", "that", "driving", "software", "business", "professional", "commercial", "export", "operating", "training", "television", "tv", "radio", "loyalty", "rehabilitation", "education", "educational", "arts", "concert", "event"]);
 const PROGRAMME_COMPUTING_CONTEXT = new Set(["computer", "software", "code", "coding", "programming", "developer", "application", "app", "script", "source", "compile", "compiler", "debug", "debugging", "api", "machine", "algorithm", "database", "terminal", "runtime", "python", "javascript"]);
 const PROGRAMME_NON_COMPUTING_CONTEXT = new Set(["training", "television", "tv", "radio", "loyalty", "rehabilitation", "education", "educational", "arts", "concert", "event", "theatre"]);
-function contextualDialectReplacement(tokens, index, preferences) {
-    const word = tokens[index]?.lower;
-    if (!word || !CONTEXTUAL_DIALECT_WORDS.has(word))
-        return undefined;
-    const before = tokens.slice(Math.max(0, index - 3), index).map((token) => token.lower);
-    const after = tokens.slice(index + 1, index + 3).map((token) => token.lower);
-    const immediateBefore = before.at(-1);
-    const nearby = new Set([...before, ...after]);
-    const verbUse = Boolean(immediateBefore && DIALECT_VERB_CONTEXT.has(immediateBefore));
-    const nounUse = Boolean(immediateBefore && DIALECT_NOUN_CONTEXT.has(immediateBefore))
-        || before.some((value) => DIALECT_NOUN_CONTEXT.has(value));
-    if (word === "license" && preferences.dialect === "en-GB") {
-        if (verbUse)
-            return undefined;
-        return nounUse ? "licence" : undefined;
-    }
-    if (word === "licence" && preferences.dialect === "en-US") {
-        return verbUse || nounUse ? "license" : undefined;
-    }
-    if (word === "practice" && preferences.dialect === "en-GB") {
-        return verbUse ? "practise" : undefined;
-    }
-    if (word === "practise" && preferences.dialect === "en-US") {
-        return verbUse || nounUse ? "practice" : undefined;
-    }
-    if (word === "program" && preferences.dialect === "en-GB") {
-        if (nearby.has("software") || [...nearby].some((value) => PROGRAMME_COMPUTING_CONTEXT.has(value)))
-            return undefined;
-        return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value)) || nounUse ? "programme" : undefined;
-    }
-    if (word === "programme" && preferences.dialect === "en-US") {
-        return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value) || PROGRAMME_COMPUTING_CONTEXT.has(value)) || nounUse ? "program" : undefined;
-    }
-    return undefined;
-}
 const FILLER_WORDS = new Set([
     "actually",
     "basically",
@@ -707,38 +691,149 @@ const COMMON_WORDS = new Set([
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have", "in", "is", "it",
     "of", "on", "or", "that", "the", "this", "to", "was", "were", "with", "you", "your", "we", "our",
 ]);
-const clamp = (value) => Math.max(0, Math.min(100, Math.round(value)));
-function mergePreferences(options = {}) {
+const WORD_PATTERN = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
+function tokensIn(text, offset = 0) {
+    return [...text.matchAll(WORD_PATTERN)].map((match) => ({
+        value: match[0],
+        lower: match[0].toLocaleLowerCase(),
+        start: offset + (match.index ?? 0),
+        end: offset + (match.index ?? 0) + match[0].length,
+    }));
+}
+function sentenceSpans(text, allTokens) {
+    const spans = [];
+    const tokens = allTokens ?? tokensIn(text);
+    let tokenIndex = 0;
+    const pattern = /[^.!?…\n]+(?:[.!?…]+|$)/gu;
+    for (const match of text.matchAll(pattern)) {
+        const raw = match[0];
+        const leading = raw.search(/\S/u);
+        if (leading < 0)
+            continue;
+        const start = (match.index ?? 0) + leading;
+        const value = raw.slice(leading).trim();
+        if (!value)
+            continue;
+        const end = start + value.length;
+        while (tokenIndex < tokens.length && tokens[tokenIndex].end <= start)
+            tokenIndex += 1;
+        const sentenceTokens = [];
+        while (tokenIndex < tokens.length && tokens[tokenIndex].start < end) {
+            sentenceTokens.push(tokens[tokenIndex]);
+            tokenIndex += 1;
+        }
+        spans.push({ text: value, start, end, tokens: sentenceTokens });
+    }
+    return spans;
+}
+function parseDocument(text) {
+    const tokens = tokensIn(text);
+    const sentences = sentenceSpans(text, tokens);
+    const paragraphs = [];
+    let cursor = 0;
+    let tokenCursor = 0;
+    for (const paragraph of text.split(/\n\s*\n/gu)) {
+        const start = text.indexOf(paragraph, cursor);
+        cursor = Math.max(cursor, start + paragraph.length);
+        if (!paragraph.trim() || start < 0)
+            continue;
+        const end = start + paragraph.length;
+        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= start)
+            tokenCursor += 1;
+        const paragraphTokens = [];
+        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= end) {
+            paragraphTokens.push(tokens[tokenCursor]);
+            tokenCursor += 1;
+        }
+        paragraphs.push({ text: paragraph, start, end, tokens: paragraphTokens });
+    }
+    const frequencies = new Map();
+    for (const token of tokens)
+        frequencies.set(token.lower, (frequencies.get(token.lower) ?? 0) + 1);
     return {
-        ...DEFAULT_STYLE_PREFERENCES,
-        ...options,
-        personalDictionary: options.personalDictionary ?? DEFAULT_STYLE_PREFERENCES.personalDictionary,
-        names: options.names ?? DEFAULT_STYLE_PREFERENCES.names,
-        ignoredWords: options.ignoredWords ?? DEFAULT_STYLE_PREFERENCES.ignoredWords,
-        ignoredRuleIds: options.ignoredRuleIds ?? DEFAULT_STYLE_PREFERENCES.ignoredRuleIds,
-        preferredTerminology: options.preferredTerminology ?? DEFAULT_STYLE_PREFERENCES.preferredTerminology,
-        blockedWords: options.blockedWords ?? DEFAULT_STYLE_PREFERENCES.blockedWords,
+        text,
+        tokens,
+        sentences,
+        paragraphs,
+        frequencies,
+        sentenceLengths: sentences.map((sentence) => sentence.tokens.length),
+        paragraphLengths: paragraphs.map((paragraph) => paragraph.tokens.length),
     };
 }
-function preserveCase(original, replacement) {
-    if (!replacement)
-        return replacement;
-    if (original === original.toUpperCase())
-        return replacement.toUpperCase();
-    if (original[0] === original[0]?.toUpperCase())
-        return replacement[0].toUpperCase() + replacement.slice(1);
-    return replacement;
+const analyzeDocument = parseDocument;
+function shouldIgnore(ruleId, original, preferences) {
+    const lower = original.trim().toLocaleLowerCase();
+    return preferences.ignoredRuleIds.includes(ruleId) || preferences.ignoredWords.some((word) => word.toLocaleLowerCase() === lower) || preferences.personalDictionary.some((word) => word.toLocaleLowerCase() === lower) || preferences.names?.some((word) => word.toLocaleLowerCase() === lower);
 }
-function issueTextFingerprint(text) {
-    let hash = 2_166_136_261;
-    for (let index = 0; index < text.length; index += 1) {
-        hash ^= text.charCodeAt(index);
-        hash = Math.imul(hash, 16_777_619);
+function makeIssue(ruleId, start, end, original, replacement, category, severity, title, explanation, confidence, preferences) {
+    if (!original || end <= start || shouldIgnore(ruleId, original, preferences))
+        return null;
+    return {
+        id: createIssueId(ruleId, start, end, original),
+        ruleId,
+        start,
+        end,
+        original,
+        replacement,
+        category,
+        severity,
+        confidence: Math.max(0, Math.min(1, confidence)),
+        title,
+        explanation,
+        source: "local",
+    };
+}
+function pushIssue(target, value) {
+    if (value)
+        target.push(value);
+}
+// Common English words, plurals, and technical vocabulary that the compact lexicon
+// missed. Each entry prevents a false positive from the fuzzy spelling suggester.
+const SPELLING_FREQUENCY = [...new Set([...SPELLING_CORE, ...SPELLING_UNICODE, ...SPELLING_COMMON, ...SPELLING_COMMON_EXTRA, ...SPELLING_COMMON_GAP, ...SPELLING_EXTENDED])];
+const SPELLING_WORDS = new Set(SPELLING_FREQUENCY);
+const SPELLING_RANK = new Map(SPELLING_FREQUENCY.map((word, index) => [word.toLocaleLowerCase(), index]));
+const SPELLING_INDEX = new Map();
+SPELLING_FREQUENCY.forEach((word) => {
+    const normalized = word.toLocaleLowerCase();
+    const bucket = SPELLING_INDEX.get(normalized.length) ?? [];
+    bucket.push(normalized);
+    SPELLING_INDEX.set(normalized.length, bucket);
+});
+const SPELLING_CACHE = new Map();
+function contextualDialectReplacement(tokens, index, preferences) {
+    const word = tokens[index]?.lower;
+    if (!word || !CONTEXTUAL_DIALECT_WORDS.has(word))
+        return undefined;
+    const before = tokens.slice(Math.max(0, index - 3), index).map((token) => token.lower);
+    const after = tokens.slice(index + 1, index + 3).map((token) => token.lower);
+    const immediateBefore = before.at(-1);
+    const nearby = new Set([...before, ...after]);
+    const verbUse = Boolean(immediateBefore && DIALECT_VERB_CONTEXT.has(immediateBefore));
+    const nounUse = Boolean(immediateBefore && DIALECT_NOUN_CONTEXT.has(immediateBefore))
+        || before.some((value) => DIALECT_NOUN_CONTEXT.has(value));
+    if (word === "license" && preferences.dialect === "en-GB") {
+        if (verbUse)
+            return undefined;
+        return nounUse ? "licence" : undefined;
     }
-    return (hash >>> 0).toString(36);
-}
-function createIssueId(ruleId, start, end, original) {
-    return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
+    if (word === "licence" && preferences.dialect === "en-US") {
+        return verbUse || nounUse ? "license" : undefined;
+    }
+    if (word === "practice" && preferences.dialect === "en-GB") {
+        return verbUse ? "practise" : undefined;
+    }
+    if (word === "practise" && preferences.dialect === "en-US") {
+        return verbUse || nounUse ? "practice" : undefined;
+    }
+    if (word === "program" && preferences.dialect === "en-GB") {
+        if (nearby.has("software") || [...nearby].some((value) => PROGRAMME_COMPUTING_CONTEXT.has(value)))
+            return undefined;
+        return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value)) || nounUse ? "programme" : undefined;
+    }
+    if (word === "programme" && preferences.dialect === "en-US") {
+        return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value) || PROGRAMME_COMPUTING_CONTEXT.has(value)) || nounUse ? "program" : undefined;
+    }
+    return undefined;
 }
 function boundedEditDistance(left, right, limit = 2) {
     if (Math.abs(left.length - right.length) > limit)
@@ -956,101 +1051,6 @@ function suggestSpelling(word, preferences = {}) {
     if (SPELLING_CACHE.size > 512)
         SPELLING_CACHE.delete(SPELLING_CACHE.keys().next().value);
     return result;
-}
-function tokensIn(text, offset = 0) {
-    return [...text.matchAll(WORD_PATTERN)].map((match) => ({
-        value: match[0],
-        lower: match[0].toLocaleLowerCase(),
-        start: offset + (match.index ?? 0),
-        end: offset + (match.index ?? 0) + match[0].length,
-    }));
-}
-function sentenceSpans(text, allTokens) {
-    const spans = [];
-    const tokens = allTokens ?? tokensIn(text);
-    let tokenIndex = 0;
-    const pattern = /[^.!?…\n]+(?:[.!?…]+|$)/gu;
-    for (const match of text.matchAll(pattern)) {
-        const raw = match[0];
-        const leading = raw.search(/\S/u);
-        if (leading < 0)
-            continue;
-        const start = (match.index ?? 0) + leading;
-        const value = raw.slice(leading).trim();
-        if (!value)
-            continue;
-        const end = start + value.length;
-        while (tokenIndex < tokens.length && tokens[tokenIndex].end <= start)
-            tokenIndex += 1;
-        const sentenceTokens = [];
-        while (tokenIndex < tokens.length && tokens[tokenIndex].start < end) {
-            sentenceTokens.push(tokens[tokenIndex]);
-            tokenIndex += 1;
-        }
-        spans.push({ text: value, start, end, tokens: sentenceTokens });
-    }
-    return spans;
-}
-function parseDocument(text) {
-    const tokens = tokensIn(text);
-    const sentences = sentenceSpans(text, tokens);
-    const paragraphs = [];
-    let cursor = 0;
-    let tokenCursor = 0;
-    for (const paragraph of text.split(/\n\s*\n/gu)) {
-        const start = text.indexOf(paragraph, cursor);
-        cursor = Math.max(cursor, start + paragraph.length);
-        if (!paragraph.trim() || start < 0)
-            continue;
-        const end = start + paragraph.length;
-        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= start)
-            tokenCursor += 1;
-        const paragraphTokens = [];
-        while (tokenCursor < tokens.length && tokens[tokenCursor].end <= end) {
-            paragraphTokens.push(tokens[tokenCursor]);
-            tokenCursor += 1;
-        }
-        paragraphs.push({ text: paragraph, start, end, tokens: paragraphTokens });
-    }
-    const frequencies = new Map();
-    for (const token of tokens)
-        frequencies.set(token.lower, (frequencies.get(token.lower) ?? 0) + 1);
-    return {
-        text,
-        tokens,
-        sentences,
-        paragraphs,
-        frequencies,
-        sentenceLengths: sentences.map((sentence) => sentence.tokens.length),
-        paragraphLengths: paragraphs.map((paragraph) => paragraph.tokens.length),
-    };
-}
-const analyzeDocument = parseDocument;
-function shouldIgnore(ruleId, original, preferences) {
-    const lower = original.trim().toLocaleLowerCase();
-    return preferences.ignoredRuleIds.includes(ruleId) || preferences.ignoredWords.some((word) => word.toLocaleLowerCase() === lower) || preferences.personalDictionary.some((word) => word.toLocaleLowerCase() === lower) || preferences.names?.some((word) => word.toLocaleLowerCase() === lower);
-}
-function makeIssue(ruleId, start, end, original, replacement, category, severity, title, explanation, confidence, preferences) {
-    if (!original || end <= start || shouldIgnore(ruleId, original, preferences))
-        return null;
-    return {
-        id: createIssueId(ruleId, start, end, original),
-        ruleId,
-        start,
-        end,
-        original,
-        replacement,
-        category,
-        severity,
-        confidence: Math.max(0, Math.min(1, confidence)),
-        title,
-        explanation,
-        source: "local",
-    };
-}
-function pushIssue(target, value) {
-    if (value)
-        target.push(value);
 }
 function findSpelling(text, preferences, document = parseDocument(text)) {
     const issues = [];
@@ -1481,6 +1481,23 @@ function scoreWriting(stats, issues, goals, text = "", document) {
     const overall = hasText ? clamp(correctness * 0.29 + clarity * 0.17 + conciseness * 0.14 + readability * 0.12 + engagement * 0.1 + consistency * 0.1 + goalAlignment * 0.08) : 0;
     return { correctness, clarity, conciseness, readability, engagement, consistency, goalAlignment, overall, grammar: correctness, breakdown };
 }
+const categoryColors = {
+    spelling: "#e25d70",
+    grammar: "#ef9f55",
+    punctuation: "#8b78e6",
+    clarity: "#4a9a9d",
+    conciseness: "#d8944a",
+    "word choice": "#3e87c7",
+    repetition: "#d46191",
+    tone: "#7b6fd2",
+    formality: "#4e879c",
+    readability: "#4e879c",
+    fluency: "#4e879c",
+    "passive voice": "#b5794e",
+    "sentence structure": "#7a9d5e",
+    consistency: "#6a8f68",
+    capitalization: "#bf7a42",
+};
 function mergeWritingIssues(issues) {
     return mergeAnalysisIssues(issues);
 }
@@ -1556,25 +1573,9 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
     const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "incremental");
     return { issues, tone: inferTone(nextText, document), stats, scores: scoreWriting(stats, issues, goals, nextText, document), ...(diagnostics ? { diagnostics } : {}) };
 }
-const categoryColors = {
-    spelling: "#e25d70",
-    grammar: "#ef9f55",
-    punctuation: "#8b78e6",
-    clarity: "#4a9a9d",
-    conciseness: "#d8944a",
-    "word choice": "#3e87c7",
-    repetition: "#d46191",
-    tone: "#7b6fd2",
-    formality: "#4e879c",
-    readability: "#4e879c",
-    fluency: "#4e879c",
-    "passive voice": "#b5794e",
-    "sentence structure": "#7a9d5e",
-    consistency: "#6a8f68",
-    capitalization: "#bf7a42",
-};
+// Public surface preserved for the web app, the extension bundle, and the test suite.
 
-return { analyzeLocally, analyzeLocallyIncremental, detectChangedRange, getWritingStats };
+return { WORD_PATTERN, analyzeDocument, analyzeLocally, analyzeLocallyIncremental, categoryColors, createAnalysisDiagnostics, detectChangedRange, getWritingStats, inferTone, mergeWritingIssues, parseDocument, scoreWriting, suggestSpelling };
 })();
 const DraftwiseProviderModule = (() => {
 const { createAnalysisChunks, expandRangeToContext, mapChunkIssue, mergeAnalysisIssues } = DraftwiseAnalysisModule;

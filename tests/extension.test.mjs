@@ -88,6 +88,45 @@ test("generated bundles load at runtime and the service worker starts without re
   assert.ok(serviceWorker.storage.writes >= 1);
 });
 
+test("the bundled grammar surface is callable, not merely present", async () => {
+  // Regression: the grammar bundle returned only part of its surface, so the provider
+  // prelude destructured `inferTone` and `scoreWriting` as undefined. Those consts then
+  // shadowed the in-scope functions and every provider-backed analysis threw a TypeError
+  // inside the extension. The bundle still parsed cleanly, which is why a load-time
+  // assertion never caught it.
+  const runtime = browserLikeContext();
+  vm.runInNewContext(readFileSync(file("extension/shared-analysis.js"), "utf8"), runtime.context, { filename: "shared-analysis.js" });
+  const grammar = runtime.context.DraftwiseGrammar;
+  for (const name of ["analyzeLocally", "analyzeLocallyIncremental", "detectChangedRange", "getWritingStats", "inferTone", "mergeWritingIssues", "parseDocument", "scoreWriting", "suggestSpelling", "analyzeDocument", "createAnalysisDiagnostics"]) {
+    assert.equal(typeof grammar[name], "function", name + " must be exported by the grammar bundle");
+  }
+  assert.equal(typeof grammar.categoryColors, "object");
+  assert.notEqual(grammar.WORD_PATTERN, undefined);
+
+  const text = "We have wrote the report. Its was very basic.";
+  const analysis = grammar.analyzeLocally(text, { dialect: "en-GB" });
+  assert.equal(typeof analysis.scores.overall, "number");
+  assert.ok(Array.isArray(analysis.tone));
+  assert.ok(Array.isArray(grammar.inferTone(text)));
+
+  // shared-provider.js rebuilds the same grammar module but keeps it module-private, so
+  // the invariant is checked on the generated artefact: every name its prelude pulls out
+  // of DraftwiseGrammarModule must be one that module actually returns.
+  const provider = await readFile(file("extension/shared-provider.js"), "utf8");
+  const grammarReturn = provider.match(/const DraftwiseGrammarModule = \(\(\) => \{[\s\S]*?\nreturn \{ ([^}]*) \};/u);
+  assert.ok(grammarReturn, "provider bundle must define the grammar module");
+  const returned = grammarReturn[1].split(",").map((name) => name.trim()).filter(Boolean);
+  const prelude = provider.match(/const \{ ([^}]*) \} = DraftwiseGrammarModule;/u);
+  assert.ok(prelude, "provider bundle must declare a grammar prelude");
+  const destructured = prelude[1].split(",").map((name) => name.trim()).filter(Boolean);
+  assert.deepEqual(destructured, ["analyzeLocally", "getWritingStats", "inferTone", "scoreWriting"]);
+  for (const name of destructured) {
+    assert.ok(returned.includes(name), "provider prelude destructures " + name + " but the grammar bundle does not return it");
+  }
+  const providerRuntime = browserLikeContext();
+  assert.doesNotThrow(() => vm.runInNewContext(provider, providerRuntime.context, { filename: "shared-provider.js" }));
+});
+
 test("clearing site access unregisters stale dynamically registered scripts", async () => {
   const runtime = browserLikeContext();
   runtime.storage.values = {

@@ -127,4 +127,6 @@ export { categoryColors, scoreWriting } from "./scoring.ts";
 export { getWritingStats, inferTone } from "./statistics.ts";
 export { suggestSpelling } from "./spelling.ts";
 export { createAnalysisDiagnostics } from "./diagnostics.ts";
+export { SUGGESTION_DENSITY_CAPS, classifyIssueKind, prioritiseSuggestions, ruleFamily } from "./prioritise.ts";
+export type { DismissedFinding, PrioritiseOptions, PrioritiseResult } from "./prioritise.ts";
 export type { GrammarOptions } from "./preferences.ts";

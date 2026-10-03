@@ -9,6 +9,7 @@ export const DEFAULT_STYLE_PREFERENCES : StylePreferences = {
   names: [],
   ignoredWords: [],
   ignoredRuleIds: [],
+  reducedRuleIds: [],
   preferredTerminology: {},
   oxfordComma: true,
   allowContractions: true,
@@ -29,6 +30,7 @@ export function mergePreferences(options: GrammarOptions = {}): StylePreferences
     names: options.names ?? DEFAULT_STYLE_PREFERENCES.names,
     ignoredWords: options.ignoredWords ?? DEFAULT_STYLE_PREFERENCES.ignoredWords,
     ignoredRuleIds: options.ignoredRuleIds ?? DEFAULT_STYLE_PREFERENCES.ignoredRuleIds,
+    reducedRuleIds: options.reducedRuleIds ?? DEFAULT_STYLE_PREFERENCES.reducedRuleIds,
     preferredTerminology: options.preferredTerminology ?? DEFAULT_STYLE_PREFERENCES.preferredTerminology,
     blockedWords: options.blockedWords ?? DEFAULT_STYLE_PREFERENCES.blockedWords,
   };

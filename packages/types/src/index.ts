@@ -20,6 +20,9 @@ export type IssueCategory =
 export type IssueSeverity = "low" | "medium" | "high";
 export type IssueSource = "local" | "ai";
 
+export type SuggestionTier = "fix-first" | "improve" | "optional";
+export type SuggestionKind = "objective" | "clarity" | "style";
+
 export interface WritingIssue {
   id: string;
   ruleId: string;
@@ -34,6 +37,42 @@ export interface WritingIssue {
   title: string;
   explanation: string;
   source: IssueSource;
+}
+
+/**
+ * A detected issue after context evaluation: classified by whether it is an
+ * objective error or a stylistic preference, scored for relevance and impact,
+ * assigned to a review tier, and ranked against everything else in the draft.
+ */
+export interface PrioritisedIssue extends WritingIssue {
+  tier: SuggestionTier;
+  kind: SuggestionKind;
+  /** Overall ranking score within the draft. Higher sorts first. */
+  rank: number;
+  /** How relevant the finding is to the surrounding sentence and register (0-1). */
+  contextRelevance: number;
+  /** How much fixing this is likely to change the reader's experience (0-1). */
+  impact: number;
+  /** Number of further findings folded into this one as the same pattern. */
+  groupedCount: number;
+  groupedIds: string[];
+  /** Short machine-readable reasons for the tiering decision, for tests and insights. */
+  reasonCodes: string[];
+}
+
+export interface SuppressedFinding {
+  issue: WritingIssue;
+  reason: "low-confidence-style" | "rule-reduced" | "rule-off" | "density-cap" | "repeated-pattern" | "register-mismatch" | "near-dismissal";
+}
+
+export interface SuggestionReport {
+  rawCount: number;
+  displayedCount: number;
+  suppressedCount: number;
+  groupedCount: number;
+  byTier: Record<SuggestionTier, number>;
+  byCategory: Record<string, number>;
+  suppressedByRule: Array<{ ruleId: string; suppressed: number; displayed: number }>;
 }
 
 export type ScoreDimension =
@@ -188,6 +227,8 @@ export interface StylePreferences {
   names?: string[];
   ignoredWords: string[];
   ignoredRuleIds: string[];
+  /** Rules the writer asked to see less often: their cap drops to one per document. */
+  reducedRuleIds: string[];
   preferredTerminology: Record<string, string>;
   oxfordComma: boolean;
   allowContractions: boolean;
@@ -344,6 +385,7 @@ export const DEFAULT_STYLE_PREFERENCES: StylePreferences = {
   names: [],
   ignoredWords: [],
   ignoredRuleIds: [],
+  reducedRuleIds: [],
   preferredTerminology: {},
   oxfordComma: true,
   allowContractions: true,

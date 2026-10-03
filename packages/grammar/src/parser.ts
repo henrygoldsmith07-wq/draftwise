@@ -39,7 +39,7 @@ function sentenceSpans(text: string, allTokens?: Token[]): SentenceSpan[] {
   const spans: SentenceSpan[] = [];
   const tokens = allTokens ?? tokensIn(text);
   let tokenIndex = 0;
-  const pattern = /[^.!?…\n]+(?:[.!?…]+|$)/gu;
+  const pattern = /[^.!?…\n]+(?:[.!?…]+(?=\s|$)|$)/gu;
   for (const match of text.matchAll(pattern)) {
     const raw = match[0];
     const leading = raw.search(/\S/u);

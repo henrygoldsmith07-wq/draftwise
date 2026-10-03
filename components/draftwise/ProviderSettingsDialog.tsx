@@ -1,11 +1,16 @@
 "use client";
 
-import { Info, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronRight, Info, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { ClassifierSettings, ProviderSettings, StylePreferences } from "@/packages/types/src";
+
+const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: string; baseUrl: string; modelPlaceholder: string }> = [
+  { value: "openai-compatible", label: "OpenAI", baseUrl: "https://api.openai.com/v1", modelPlaceholder: "gpt-4o-mini" },
+  { value: "custom", label: "OpenRouter / compatible", baseUrl: "https://openrouter.ai/api/v1", modelPlaceholder: "openai/gpt-4o-mini" },
+];
 
 interface ProviderSettingsDialogProps {
   open: boolean;
@@ -66,14 +71,6 @@ export function ProviderSettingsDialog({
         </DialogHeader>
 
         <div className="settings-stack">
-          <div className="settings-callout">
-            <ShieldCheck size={18} />
-            <div>
-              <strong>Three explicit paths</strong>
-              <span>Local-only checks stay on-device; classifier.dev receives excerpts for routing; your provider receives only chunks selected for AI review.</span>
-            </div>
-          </div>
-
           <div className="settings-row settings-row-toggle">
             <div>
               <strong>Enable AI suggestions</strong>
@@ -82,28 +79,42 @@ export function ProviderSettingsDialog({
             <Switch checked={aiEnabled} onCheckedChange={onAiEnabledChange} aria-label="Enable AI suggestions" />
           </div>
 
-          <div className="settings-grid">
-            <label className="field-label">
-              <span>Provider</span>
-              <select value={settings.provider} onChange={(event) => patchSettings({ provider: event.target.value as ProviderSettings["provider"] })}>
-                <option value="openai-compatible">OpenAI-compatible</option>
-                <option value="custom">Custom adapter</option>
-              </select>
-            </label>
-            <label className="field-label">
-              <span>Model ID</span>
-              <Input value={settings.model} onChange={(event) => patchSettings({ model: event.target.value })} placeholder="gpt-4o-mini" />
-            </label>
-          </div>
-
           <label className="field-label">
-            <span>Base URL <em>HTTPS required outside localhost</em></span>
-            <Input value={settings.baseUrl} onChange={(event) => patchSettings({ baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" inputMode="url" />
+            <span>Provider</span>
+            <select value={settings.provider} onChange={(event) => {
+              const value = event.target.value as ProviderSettings["provider"];
+              const preset = PROVIDER_PRESETS.find((item) => item.value === value);
+              patchSettings({ provider: value, ...(preset && !settings.baseUrl.trim() ? { baseUrl: preset.baseUrl } : {}) });
+            }}>
+              {PROVIDER_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
+            </select>
           </label>
 
           <label className="field-label">
             <span>API key <em>stored locally on this device</em></span>
             <Input type="password" value={settings.apiKey} onChange={(event) => patchSettings({ apiKey: event.target.value })} placeholder="sk-…" autoComplete="off" />
+          </label>
+
+          <label className="field-label">
+            <span>Model</span>
+            <Input value={settings.model} onChange={(event) => patchSettings({ model: event.target.value })} placeholder={PROVIDER_PRESETS.find((item) => item.value === settings.provider)?.modelPlaceholder ?? "gpt-4o-mini"} />
+          </label>
+
+          <details className="settings-advanced">
+            <summary><ChevronRight size={14} className="settings-advanced-chevron" /> Advanced</summary>
+            <div className="settings-stack settings-advanced-body">
+
+          <div className="settings-callout">
+            <ShieldCheck size={18} />
+            <div>
+              <strong>Three explicit paths</strong>
+              <span>Local-only checks stay on-device; classifier.dev receives excerpts for routing; your provider receives only chunks selected for AI review.</span>
+            </div>
+          </div>
+
+          <label className="field-label">
+            <span>Base URL <em>HTTPS required outside localhost</em></span>
+            <Input value={settings.baseUrl} onChange={(event) => patchSettings({ baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" inputMode="url" />
           </label>
 
           <div className="settings-grid">
@@ -147,6 +158,9 @@ export function ProviderSettingsDialog({
               <option value="local">Keep local (lower cost)</option>
             </select>
           </label>
+
+            </div>
+          </details>
 
           <div className="settings-grid">
             <label className="field-label">

@@ -73,6 +73,7 @@ export function isStylePreferences(value: unknown): value is StylePreferences {
     && (value.names === undefined || isStringArray(value.names))
     && isStringArray(value.ignoredWords)
     && isStringArray(value.ignoredRuleIds)
+    && (value.reducedRuleIds === undefined || isStringArray(value.reducedRuleIds))
     && isStringMap(value.preferredTerminology)
     && typeof value.oxfordComma === "boolean"
     && typeof value.allowContractions === "boolean"
@@ -157,6 +158,7 @@ function sanitiseStyle(value: unknown, fallback: StylePreferences): StylePrefere
     names: isStringArray(value.names) ? value.names : fallback.names,
     ignoredWords: isStringArray(value.ignoredWords) ? value.ignoredWords : fallback.ignoredWords,
     ignoredRuleIds: isStringArray(value.ignoredRuleIds) ? value.ignoredRuleIds : fallback.ignoredRuleIds,
+    reducedRuleIds: isStringArray(value.reducedRuleIds) ? value.reducedRuleIds : fallback.reducedRuleIds,
     preferredTerminology: isStringMap(value.preferredTerminology) ? value.preferredTerminology : fallback.preferredTerminology,
     oxfordComma: typeof value.oxfordComma === "boolean" ? value.oxfordComma : fallback.oxfordComma,
     allowContractions: typeof value.allowContractions === "boolean" ? value.allowContractions : fallback.allowContractions,

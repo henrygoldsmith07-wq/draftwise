@@ -22,13 +22,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, categoryMatches } from "@/components/draftwise/EditorPrimitives";
+import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, type SuggestionCardControls } from "@/components/draftwise/EditorPrimitives";
 import { RewritePreview } from "@/components/draftwise/RewritePreview";
 import { hasActionableReplacement } from "@/lib/issue-actions";
-import type { AnalysisResult, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
+import { rewriteActionsFor } from "@/lib/rewrite-actions";
+import { type SuggestionState, type TierFilter } from "@/lib/suggestions";
+import type { AnalysisResult, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
-
-type IssueFilter = "all" | "grammar" | "style";
 
 interface EditorWorkspaceProps {
   draft: string;
@@ -36,9 +36,10 @@ interface EditorWorkspaceProps {
   style: StylePreferences;
   analysis: AnalysisResult;
   openIssues: WritingIssue[];
-  visibleIssues: WritingIssue[];
+  visibleIssues: PrioritisedIssue[];
+  suggestions: SuggestionState;
   activeIssueId: string | null;
-  filter: IssueFilter;
+  filter: TierFilter;
   analyzing: boolean;
   analysisStatusLabel: string;
   analysisError?: string | null;
@@ -56,13 +57,14 @@ interface EditorWorkspaceProps {
   registerHighlight: (element: HTMLDivElement | null) => void;
   onDraftChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
   onGoalChange: (patch: Partial<WritingGoals>) => void;
-  onFilterChange: (filter: IssueFilter) => void;
+  onFilterChange: (filter: TierFilter) => void;
   onSelectionChange: () => void;
   onScroll: () => void;
   onSelectIssue: (issue: WritingIssue) => void;
   onAcceptIssue: (issue: WritingIssue) => void;
   onDismissIssue: (issue: WritingIssue) => void;
   onAddToDictionary: (word: string) => void;
+  onRuleControl: (ruleId: string, action: "reduce" | "off") => void;
   onAcceptAll: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -139,13 +141,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         {props.selection.end > props.selection.start ? (
           <div className="rewrite-toolbar">
             <span className="rewrite-toolbar-label"><WandSparkles size={14} /> Rewrite selection</span>
-            <button onClick={() => props.onRunRewrite("Improve", "Improve writing while preserving meaning")} type="button">Improve</button>
-            <button onClick={() => props.onRunRewrite("Fix grammar", "Fix grammar only")} type="button">Fix grammar</button>
-            <button onClick={() => props.onRunRewrite("Shorten", "Shorten without losing facts")} type="button">Shorten</button>
-            <button onClick={() => props.onRunRewrite("Expand", "Expand with useful detail")} type="button">Expand</button>
-            <button onClick={() => props.onRunRewrite("Simplify", "Simplify for a general reader")} type="button">Simplify</button>
-            <button onClick={() => props.onRunRewrite("Formal", "Make more formal and professional")} type="button">Formal</button>
-            <button onClick={() => props.onRunRewrite("Friendly", "Make warmer and more friendly")} type="button">Friendly</button>
+            {rewriteActionsFor(props.selectedText, props.goals, props.style).map((action) => (
+              <button key={action.label} onClick={() => props.onRunRewrite(action.label, action.instruction)} type="button">{action.label}</button>
+            ))}
             <div className="custom-rewrite">
               <Input value={props.customInstruction} onChange={(event) => props.onCustomInstructionChange(event.target.value)} placeholder="Custom instruction" aria-label="Custom rewrite instruction" />
               <button aria-label="Run custom instruction" onClick={() => { if (props.customInstruction.trim()) props.onRunRewrite("Custom rewrite", props.customInstruction); }} type="button"><Zap size={13} /></button>
@@ -191,9 +189,22 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       {props.suggestionsOpen ? (
         <aside className="suggestions-column">
           <div className="suggestions-header">
-            <div><p className="eyebrow">Live analysis</p><h2>Suggestions <span>{props.visibleIssues.length}</span></h2></div>
+            <div><p className="eyebrow">Live analysis</p><h2>Suggestions <span>{props.suggestions.report.displayedCount}</span></h2></div>
             <Button size="icon-sm" variant="ghost" aria-label="Collapse suggestions" onClick={props.onToggleSuggestions}><PanelRight size={17} /></Button>
           </div>
+          {props.suggestions.changesWorthMaking > 0 ? (
+            <div className="fix-first-banner">
+              <strong>{props.suggestions.changesWorthMaking} change{props.suggestions.changesWorthMaking === 1 ? "" : "s"} worth making</strong>
+              <span>{props.suggestions.report.suppressedCount > 0
+                ? `${props.suggestions.report.suppressedCount} lower-value finding${props.suggestions.report.suppressedCount === 1 ? "" : "s"} held back to keep the list focused.`
+                : "High-confidence problems first, then improvements, then preferences."}</span>
+              {props.suggestions.focus && props.suggestions.focus.id !== props.activeIssueId ? (
+                <button type="button" className="fix-first-next" onClick={() => props.onSelectIssue(props.suggestions.focus as PrioritisedIssue)}>
+                  Start with “{(props.suggestions.focus.original || props.suggestions.focus.title).trim().slice(0, 30)}” <ArrowDown size={12} />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="score-card">
             <div>
               <p className="score-kicker">Overall writing guide</p>
@@ -204,16 +215,23 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             <ScoreRing score={props.analysis.scores.overall} />
           </div>
           <div className="issue-tabs">
-            <Tabs value={props.filter} onValueChange={(value) => props.onFilterChange(value as IssueFilter)}>
+            <Tabs value={props.filter} onValueChange={(value) => props.onFilterChange(value as TierFilter)}>
               <TabsList variant="line">
-                <TabsTrigger value="all">All <span>{props.openIssues.length}</span></TabsTrigger>
-                <TabsTrigger value="grammar">Correctness <span>{props.openIssues.filter((item) => categoryMatches(item, "grammar")).length}</span></TabsTrigger>
-                <TabsTrigger value="style">Style <span>{props.openIssues.filter((item) => categoryMatches(item, "style")).length}</span></TabsTrigger>
+                <TabsTrigger value="fix-first">Fix first <span>{props.suggestions.report.byTier["fix-first"]}</span></TabsTrigger>
+                <TabsTrigger value="improve">Improve <span>{props.suggestions.report.byTier.improve}</span></TabsTrigger>
+                <TabsTrigger value="optional">Optional <span>{props.suggestions.report.byTier.optional}</span></TabsTrigger>
+                <TabsTrigger value="all">All <span>{props.suggestions.report.displayedCount}</span></TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
           <div className="suggestions-list">
-            {props.visibleIssues.length ? props.visibleIssues.map((issue) => <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} />) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
+            {props.visibleIssues.length ? props.visibleIssues.map((issue) => {
+              const controls: SuggestionCardControls = {
+                onReduceRule: () => props.onRuleControl(issue.ruleId, "reduce"),
+                onTurnOffRule: () => props.onRuleControl(issue.ruleId, "off"),
+              };
+              return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} />;
+            }) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
           </div>
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>

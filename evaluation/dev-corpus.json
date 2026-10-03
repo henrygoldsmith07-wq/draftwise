@@ -1,0 +1,411 @@
+[
+  {
+    "id": "dev-essay-001",
+    "register": "essay",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "neutral"
+    },
+    "text": "Attention is the rarest form of generosity. We spend it on people who repay it, and we call that strategy. An honest essay about focus has to admit this before it can argue for anything better. The essays collected here make that argument slowly, and they are stronger for it.",
+    "expected": []
+  },
+  {
+    "id": "dev-essay-002",
+    "register": "essay",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "neutral"
+    },
+    "text": "Cities are often described as if they were machines, but they behave more like gardens. They grow in response to care or neglect, and the difference compounds over decades. When we cut transit funding, we do not see the cost immediately; we see it ten years later in the shape of the city.",
+    "expected": []
+  },
+  {
+    "id": "dev-essay-003",
+    "register": "essay",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "text": "The case for shorter working weeks rests on a simple observation. Most knowledge workers produce their best work in the first four hours of the day, and the remaining hours mostly produce meetings. in order to test this, the company cut one afternoon each week and tracked output for a year.",
+    "expected": [
+      {
+        "category": "capitalization",
+        "original": "i"
+      }
+    ]
+  },
+  {
+    "id": "dev-school-001",
+    "register": "school",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "text": "The Industrial Revolution began in Britain in the late eighteenth century. It changed how goods were made and how people lived. Many families moved from farms to cities to find work in factories.",
+    "expected": []
+  },
+  {
+    "id": "dev-school-002",
+    "register": "school",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "text": "Photosynthesis is the process plants use to make food from sunlight. The plant takes in carbon dioxide from the air and water from the soil. Then it uses energy from sunlight to turn these into glucose and oxygen. This is why plants are so important for life on Earth.",
+    "expected": []
+  },
+  {
+    "id": "dev-school-003",
+    "register": "school",
+    "goals": {
+      "audience": "academic",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "text": "The causes of the first world war were very complicated and there was lots of things that made it happen. The alliance system meant that a small conflict could get much bigger very quickly. Also the arms race between Britain and Germany made countries feel unsafe, which was a major cause of the war.",
+    "expected": [
+      {
+        "category": "clarity",
+        "original": "things"
+      }
+    ]
+  },
+  {
+    "id": "dev-report-001",
+    "register": "report",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Q3 revenue grew 12% year over year, driven primarily by enterprise renewals. Churn remained flat at 4.1%, in line with the forecast. The support backlog was cleared by the end of September, and average first-response time fell from 9 hours to 3 hours.",
+    "expected": []
+  },
+  {
+    "id": "dev-report-002",
+    "register": "report",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "The migration completed on schedule with no customer-visible downtime. Three follow-up items remain: the legacy export path, the audit-log backfill, and the deprecation notice for the v1 API. Owners are assigned for the first two items.",
+    "expected": []
+  },
+  {
+    "id": "dev-report-003",
+    "register": "report",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Customer satisfaction improved this quarter. The survey data basically shows that users were happier with the new dashboard. However, it should be noted that the sample size was small, and due to the fact that only 240 customers responded, the results should be interpreted with care.",
+    "expected": [
+      {
+        "category": "conciseness",
+        "original": "basically"
+      },
+      {
+        "category": "conciseness",
+        "original": "due to the fact that"
+      }
+    ]
+  },
+  {
+    "id": "dev-email-001",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Hi Priya,\n\nThe contract is ready for signature. I've attached the final version with the updated payment terms. Could you review it by Thursday so we can close this before the end of the month?\n\nThanks,\nDaniel",
+    "expected": []
+  },
+  {
+    "id": "dev-email-002",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "persuade",
+      "tone": "friendly"
+    },
+    "text": "Hi team,\n\nGreat work on the launch. I know the last two weeks were intense, and the results show it: sign-ups are up 30% and support tickets are down. Let's take a breath this week and then plan the next round.\n\nCheers,\nMaya",
+    "expected": []
+  },
+  {
+    "id": "dev-email-003",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Hi Sam,\n\nI just wanted to reach out and let you know that the report is basically done. There is a couple of small things left to check, but its almost ready to send to the client.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "its"
+      }
+    ]
+  },
+  {
+    "id": "dev-casual-001",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "hey are you around later? thinking of grabbing food around 7 if you're free",
+    "expected": []
+  },
+  {
+    "id": "dev-casual-002",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "omg that movie was so good. the ending tho?? did not see that coming at all lol",
+    "expected": []
+  },
+  {
+    "id": "dev-casual-003",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "sorry completely forgot to reply! can we reschedule to tomorrow? also recieve the package yet?",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "recieve"
+      }
+    ]
+  },
+  {
+    "id": "dev-technical-001",
+    "register": "technical-doc",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "text": "The parser consumes tokens from the lexer and produces an abstract syntax tree. Each node records its source span so that diagnostics can point at the exact location of an error. The parser never throws on malformed input; it emits an error node and continues.",
+    "expected": []
+  },
+  {
+    "id": "dev-technical-002",
+    "register": "technical-doc",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "text": "Configuration is loaded from draftwise.config.json at startup. Unknown keys are ignored with a warning so that forward-compatible configs do not break older releases. Environment variables override file values using the DW_ prefix convention.",
+    "expected": []
+  },
+  {
+    "id": "dev-technical-003",
+    "register": "technical-doc",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "text": "The webhook retry policy uses exponential backoff with jitter. Failed deliveries are retried up to five times over a 24 hour period. After that, the payload is moved to a dead-letter queue where an operator can inspect it and replay it manually.",
+    "expected": []
+  },
+  {
+    "id": "dev-persuasive-001",
+    "register": "persuasive",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "text": "Every child deserves a safe route to school. The proposal before the council costs less than one kilometre of highway and protects thousands of students every day. We should approve it tonight.",
+    "expected": []
+  },
+  {
+    "id": "dev-persuasive-002",
+    "register": "persuasive",
+    "goals": {
+      "audience": "professional",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "text": "Our retention numbers are strong, but the referral engine is barely tapped. A modest investment here would compound: each retained customer who refers a friend lowers our acquisition cost by roughly 20%. The recommendation is to fund this in the next planning cycle.",
+    "expected": []
+  },
+  {
+    "id": "dev-explanatory-001",
+    "register": "explanatory",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "friendly"
+    },
+    "text": "Compound interest works like a snowball. You earn interest on your savings, and then you earn interest on that interest too. Over time, the curve bends upward, which is why starting early matters more than saving a large amount later.",
+    "expected": []
+  },
+  {
+    "id": "dev-explanatory-002",
+    "register": "explanatory",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "friendly"
+    },
+    "text": "When you save a file, your computer writes the data to storage in blocks. If the power goes out mid-write, some blocks may be updated while others are not. Filesystems guard against this with journaling, which records the intended change before making it.",
+    "expected": []
+  },
+  {
+    "id": "dev-imperfect-001",
+    "register": "imperfect-draft",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "The team have been working on the new onboarding flow for weeks now. The reserch shows that users drop off at step three, so we are going to move the payment step later in the flow. It is hoped that this will improve completion rates significantly.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "reserch"
+      }
+    ]
+  },
+  {
+    "id": "dev-imperfect-002",
+    "register": "imperfect-draft",
+    "goals": {
+      "audience": "general",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "text": "The process is fairly simple. First you gather all the materials, then you mix them together in a large bowl. At this point in time, you should add the water slowly, because if you add it too fast the mixture becomes lumpy and its very hard to fix later.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "its"
+      },
+      {
+        "category": "conciseness",
+        "original": "At this point in time"
+      }
+    ]
+  },
+  {
+    "id": "dev-imperfect-003",
+    "register": "imperfect-draft",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "neutral"
+    },
+    "text": "The system works by collecting data from sensors and sending it to the cloud. Due to the fact that the sensors only report every five minutes, the dashboard can sometimes be out of date. we are aware of the issue and it is being worked on at this moment in time.",
+    "expected": [
+      {
+        "category": "capitalization",
+        "original": "w"
+      }
+    ]
+  },
+  {
+    "id": "dev-essay-004",
+    "register": "essay",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "neutral"
+    },
+    "text": "A library is one of the few institutions that asks nothing of you at the door. It does not measure your worth or check your prospects. That quiet equality is not an accident of architecture; it is the point, and it is worth defending.",
+    "expected": []
+  },
+  {
+    "id": "dev-report-004",
+    "register": "report",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Incident summary: a configuration change at 14:02 UTC caused elevated error rates on the checkout service. The change was rolled back at 14:18 UTC. Roughly 1.2% of checkout attempts failed during the window. A fix for the underlying validation gap ships tomorrow.",
+    "expected": []
+  },
+  {
+    "id": "dev-email-004",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "formal"
+    },
+    "text": "Dear Ms. Okonkwo,\n\nThank you for your enquiry regarding the partnership programme. Please find attached the overview document you requested. I would be happy to arrange a call next week to discuss the terms in detail.\n\nYours sincerely,\nEdward Lang",
+    "expected": []
+  },
+  {
+    "id": "dev-casual-004",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "just landed. bag took forever but whatever. heading to the hotel now, see you at 8?",
+    "expected": []
+  },
+  {
+    "id": "dev-technical-004",
+    "register": "technical-doc",
+    "goals": {
+      "audience": "technical",
+      "intent": "inform",
+      "tone": "neutral"
+    },
+    "text": "Rate limiting is applied per API key using a sliding window of 60 seconds. Responses include the X-RateLimit-Remaining header so clients can back off before they are throttled. A 429 response includes a Retry-After header measured in seconds.",
+    "expected": []
+  },
+  {
+    "id": "dev-school-004",
+    "register": "school",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "text": "In my opinion, Shakespeare uses imagery of light and dark to show the difference between appearance and reality. Romeo says that Juliet is like the sun, which suggests she brings truth with her. This imagery continues throughout the play.",
+    "expected": []
+  },
+  {
+    "id": "dev-imperfect-004",
+    "register": "imperfect-draft",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "neutral"
+    },
+    "text": "The new park has been used by more families then we expected, and the playground equipement is already showing wear. we should ask the council for maintainence funding before next spring, because a closed playground is worse than no playground at all.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "maintainence"
+      },
+      {
+        "category": "capitalization",
+        "original": "w"
+      }
+    ]
+  }
+]

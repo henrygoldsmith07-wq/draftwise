@@ -325,6 +325,7 @@ const DEFAULT_STYLE_PREFERENCES = {
     names: [],
     ignoredWords: [],
     ignoredRuleIds: [],
+    reducedRuleIds: [],
     preferredTerminology: {},
     oxfordComma: true,
     allowContractions: true,
@@ -340,6 +341,7 @@ function mergePreferences(options = {}) {
         names: options.names ?? DEFAULT_STYLE_PREFERENCES.names,
         ignoredWords: options.ignoredWords ?? DEFAULT_STYLE_PREFERENCES.ignoredWords,
         ignoredRuleIds: options.ignoredRuleIds ?? DEFAULT_STYLE_PREFERENCES.ignoredRuleIds,
+        reducedRuleIds: options.reducedRuleIds ?? DEFAULT_STYLE_PREFERENCES.reducedRuleIds,
         preferredTerminology: options.preferredTerminology ?? DEFAULT_STYLE_PREFERENCES.preferredTerminology,
         blockedWords: options.blockedWords ?? DEFAULT_STYLE_PREFERENCES.blockedWords,
     };
@@ -376,10 +378,12 @@ const TYPO_FIXES = {
     couldnt: "couldn't",
     definately: "definitely",
     dont: "don't",
+    equipement: "equipment",
     goverment: "government",
     enviroment: "environment",
     expecially: "especially",
     independant: "independent",
+    maintainence: "maintenance",
     maintenence: "maintenance",
     occured: "occurred",
     occurence: "occurrence",
@@ -389,6 +393,7 @@ const TYPO_FIXES = {
     receeve: "receive",
     reciever: "receiver",
     refered: "referred",
+    reserch: "research",
     seperate: "separate",
     sucess: "success",
     succesful: "successful",
@@ -704,7 +709,7 @@ function sentenceSpans(text, allTokens) {
     const spans = [];
     const tokens = allTokens ?? tokensIn(text);
     let tokenIndex = 0;
-    const pattern = /[^.!?…\n]+(?:[.!?…]+|$)/gu;
+    const pattern = /[^.!?…\n]+(?:[.!?…]+(?=\s|$)|$)/gu;
     for (const match of text.matchAll(pattern)) {
         const raw = match[0];
         const leading = raw.search(/\S/u);
@@ -1078,6 +1083,8 @@ function findConfusedWords(text, preferences) {
     const patterns = [
         [/\b(your)\s+(welcome|going|right|sure)\b/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
         [/\b(its)\s+(a|an|not|been|going)\b/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
+        [/\b(its)\s+(?:almost|nearly|just|really|quite|very|so|pretty|already|finally|always|never|probably|definitely|simply|literally)\s+[\p{L}]+(?=\s+(?:to\b|and\b|but\b|or\b|because\b|though\b|although\b|so\b|then\b))/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
+        [/\b(its)\s+(ready|done|over|finished|fine|great|obvious|clear|unclear|impossible)(?=\s+(?:to\b|and\b|but\b|or\b|because\b)|[.,!?;:]|$)/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
         [/\b(their)\s+(is|are|was|were|has|have|a|an|not)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
         [/\b(there)\s+(own|idea|ideas|team|house|car|name|responsibility)\b/giu, "their", "grammar-confused-there", "Their shows possession; there points to a place or introduces a statement."],
         [/\b(better|worse|more|less|rather|different)\s+(then)\b/giu, "than", "grammar-confused-than", "Than compares; then describes time or sequence.", 2],
@@ -1290,7 +1297,10 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
             const base = token.lower.split(/[’']/u)[0];
             return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base) || /(?:ed|ing|s)$/u.test(token.lower);
         });
-        if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !/[!?]$/u.test(sentence.text)) {
+        // Every token capitalised or numeric is a name, label or heading ("Daniel",
+        // "Roughly 1."), not a missing-verb fragment.
+        const labelLike = sentence.tokens.length > 0 && sentence.tokens.every((token) => token.value[0] !== token.value[0].toLocaleLowerCase());
+        if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !labelLike && !/[!?]$/u.test(sentence.text)) {
             pushIssue(issues, makeIssue("structure-fragment", sentence.start, sentence.end, sentence.text, "", "sentence structure", "low", "Possible sentence fragment", "This short sentence may be missing a verb. Keep it if the fragment is intentional.", 0.65, preferences));
         }
     }

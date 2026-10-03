@@ -661,12 +661,7 @@ const FILLER_WORDS = new Set([
     "basically",
     "just",
     "really",
-    "quite",
-    "very",
-    "perhaps",
     "simply",
-    "somewhat",
-    "obviously",
 ]);
 const WORDINESS = [
     ["in order to", "to"],
@@ -1374,10 +1369,20 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
     }
     const passiveSensitivity = preferences.passiveVoiceSensitivity;
     if (passiveSensitivity !== "off") {
-        const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu;
+        // Past participles only. A bare -en suffix is not evidence: "are often",
+        // "is even" and "are open" are ordinary prose, and each one that fires
+        // costs the writer's trust in every real passive that follows.
+        const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))\b/giu;
         for (const match of text.matchAll(pattern)) {
             const start = match.index ?? 0;
-            pushIssue(issues, makeIssue("style-passive-voice", start, start + match[0].length, match[0], "", "passive voice", passiveSensitivity === "strict" ? "medium" : "low", "Try active voice", "Active voice often makes the actor and the action clearer. Keep this suggestion only when it matches your intent.", passiveSensitivity === "strict" ? 0.86 : 0.7, preferences));
+            // Only offer the change where an actor is plausibly missing. Reporting
+            // what happened ("the backlog was cleared") is correct, deliberate prose.
+            const sentence = document.sentences.find((span) => start >= span.start && start < span.end);
+            const textBefore = sentence ? sentence.text.slice(0, Math.max(0, start - sentence.start)) : text.slice(Math.max(0, start - 80), start);
+            const hasExplicitActor = /\b(?:by\s+\p{L}+|(?:we|they|he|she|it|someone|the)\s+\w+\s+(?:made|built|created|fixed|found|wrote|sent))\s*$/iu.test(textBefore.trim());
+            if (hasExplicitActor)
+                continue;
+            pushIssue(issues, makeIssue("style-passive-voice", start, start + match[0].length, match[0], "", "passive voice", passiveSensitivity === "strict" ? "medium" : "low", "Consider naming who acts", "This is a passive construction, so the reader cannot tell who is acting. If the actor matters, name them; if the focus on the result is deliberate, keep it.", passiveSensitivity === "strict" ? 0.8 : 0.62, preferences));
         }
     }
     return issues;
@@ -1470,7 +1475,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
             const overlap = jaccard(words, previous.words);
             if (overlap >= 0.55) {
                 const topic = sharedTopicWords(words, previous.words);
-                pushIssue(issues, makeIssue("structure-note-repeated-idea", paragraph.start, Math.min(paragraph.end, paragraph.start + 90), text.slice(paragraph.start, Math.min(paragraph.end, paragraph.start + 90)), "", "fluency", "low", "Repeated idea", `This paragraph repeats the earlier point${topic.length ? ` about ${topic.map((word) => `“${word}”`).join(" and ")}` : ""} without adding new evidence or a new angle.`, 0.6, preferences));
+                pushIssue(issues, makeIssue("structure-note-repeated-idea", paragraph.start, Math.min(paragraph.end, paragraph.start + 90), text.slice(paragraph.start, Math.min(paragraph.end, paragraph.start + 90)), "", "fluency", "low", "Repeated idea", `What Draftwise noticed: this paragraph covers nearly the same ground as an earlier one${topic.length ? `, sharing ${topic.map((word) => `“${word}”`).join(" and ")}` : ""}. Why it may matter: readers who already read the earlier point lose momentum here. Consider either cutting this paragraph, or keeping only the sentence that adds new evidence or a new angle.`, 0.6, preferences));
                 break;
             }
         }
@@ -1488,7 +1493,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
                 continue;
             if (SUPPORT_MARKERS.some((marker) => lower.includes(marker)))
                 continue;
-            pushIssue(issues, makeIssue("structure-note-unsupported-claim", claim.start, claim.end, claim.value, "", "clarity", "low", "Claim without support", `This paragraph states that “${claim.value}” holds, but it does not explain why or give an example. One sentence of support would carry the claim.`, 0.55, preferences));
+            pushIssue(issues, makeIssue("structure-note-unsupported-claim", claim.start, claim.end, claim.value, "", "clarity", "low", "Claim without support", `What Draftwise noticed: this passage asserts that “${claim.value}” holds without saying why. Why it may matter: an unsupported claim is where a sceptical reader stops trusting the argument. Consider adding one sentence of evidence or a worked example right after this claim.`, 0.55, preferences));
         }
     }
     // 3. Excessive hedging: several hedges stacked in one paragraph weaken the
@@ -1500,7 +1505,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
             const hedges = paragraph.tokens.filter((token) => HEDGE_WORDS.has(token.lower));
             if (hedges.length < 3)
                 continue;
-            pushIssue(issues, makeIssue("structure-note-hedging", hedges[0].start, hedges[0].end, hedges[0].value, "", "tone", "low", "Stacked hedges", `This paragraph hedges ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). One clear qualification reads more confidently than several.`, 0.55, preferences));
+            pushIssue(issues, makeIssue("structure-note-hedging", hedges[0].start, hedges[0].end, hedges[0].value, "", "tone", "low", "Stacked hedges", `What Draftwise noticed: this passage qualifies itself ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). Why it may matter: stacked hedges read as doubt rather than care, and weaken a point the writer may actually hold confidently. Consider keeping the single strongest qualifier and removing the rest.`, 0.55, preferences));
         }
     }
     // 4. Conclusion introducing a new idea: the closing paragraph is the first
@@ -1511,7 +1516,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
         const earlierWords = new Set(paragraphs.slice(0, -1).flatMap((paragraph) => [...contentWords(paragraph)]));
         const newWords = [...contentWords(last)].filter((word) => !earlierWords.has(word));
         if (newWords.length >= 2) {
-            pushIssue(issues, makeIssue("structure-note-conclusion-new-idea", last.start, Math.min(last.end, last.start + 90), text.slice(last.start, Math.min(last.end, last.start + 90)), "", "fluency", "low", "New idea in the conclusion", `The conclusion introduces ${newWords.slice(0, 2).map((word) => `“${word}”`).join(" and ")} for the first time. Bring the point into the body, or close by returning to what has already been argued.`, 0.55, preferences));
+            pushIssue(issues, makeIssue("structure-note-conclusion-new-idea", last.start, Math.min(last.end, last.start + 90), text.slice(last.start, Math.min(last.end, last.start + 90)), "", "fluency", "low", "New idea in the conclusion", `What Draftwise noticed: the closing paragraph brings up ${newWords.slice(0, 2).map((word) => `“${word}”`).join(" and ")}, which appears nowhere earlier in the draft. Why it may matter: a conclusion that raises new material leaves the reader without a place to weigh it. Consider moving this point into the body, or closing instead by returning to what has already been argued.`, 0.55, preferences));
         }
     }
     // 5. Weak transition: a paragraph opening on a bare connector or dangling
@@ -1534,7 +1539,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
         const bridging = previousWords.has(followWord) || jaccard(previousWords, currentWords) > 0.2;
         if (bridging)
             continue;
-        pushIssue(issues, makeIssue("structure-note-weak-transition", first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end, text.slice(first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end), "", "fluency", "low", "Abrupt transition", `“${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” follows a paragraph about something else, so the reader has to guess the connection. Naming the link would carry them across.`, 0.5, preferences));
+        pushIssue(issues, makeIssue("structure-note-weak-transition", first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end, text.slice(first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end), "", "fluency", "low", "Abrupt transition", `What Draftwise noticed: “${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” opens on a subject the previous paragraph never introduced. Why it may matter: the reader has to guess the connection instead of following it. Consider naming the link in the first few words — what this paragraph is reacting to, or how it relates to the one above.`, 0.5, preferences));
     }
     return issues;
 }
@@ -1615,7 +1620,9 @@ function registerRelevance(issue, kind, goals) {
             return intent === "story" ? 0.5 : audience === "casual" ? 0.5 : 0.85;
         }
         if (family === "conciseness-filler") {
-            return audience === "casual" ? 0.6 : 0.9;
+            // In casual writing and email, "just"/"basically" carry tone rather than
+            // padding: flagging them there is nagging, not editing.
+            return audience === "casual" || tone === "casual" ? 0.25 : intent === "story" ? 0.5 : 0.9;
         }
         return 0.85;
     }
@@ -1625,8 +1632,10 @@ function registerRelevance(issue, kind, goals) {
     }
     if (family === "cliche")
         return audience === "academic" ? 0.7 : intent === "story" ? 0.5 : 0.65;
-    if (family === "style-intensifier")
-        return audience === "casual" || tone === "casual" ? 0.4 : 0.6;
+    if (family === "style-intensifier") {
+        // "Very good" in a school assignment or casual message is voice, not noise.
+        return audience === "casual" || tone === "casual" ? 0.3 : audience === "academic" ? 0.55 : 0.6;
+    }
     if (family === "style-contractions")
         return tone === "formal" ? 0.9 : 0.5;
     if (family === "punctuation-oxford-comma")

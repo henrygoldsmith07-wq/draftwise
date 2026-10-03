@@ -15,8 +15,10 @@ test("repeated ideas are flagged with the shared topic, tied to the passage", ()
   const issues = findDocumentStructure(text, style, goals);
   const repeated = issues.find((issue) => issue.ruleId === "structure-note-repeated-idea");
   assert.ok(repeated, "expected a repeated-idea note");
-  assert.match(repeated.explanation, /repeats the earlier point/u);
-  assert.equal(repeated.source, "local");
+  assert.match(repeated.explanation, /covers nearly the same ground/u);
+  assert.match(repeated.explanation, /What Draftwise noticed/u);
+  assert.match(repeated.explanation, /Why it may matter/u);
+  assert.match(repeated.explanation, /Consider/u);
   assert.ok(repeated.confidence <= 0.65, "structural notes stay below objective confidence");
 });
 

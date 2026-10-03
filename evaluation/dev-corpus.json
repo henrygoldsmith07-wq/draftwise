@@ -405,6 +405,10 @@
       {
         "category": "capitalization",
         "original": "w"
+      },
+      {
+        "category": "spelling",
+        "original": "equipement"
       }
     ]
   },
@@ -472,7 +476,12 @@
       "tone": "casual"
     },
     "text": "so i get to the station right and the train is just gone. gone. so i sat there for like an hour lol",
-    "expected": []
+    "expected": [
+      {
+        "category": "repetition",
+        "original": "gone. gone"
+      }
+    ]
   },
   {
     "id": "dev-fragmented-001",
@@ -568,6 +577,14 @@
       {
         "category": "spelling",
         "original": "basicly"
+      },
+      {
+        "category": "spelling",
+        "original": "doesnt"
+      },
+      {
+        "category": "grammar",
+        "original": "then"
       }
     ]
   }

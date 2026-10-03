@@ -117,10 +117,19 @@ export function findStructureIssues(text: string, preferences: StylePreferences,
   }
   const passiveSensitivity = preferences.passiveVoiceSensitivity;
   if (passiveSensitivity !== "off") {
-    const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu;
+    // Past participles only. A bare -en suffix is not evidence: "are often",
+    // "is even" and "are open" are ordinary prose, and each one that fires
+    // costs the writer's trust in every real passive that follows.
+    const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))\b/giu;
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
-      pushIssue(issues, makeIssue("style-passive-voice", start, start + match[0].length, match[0], "", "passive voice", passiveSensitivity === "strict" ? "medium" : "low", "Try active voice", "Active voice often makes the actor and the action clearer. Keep this suggestion only when it matches your intent.", passiveSensitivity === "strict" ? 0.86 : 0.7, preferences));
+      // Only offer the change where an actor is plausibly missing. Reporting
+      // what happened ("the backlog was cleared") is correct, deliberate prose.
+      const sentence = document.sentences.find((span) => start >= span.start && start < span.end);
+      const textBefore = sentence ? sentence.text.slice(0, Math.max(0, start - sentence.start)) : text.slice(Math.max(0, start - 80), start);
+      const hasExplicitActor = /\b(?:by\s+\p{L}+|(?:we|they|he|she|it|someone|the)\s+\w+\s+(?:made|built|created|fixed|found|wrote|sent))\s*$/iu.test(textBefore.trim());
+      if (hasExplicitActor) continue;
+      pushIssue(issues, makeIssue("style-passive-voice", start, start + match[0].length, match[0], "", "passive voice", passiveSensitivity === "strict" ? "medium" : "low", "Consider naming who acts", "This is a passive construction, so the reader cannot tell who is acting. If the actor matters, name them; if the focus on the result is deliberate, keep it.", passiveSensitivity === "strict" ? 0.8 : 0.62, preferences));
     }
   }
   return issues;

@@ -55,6 +55,7 @@ function evaluatePass(examples, mode) {
   let words = 0;
   let highConfidenceShown = 0;
   let highConfidenceCorrect = 0;
+  const allDisplayed = [];
 
   const bucket = (map, key) => {
     let entry = map.get(key);
@@ -72,6 +73,7 @@ function evaluatePass(examples, mode) {
     const shown = mode === "displayed" ? report.displayed : raw.issues;
     rawTotal += raw.issues.length;
     displayedTotal += shown.length;
+    allDisplayed.push(...shown);
     for (const entry of report.suppressed) {
       suppressionReasons.set(entry.reason, (suppressionReasons.get(entry.reason) ?? 0) + 1);
     }
@@ -134,6 +136,21 @@ function evaluatePass(examples, mode) {
     .sort((a, b) => b.falsePositives - a.falsePositives)
     .slice(0, 10);
 
+  // Replacement validity: an actionable suggestion must offer a replacement
+  // that actually differs from the original. "Review wording" cards count as
+  // editorial notes, not broken replacements.
+  let actionable = 0;
+  let validReplacements = 0;
+  let editorialNotes = 0;
+  for (const issue of allDisplayed) {
+    if (!issue.replacement || issue.replacement === issue.original) {
+      editorialNotes += 1;
+      continue;
+    }
+    actionable += 1;
+    if (issue.replacement.trim().length > 0 || issue.original.trim().length > 0) validReplacements += 1;
+  }
+
   return {
     mode,
     examples: examples.length,
@@ -150,6 +167,12 @@ function evaluatePass(examples, mode) {
     suggestionDensityPer1000Words: perThousand(displayedTotal, words),
     severityDistribution: severityCounts,
     highConfidencePrecision: ratio(highConfidenceCorrect, highConfidenceShown),
+    replacementValidity: {
+      actionable,
+      valid: validReplacements,
+      editorialNotes,
+      validityRate: ratio(validReplacements, actionable),
+    },
     byCategory: finalise(byCategory),
     bySeverity: finalise(bySeverity),
     byRegister: finalise(byRegister),

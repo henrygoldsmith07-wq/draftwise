@@ -132,7 +132,9 @@ function registerRelevance(issue: WritingIssue, kind: SuggestionKind, goals?: Wr
       return intent === "story" ? 0.5 : audience === "casual" ? 0.5 : 0.85;
     }
     if (family === "conciseness-filler") {
-      return audience === "casual" ? 0.6 : 0.9;
+      // In casual writing and email, "just"/"basically" carry tone rather than
+      // padding: flagging them there is nagging, not editing.
+      return audience === "casual" || tone === "casual" ? 0.25 : intent === "story" ? 0.5 : 0.9;
     }
     return 0.85;
   }
@@ -142,7 +144,10 @@ function registerRelevance(issue: WritingIssue, kind: SuggestionKind, goals?: Wr
     return audience === "academic" ? 0.55 : intent === "story" ? 0.5 : audience === "professional" ? 0.7 : 0.6;
   }
   if (family === "cliche") return audience === "academic" ? 0.7 : intent === "story" ? 0.5 : 0.65;
-  if (family === "style-intensifier") return audience === "casual" || tone === "casual" ? 0.4 : 0.6;
+  if (family === "style-intensifier") {
+    // "Very good" in a school assignment or casual message is voice, not noise.
+    return audience === "casual" || tone === "casual" ? 0.3 : audience === "academic" ? 0.55 : 0.6;
+  }
   if (family === "style-contractions") return tone === "formal" ? 0.9 : 0.5;
   if (family === "punctuation-oxford-comma") return audience === "casual" ? 0.35 : 0.6;
   return 0.65;

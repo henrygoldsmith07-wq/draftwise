@@ -305,13 +305,7 @@ export const FILLER_WORDS  = new Set([
   "basically",
   "just",
   "really",
-  "quite",
-  "very",
-  "perhaps",
   "simply",
-  "somewhat",
-  "obviously",
-
 ]);
 
 export const WORDINESS : Array<[string, string]> = [

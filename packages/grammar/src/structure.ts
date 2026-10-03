@@ -146,7 +146,7 @@ export function findDocumentStructure(
           "fluency",
           "low",
           "Repeated idea",
-          `This paragraph repeats the earlier point${topic.length ? ` about ${topic.map((word) => `“${word}”`).join(" and ")}` : ""} without adding new evidence or a new angle.`,
+          `What Draftwise noticed: this paragraph covers nearly the same ground as an earlier one${topic.length ? `, sharing ${topic.map((word) => `“${word}”`).join(" and ")}` : ""}. Why it may matter: readers who already read the earlier point lose momentum here. Consider either cutting this paragraph, or keeping only the sentence that adds new evidence or a new angle.`,
           0.6,
           preferences,
         ));
@@ -174,7 +174,7 @@ export function findDocumentStructure(
         "clarity",
         "low",
         "Claim without support",
-        `This paragraph states that “${claim.value}” holds, but it does not explain why or give an example. One sentence of support would carry the claim.`,
+        `What Draftwise noticed: this passage asserts that “${claim.value}” holds without saying why. Why it may matter: an unsupported claim is where a sceptical reader stops trusting the argument. Consider adding one sentence of evidence or a worked example right after this claim.`,
         0.55,
         preferences,
       ));
@@ -197,7 +197,7 @@ export function findDocumentStructure(
         "tone",
         "low",
         "Stacked hedges",
-        `This paragraph hedges ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). One clear qualification reads more confidently than several.`,
+        `What Draftwise noticed: this passage qualifies itself ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). Why it may matter: stacked hedges read as doubt rather than care, and weaken a point the writer may actually hold confidently. Consider keeping the single strongest qualifier and removing the rest.`,
         0.55,
         preferences,
       ));
@@ -221,7 +221,7 @@ export function findDocumentStructure(
         "fluency",
         "low",
         "New idea in the conclusion",
-        `The conclusion introduces ${newWords.slice(0, 2).map((word) => `“${word}”`).join(" and ")} for the first time. Bring the point into the body, or close by returning to what has already been argued.`,
+        `What Draftwise noticed: the closing paragraph brings up ${newWords.slice(0, 2).map((word) => `“${word}”`).join(" and ")}, which appears nowhere earlier in the draft. Why it may matter: a conclusion that raises new material leaves the reader without a place to weigh it. Consider moving this point into the body, or closing instead by returning to what has already been argued.`,
         0.55,
         preferences,
       ));
@@ -254,7 +254,7 @@ export function findDocumentStructure(
       "fluency",
       "low",
       "Abrupt transition",
-      `“${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” follows a paragraph about something else, so the reader has to guess the connection. Naming the link would carry them across.`,
+      `What Draftwise noticed: “${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” opens on a subject the previous paragraph never introduced. Why it may matter: the reader has to guess the connection instead of following it. Consider naming the link in the first few words — what this paragraph is reacting to, or how it relates to the one above.`,
       0.5,
       preferences,
     ));

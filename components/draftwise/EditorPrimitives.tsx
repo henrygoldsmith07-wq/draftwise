@@ -52,14 +52,23 @@ export interface SuggestionCardControls {
   onTurnOffRule?: () => void;
 }
 
-export function SuggestionCard({ issue, active, onSelect, onAccept, onDismiss, onAddToDictionary, controls }: { issue: WritingIssue & { tier?: string; kind?: string; groupedCount?: number }; active: boolean; onSelect: () => void; onAccept: () => void; onDismiss: () => void; onAddToDictionary?: () => void; controls?: SuggestionCardControls }) {
+export interface SuggestionGroupActions {
+  label: string;
+  count: number;
+  safeToApplyAll: boolean;
+  onApplyAll: () => void;
+  onDismissAll: () => void;
+}
+
+export function SuggestionCard({ issue, active, onSelect, onAccept, onDismiss, onAddToDictionary, controls, groupActions }: { issue: WritingIssue & { tier?: string; kind?: string; groupedCount?: number; context?: string }; active: boolean; onSelect: () => void; onAccept: () => void; onDismiss: () => void; onAddToDictionary?: () => void; controls?: SuggestionCardControls; groupActions?: SuggestionGroupActions }) {
   const color = categoryColors[issue.category];
   const isStylistic = issue.kind === "style";
   const tierLabel = issue.tier === "fix-first" ? "Fix first" : issue.tier === "improve" ? "Improve" : issue.tier === "optional" ? "Optional" : null;
   return <article className={`suggestion-card ${active ? "is-active" : ""}`} style={{ "--suggestion-color": color } as CSSProperties}>
-    <button className="suggestion-main" onClick={onSelect} type="button"><span className="suggestion-heading"><span className="suggestion-color-dot" /><span>{issue.title}</span>{tierLabel ? <Badge className={`tier-badge tier-badge-${issue.tier}`}>{tierLabel}</Badge> : null}{issue.source === "ai" ? <Badge className="ai-badge">AI</Badge> : <Badge className="local-badge">Local</Badge>}</span><span className="suggestion-category">{issue.category} · {issue.severity} · {Math.round(issue.confidence * 100)}% confidence{issue.kind ? ` · ${isStylistic ? "style preference" : issue.kind === "objective" ? "objective rule" : "clarity"}` : ""}{issue.groupedCount ? ` · ${issue.groupedCount + 1} similar` : ""}</span><span className="suggestion-copy">{issue.explanation}</span></button>
+    <button className="suggestion-main" onClick={onSelect} type="button"><span className="suggestion-heading"><span className="suggestion-color-dot" /><span>{issue.title}</span>{tierLabel ? <Badge className={`tier-badge tier-badge-${issue.tier}`}>{tierLabel}</Badge> : null}{issue.source === "ai" ? <Badge className="ai-badge">AI</Badge> : <Badge className="local-badge">Local</Badge>}</span><span className="suggestion-category">{issue.category} · {issue.severity} · {Math.round(issue.confidence * 100)}% confidence{issue.kind ? ` · ${isStylistic ? "style preference" : issue.kind === "objective" ? "objective rule" : "clarity"}` : ""}{issue.groupedCount ? ` · ${issue.groupedCount + 1} similar` : ""}</span>{issue.context ? <span className="suggestion-context">…{issue.context}…</span> : null}<span className="suggestion-copy">{issue.explanation}</span></button>
     <div className="suggestion-replacement"><span className="suggestion-original">{issue.original}</span>{issue.replacement && issue.replacement !== issue.original ? <><ArrowDown size={14} aria-hidden="true" /><span className="suggestion-new">{issue.replacement}</span></> : <span className="suggestion-review">Review wording</span>}</div>
     <div className="suggestion-actions"><Button size="sm" onClick={onAccept} disabled={!issue.replacement || issue.replacement === issue.original}><Check size={14} /> Accept</Button><Button size="sm" variant="ghost" onClick={onDismiss} aria-label={`Dismiss ${issue.title}`}><X size={14} /> Ignore this</Button>{onAddToDictionary && issue.category === "spelling" ? <Button size="sm" variant="ghost" onClick={onAddToDictionary}>Add word</Button> : null}</div>
+    {groupActions && groupActions.count > 1 ? <div className="suggestion-group-actions"><span>{groupActions.label}</span><button type="button" onClick={groupActions.onApplyAll} disabled={!groupActions.safeToApplyAll} title={groupActions.safeToApplyAll ? `Replace all ${groupActions.count} occurrences` : "Meaning can differ by context, so this pattern is reviewed one at a time"}>{groupActions.safeToApplyAll ? `Replace all ${groupActions.count}` : "Review one by one"}</button><button type="button" onClick={groupActions.onDismissAll}>Dismiss all {groupActions.count}</button></div> : null}
     {controls ? <div className="suggestion-controls"><span>Suggestion type</span><button type="button" onClick={controls.onReduceRule}>Show fewer</button><button type="button" onClick={controls.onTurnOffRule}>Turn off</button></div> : null}
   </article>;
 }

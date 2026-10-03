@@ -40,6 +40,12 @@ export interface PrioritiseOptions {
   dismissed?: Iterable<DismissedFinding>;
   /** Per-rule dismissal history; noisy rules rank lower. */
   ruleDismissalCounts?: Record<string, number>;
+  /**
+   * Transparent rank adjustments from the Writing Profile. Each names its
+   * reason; a strong negative dampens the family to a single displayed
+   * instance rather than hiding it entirely.
+   */
+  rankAdjustments?: Array<{ family: string; rankDelta: number; reason: string }>;
   text?: string;
   document?: ParsedDocument;
 }
@@ -251,7 +257,10 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
     }
     const tier = assignTier(kind, issue, relevance, impact);
     const noisePenalty = Math.min(1.5, (noise[issue.ruleId] ?? 0) * 0.35);
-    const rank = tierWeight(tier) * 2 + issue.confidence * 2 + relevance * 1.5 + impact * 1.5 - noisePenalty;
+    const profileAdjustment = (options.rankAdjustments ?? [])
+      .filter((adjustment) => adjustment.family === family)
+      .reduce((total, adjustment) => total + adjustment.rankDelta, 0);
+    const rank = tierWeight(tier) * 2 + issue.confidence * 2 + relevance * 1.5 + impact * 1.5 - noisePenalty + profileAdjustment;
     candidates.push({
       issue,
       kind,
@@ -297,10 +306,14 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
   const displayed: PrioritisedIssue[] = [];
   for (const candidate of grouped) {
     const family = ruleFamily(candidate.issue.ruleId);
-    const perRuleCap = ruleReduced.has(family) ? 1 : PER_RULE_CAPS[candidate.kind];
+    // A family the writer repeatedly dismissed is dampened to one instance,
+    // the same treatment as an explicit "Show fewer" — still visible, never nagging.
+    const dampened = ruleReduced.has(family)
+      || (options.rankAdjustments ?? []).some((adjustment) => adjustment.family === family && adjustment.rankDelta <= -0.8);
+    const perRuleCap = dampened ? 1 : PER_RULE_CAPS[candidate.kind];
     const shown = perRuleShown.get(family) ?? 0;
     if (shown >= perRuleCap) {
-      suppressed.push({ issue: candidate.issue, reason: ruleReduced.has(family) ? "rule-reduced" : "density-cap" });
+      suppressed.push({ issue: candidate.issue, reason: dampened ? "rule-reduced" : "density-cap" });
       continue;
     }
     if (tierShown[candidate.tier] >= SUGGESTION_DENSITY_CAPS[candidate.tier]) {

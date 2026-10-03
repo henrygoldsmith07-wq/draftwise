@@ -8,6 +8,7 @@ import {
   DEFAULT_STYLE_PREFERENCES,
   type ClassifierSettings,
   type DraftwiseWorkspace,
+  type LearnedPreference,
   type ProviderSettings,
   type StylePreferences,
   type WritingGoals,
@@ -63,7 +64,11 @@ export function isWritingGoals(value: unknown): value is WritingGoals {
   return isRecord(value)
     && isOneOf(value.audience, ["general", "academic", "professional", "technical", "casual"])
     && isOneOf(value.intent, ["inform", "explain", "persuade", "describe", "story"])
-    && isOneOf(value.tone, ["neutral", "confident", "friendly", "professional", "formal", "casual"]);
+    && isOneOf(value.tone, ["neutral", "confident", "friendly", "professional", "formal", "casual"])
+    && (value.documentType === undefined || isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]))
+    && (value.targetLength === undefined || (typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0))
+    && (value.requiredTerminology === undefined || isStringArray(value.requiredTerminology))
+    && (value.forbiddenTerminology === undefined || isStringArray(value.forbiddenTerminology));
 }
 
 export function isStylePreferences(value: unknown): value is StylePreferences {
@@ -74,6 +79,8 @@ export function isStylePreferences(value: unknown): value is StylePreferences {
     && isStringArray(value.ignoredWords)
     && isStringArray(value.ignoredRuleIds)
     && (value.reducedRuleIds === undefined || isStringArray(value.reducedRuleIds))
+    && (value.dismissalCounts === undefined || (isRecord(value.dismissalCounts) && Object.values(value.dismissalCounts).every((count) => typeof count === "number" && Number.isFinite(count))))
+    && (value.learned === undefined || Array.isArray(value.learned))
     && isStringMap(value.preferredTerminology)
     && typeof value.oxfordComma === "boolean"
     && typeof value.allowContractions === "boolean"
@@ -147,6 +154,18 @@ function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
     audience: isOneOf(value.audience, ["general", "academic", "professional", "technical", "casual"]) ? value.audience : fallback.audience,
     intent: isOneOf(value.intent, ["inform", "explain", "persuade", "describe", "story"]) ? value.intent : fallback.intent,
     tone: isOneOf(value.tone, ["neutral", "confident", "friendly", "professional", "formal", "casual"]) ? value.tone : fallback.tone,
+    ...(value.documentType !== undefined
+      ? { documentType: isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]) ? value.documentType : fallback.documentType }
+      : { documentType: fallback.documentType }),
+    ...(typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0
+      ? { targetLength: Math.min(200_000, Math.round(value.targetLength)) }
+      : { targetLength: fallback.targetLength }),
+    ...(value.requiredTerminology !== undefined || fallback.requiredTerminology !== undefined
+      ? { requiredTerminology: isStringArray(value.requiredTerminology) ? value.requiredTerminology : fallback.requiredTerminology ?? [] }
+      : {}),
+    ...(value.forbiddenTerminology !== undefined || fallback.forbiddenTerminology !== undefined
+      ? { forbiddenTerminology: isStringArray(value.forbiddenTerminology) ? value.forbiddenTerminology : fallback.forbiddenTerminology ?? [] }
+      : {}),
   };
 }
 
@@ -159,6 +178,22 @@ function sanitiseStyle(value: unknown, fallback: StylePreferences): StylePrefere
     ignoredWords: isStringArray(value.ignoredWords) ? value.ignoredWords : fallback.ignoredWords,
     ignoredRuleIds: isStringArray(value.ignoredRuleIds) ? value.ignoredRuleIds : fallback.ignoredRuleIds,
     reducedRuleIds: isStringArray(value.reducedRuleIds) ? value.reducedRuleIds : fallback.reducedRuleIds,
+    dismissalCounts: isRecord(value.dismissalCounts)
+      ? Object.fromEntries(Object.entries(value.dismissalCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])))
+      : (fallback as { dismissalCounts?: Record<string, number> }).dismissalCounts,
+    learned: Array.isArray(value.learned)
+      ? value.learned.flatMap((entry): LearnedPreference[] => (isRecord(entry) && typeof entry.id === "string" && typeof entry.family === "string" && typeof entry.label === "string"
+        ? [{
+            id: entry.id,
+            kind: entry.kind === "reduced-family" || entry.kind === "disabled-family" ? entry.kind : "dismissal-pattern",
+            label: entry.label,
+            detail: typeof entry.detail === "string" ? entry.detail : "",
+            family: entry.family,
+            createdAt: typeof entry.createdAt === "number" && Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
+            source: entry.source === "manual" ? "manual" : "learned",
+          }]
+        : []))
+      : fallback.learned,
     preferredTerminology: isStringMap(value.preferredTerminology) ? value.preferredTerminology : fallback.preferredTerminology,
     oxfordComma: typeof value.oxfordComma === "boolean" ? value.oxfordComma : fallback.oxfordComma,
     allowContractions: typeof value.allowContractions === "boolean" ? value.allowContractions : fallback.allowContractions,

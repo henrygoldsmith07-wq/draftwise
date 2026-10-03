@@ -65,6 +65,9 @@ interface EditorWorkspaceProps {
   onDismissIssue: (issue: WritingIssue) => void;
   onAddToDictionary: (word: string) => void;
   onRuleControl: (ruleId: string, action: "reduce" | "off") => void;
+  onApplyGroup: (issues: WritingIssue[]) => void;
+  onDismissGroup: (issues: WritingIssue[]) => void;
+  reviewedCount: number;
   onAcceptAll: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -109,6 +112,18 @@ const toneOptions = [
   { value: "casual", label: "Casual" },
 ];
 
+const documentTypeOptions = [
+  { value: "", label: "No type" },
+  { value: "essay", label: "Essay" },
+  { value: "report", label: "Report" },
+  { value: "email", label: "Email" },
+  { value: "article", label: "Article" },
+  { value: "personal-statement", label: "Personal statement" },
+  { value: "technical-explanation", label: "Technical explanation" },
+  { value: "notes", label: "Notes" },
+  { value: "general", label: "General writing" },
+];
+
 export function EditorWorkspace(props: EditorWorkspaceProps) {
   const { registerTextarea, registerHighlight } = props;
   const scoreMessage = props.analysis.scores.overall >= 90
@@ -136,6 +151,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <GoalSelect label="Audience" value={props.goals.audience} options={audienceOptions} onChange={(value) => props.onGoalChange({ audience: value as WritingGoals["audience"] })} />
           <GoalSelect label="Intent" value={props.goals.intent} options={intentOptions} onChange={(value) => props.onGoalChange({ intent: value as WritingGoals["intent"] })} />
           <GoalSelect label="Tone" value={props.goals.tone} options={toneOptions} onChange={(value) => props.onGoalChange({ tone: value as WritingGoals["tone"] })} />
+          <GoalSelect label="Type" value={props.goals.documentType ?? ""} options={documentTypeOptions} onChange={(value) => props.onGoalChange({ documentType: value ? (value as WritingGoals["documentType"]) : undefined })} />
+          <GoalSelect label="Length" value={props.goals.targetLength ? String(props.goals.targetLength) : ""} options={[{ value: "", label: "Any" }, { value: "300", label: "~300 words" }, { value: "600", label: "~600 words" }, { value: "1200", label: "~1,200 words" }, { value: "2500", label: "~2,500 words" }]} onChange={(value) => props.onGoalChange({ targetLength: value ? Number(value) : undefined })} />
         </div>
 
         {props.selection.end > props.selection.start ? (
@@ -230,9 +247,18 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
                 onReduceRule: () => props.onRuleControl(issue.ruleId, "reduce"),
                 onTurnOffRule: () => props.onRuleControl(issue.ruleId, "off"),
               };
-              return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} />;
+              const group = props.suggestions.groups.find((candidate) => candidate.members.some((member) => member.id === issue.id));
+              const groupActions = group ? {
+                label: group.label,
+                count: group.members.reduce((total, member) => total + 1 + member.groupedCount, 0),
+                safeToApplyAll: group.safeToApplyAll,
+                onApplyAll: () => props.onApplyGroup(group.members),
+                onDismissAll: () => props.onDismissGroup(group.members),
+              } : undefined;
+              return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} groupActions={groupActions} />;
             }) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
           </div>
+          {props.reviewedCount > 0 ? <div className="review-completion" role="status">{props.reviewedCount} important change{props.reviewedCount === 1 ? "" : "s"} reviewed.</div> : null}
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>
       ) : (

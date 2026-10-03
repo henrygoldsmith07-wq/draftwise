@@ -373,6 +373,7 @@ const TYPO_FIXES = {
     arguement: "argument",
     becuase: "because",
     beleive: "believe",
+    basicly: "basically",
     calender: "calendar",
     comming: "coming",
     couldnt: "couldn't",
@@ -791,6 +792,68 @@ function makeIssue(ruleId, start, end, original, replacement, category, severity
 function pushIssue(target, value) {
     if (value)
         target.push(value);
+}
+const CODE_FENCE = /^(?:`{3,}|~{3,})/mu;
+const INLINE_CODE = /`[^`\n]+`/gu;
+const URL_PATTERN = /\bhttps?:\/\/[^\s>)\]]+/gu;
+/** Spans the prose rules must not touch: code and literal URLs. */
+function findProtectedSpans(text) {
+    const spans = [];
+    const lines = text.split("\n");
+    let offset = 0;
+    let fenceStart = null;
+    let fenceMarker = "";
+    for (const line of lines) {
+        const fence = line.match(CODE_FENCE);
+        if (fence) {
+            const marker = fence[0][0] === "`" ? "`" : "~";
+            if (fenceStart === null) {
+                fenceStart = offset;
+                fenceMarker = marker;
+            }
+            else if (marker === fenceMarker) {
+                spans.push({ start: fenceStart, end: offset + line.length, kind: "code-fence" });
+                fenceStart = null;
+            }
+        }
+        offset += line.length + 1;
+    }
+    if (fenceStart !== null)
+        spans.push({ start: fenceStart, end: text.length, kind: "code-fence" });
+    for (const match of text.matchAll(INLINE_CODE)) {
+        const start = match.index ?? 0;
+        spans.push({ start, end: start + match[0].length, kind: "inline-code" });
+    }
+    for (const match of text.matchAll(URL_PATTERN)) {
+        const start = match.index ?? 0;
+        spans.push({ start, end: start + match[0].length, kind: "url" });
+    }
+    // Overlaps are possible (an inline code span inside a URL is nonsense but
+    // cheap to merge), so collapse them into a minimal set.
+    spans.sort((left, right) => left.start - right.start);
+    const merged = [];
+    for (const span of spans) {
+        const last = merged[merged.length - 1];
+        if (last && span.start <= last.end) {
+            last.end = Math.max(last.end, span.end);
+        }
+        else {
+            merged.push({ ...span });
+        }
+    }
+    return merged;
+}
+function isInsideProtectedSpan(spans, start, end) {
+    return spans.some((span) => start < span.end && end > span.start);
+}
+/**
+ * True when a position sits inside a list item or blockquote line. Those are
+ * structured content: a three-word bullet is a fragment only in the
+ * grammatical sense, not something to nag about.
+ */
+function isStructuredLineStart(text, position) {
+    const lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+    return /^\s*(?:[-*+]|\d+[.)]|>)\s/u.test(text.slice(lineStart, lineStart + 12));
 }
 // Common English words, plurals, and technical vocabulary that the compact lexicon
 // missed. Each entry prevents a false positive from the fuzzy spelling suggester.
@@ -1319,6 +1382,454 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
     }
     return issues;
 }
+/**
+ * Document-level structural analysis.
+ *
+ * Sentence rules fix sentences; this layer looks at how the document carries
+ * its argument: repeated ideas, paragraphs that do not advance the piece,
+ * claims without support, weak transitions, hedging, and a conclusion that
+ * introduces something new.
+ *
+ * Every finding is deliberately conservative and tied to the exact passage.
+ * These are editorial judgements, not errors: confidence stays below the
+ * objective rules, and the advice names what the paragraph is doing rather
+ * than issuing generic instruction like "improve the introduction".
+ */
+const MAX_STRUCTURAL_NOTES = 5;
+const MIN_PARAGRAPH_WORDS = 15;
+const STOP_WORDS = new Set([
+    "the", "a", "an", "and", "or", "but", "if", "then", "than", "that", "this", "these", "those", "there", "here",
+    "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "have", "has", "had",
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
+    "in", "on", "at", "to", "for", "of", "with", "from", "by", "as", "into", "about", "over", "after", "before",
+    "not", "no", "so", "because", "while", "although", "though", "which", "who", "whom", "what", "when", "where", "how", "why",
+    "will", "would", "can", "could", "should", "may", "might", "must", "shall", "also", "more", "most", "some", "any", "each", "every", "all", "both",
+]);
+const HEDGE_WORDS = new Set(["might", "maybe", "perhaps", "possibly", "somewhat", "arguably", "seemingly", "apparently", "fairly", "rather", "quite", "kind of", "sort of"]);
+const CLAIM_MARKERS = new Set(["always", "never", "everyone", "nobody", "obviously", "clearly", "proves", "proven", "undeniably", "certainly", "best", "worst"]);
+const SUPPORT_MARKERS = ["because", "since", "for example", "for instance", "evidence", "study", "data", "research", "according", "shows that", "means that", "therefore"];
+function contentWords(paragraph) {
+    return new Set(paragraph.tokens.map((token) => token.lower.split(/[’']/u)[0]).filter((word) => word.length > 3 && !STOP_WORDS.has(word)));
+}
+function jaccard(left, right) {
+    if (left.size === 0 || right.size === 0)
+        return 0;
+    let shared = 0;
+    for (const word of left)
+        if (right.has(word))
+            shared += 1;
+    return shared / (left.size + right.size - shared);
+}
+function sharedTopicWords(left, right, limit = 3) {
+    return [...left].filter((word) => right.has(word)).slice(0, limit);
+}
+function findGoalTerminology(text, goals, preferences, document = parseDocument(text)) {
+    const issues = [];
+    const forbidden = goals?.forbiddenTerminology ?? [];
+    for (const term of forbidden) {
+        const needle = term.trim();
+        if (!needle)
+            continue;
+        const pattern = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "giu");
+        for (const match of text.matchAll(pattern)) {
+            const start = match.index ?? 0;
+            pushIssue(issues, makeIssue("goal-forbidden-term", start, start + match[0].length, match[0], "", "consistency", "medium", "Term you asked to avoid", `Your goals forbid “${needle}”. Replace it with wording that fits the document.`, 0.9, preferences));
+        }
+    }
+    const required = (goals?.requiredTerminology ?? []).map((term) => term.trim()).filter(Boolean);
+    if (required.length > 0) {
+        const lower = text.toLocaleLowerCase();
+        const missing = required.filter((term) => !lower.includes(term.toLocaleLowerCase()));
+        const anchor = document.paragraphs[0];
+        if (missing.length > 0 && anchor) {
+            pushIssue(issues, makeIssue("goal-missing-term", anchor.start, Math.min(anchor.end, anchor.start + 60), text.slice(anchor.start, Math.min(anchor.end, anchor.start + 60)), "", "consistency", "low", "Required terminology missing", `Your goals require ${missing.map((term) => `“${term}”`).join(", ")} somewhere in the draft; none of ${missing.length === 1 ? "it appears" : "them appear"} yet.`, 0.7, preferences));
+        }
+    }
+    return issues;
+}
+function findDocumentStructure(text, preferences, goals, document = parseDocument(text)) {
+    const issues = [];
+    const paragraphs = document.paragraphs.filter((paragraph) => paragraph.tokens.length > 0);
+    // Claim support and hedging are paragraph-local and hold even in a one-
+    // paragraph document; the cross-paragraph checks run only from two up.
+    if (paragraphs.length === 0)
+        return issues;
+    const audience = goals?.audience ?? "general";
+    const intent = goals?.intent ?? "inform";
+    const formalRegister = audience === "academic" || audience === "professional" || intent === "persuade";
+    // 1. Repeated argument: a paragraph that substantially restates an earlier
+    //    one without adding new material.
+    const seenParagraphs = [];
+    for (const paragraph of paragraphs) {
+        if (issues.length >= MAX_STRUCTURAL_NOTES)
+            break;
+        if (paragraph.tokens.length < MIN_PARAGRAPH_WORDS)
+            continue;
+        const words = contentWords(paragraph);
+        for (const previous of seenParagraphs) {
+            const overlap = jaccard(words, previous.words);
+            if (overlap >= 0.55) {
+                const topic = sharedTopicWords(words, previous.words);
+                pushIssue(issues, makeIssue("structure-note-repeated-idea", paragraph.start, Math.min(paragraph.end, paragraph.start + 90), text.slice(paragraph.start, Math.min(paragraph.end, paragraph.start + 90)), "", "fluency", "low", "Repeated idea", `This paragraph repeats the earlier point${topic.length ? ` about ${topic.map((word) => `“${word}”`).join(" and ")}` : ""} without adding new evidence or a new angle.`, 0.6, preferences));
+                break;
+            }
+        }
+        seenParagraphs.push({ paragraph, words });
+    }
+    // 2. Unsupported claim: strong claim language in a paragraph with no
+    //    supporting marker anywhere in it.
+    if (formalRegister) {
+        for (const paragraph of paragraphs) {
+            if (issues.length >= MAX_STRUCTURAL_NOTES)
+                break;
+            const lower = paragraph.text.toLocaleLowerCase();
+            const claim = paragraph.tokens.find((token) => CLAIM_MARKERS.has(token.lower));
+            if (!claim)
+                continue;
+            if (SUPPORT_MARKERS.some((marker) => lower.includes(marker)))
+                continue;
+            pushIssue(issues, makeIssue("structure-note-unsupported-claim", claim.start, claim.end, claim.value, "", "clarity", "low", "Claim without support", `This paragraph states that “${claim.value}” holds, but it does not explain why or give an example. One sentence of support would carry the claim.`, 0.55, preferences));
+        }
+    }
+    // 3. Excessive hedging: several hedges stacked in one paragraph weaken the
+    //    point instead of qualifying it.
+    if (formalRegister) {
+        for (const paragraph of paragraphs) {
+            if (issues.length >= MAX_STRUCTURAL_NOTES)
+                break;
+            const hedges = paragraph.tokens.filter((token) => HEDGE_WORDS.has(token.lower));
+            if (hedges.length < 3)
+                continue;
+            pushIssue(issues, makeIssue("structure-note-hedging", hedges[0].start, hedges[0].end, hedges[0].value, "", "tone", "low", "Stacked hedges", `This paragraph hedges ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). One clear qualification reads more confidently than several.`, 0.55, preferences));
+        }
+    }
+    // 4. Conclusion introducing a new idea: the closing paragraph is the first
+    //    place a substantial topic word appears. Only meaningful when there is a
+    //    body before it to conclude.
+    const last = paragraphs[paragraphs.length - 1];
+    if (paragraphs.length >= 2 && last && last.tokens.length >= 15 && (intent === "persuade" || intent === "inform")) {
+        const earlierWords = new Set(paragraphs.slice(0, -1).flatMap((paragraph) => [...contentWords(paragraph)]));
+        const newWords = [...contentWords(last)].filter((word) => !earlierWords.has(word));
+        if (newWords.length >= 2) {
+            pushIssue(issues, makeIssue("structure-note-conclusion-new-idea", last.start, Math.min(last.end, last.start + 90), text.slice(last.start, Math.min(last.end, last.start + 90)), "", "fluency", "low", "New idea in the conclusion", `The conclusion introduces ${newWords.slice(0, 2).map((word) => `“${word}”`).join(" and ")} for the first time. Bring the point into the body, or close by returning to what has already been argued.`, 0.55, preferences));
+        }
+    }
+    // 5. Weak transition: a paragraph opening on a bare connector or dangling
+    //    "This…" after a paragraph about something else.
+    for (let index = 1; index < paragraphs.length && issues.length < MAX_STRUCTURAL_NOTES; index += 1) {
+        const paragraph = paragraphs[index];
+        const first = paragraph.tokens[0];
+        if (!first)
+            continue;
+        const opener = paragraph.text.slice(0, 40);
+        const startsWithThis = /^this\s+[\p{L}]+/iu.test(opener);
+        const startsWithConnector = /^(also|and|but|so|then)\b/iu.test(opener);
+        if (!startsWithThis && !(startsWithConnector && formalRegister))
+            continue;
+        const previousWords = contentWords(paragraphs[index - 1]);
+        const currentWords = contentWords(paragraph);
+        // A "This X" opener only misleads when X's topic is absent from the
+        // previous paragraph: otherwise it is a perfectly good transition.
+        const followWord = paragraph.tokens[1]?.lower ?? "";
+        const bridging = previousWords.has(followWord) || jaccard(previousWords, currentWords) > 0.2;
+        if (bridging)
+            continue;
+        pushIssue(issues, makeIssue("structure-note-weak-transition", first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end, text.slice(first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end), "", "fluency", "low", "Abrupt transition", `“${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” follows a paragraph about something else, so the reader has to guess the connection. Naming the link would carry them across.`, 0.5, preferences));
+    }
+    return issues;
+}
+const OBJECTIVE_CATEGORIES = new Set(["spelling", "grammar", "punctuation", "capitalization"]);
+const STYLE_RULE_PREFIXES = ["style-", "punctuation-oxford-comma"];
+const SUGGESTION_DENSITY_CAPS = {
+    "fix-first": 12,
+    improve: 8,
+    optional: 5,
+};
+const PER_RULE_CAPS = {
+    objective: 10,
+    clarity: 5,
+    style: 3,
+};
+const LOW_CONFIDENCE_STYLE_THRESHOLD = 0.7;
+const REGISTER_MISMATCH_THRESHOLD = 0.35;
+const NEAR_DISMISSAL_CHARS = 240;
+function classifyIssueKind(issue) {
+    if (STYLE_RULE_PREFIXES.some((prefix) => issue.ruleId.startsWith(prefix)))
+        return "style";
+    if (issue.category === "tone" || issue.category === "formality" || issue.category === "passive voice")
+        return "style";
+    if (OBJECTIVE_CATEGORIES.has(issue.category)) {
+        return issue.ruleId === "dialect-spelling" ? "clarity" : "objective";
+    }
+    return "clarity";
+}
+/**
+ * The advice a rule represents, in one key. Many findings share a cause:
+ * every "wordiness-*" rule is the same kind of advice about tightening phrases,
+ * so turning off that type turns the whole family off at once.
+ */
+function ruleFamily(ruleId) {
+    if (ruleId.startsWith("wordiness-"))
+        return "wordiness";
+    if (ruleId.startsWith("style-cliche-"))
+        return "cliche";
+    if (ruleId.startsWith("grammar-confused-"))
+        return "confused-word";
+    return ruleId;
+}
+/**
+ * How relevant the finding is to the register the writer selected. Casual
+ * writing tolerates fragments and relaxed punctuation, academic writing prizes
+ * precision over style nits, technical writing must not have valid terminology
+ * corrected, and storytelling gets fewer prescriptive style corrections.
+ */
+function registerRelevance(issue, kind, goals) {
+    const family = ruleFamily(issue.ruleId);
+    const audience = goals?.audience ?? "general";
+    const intent = goals?.intent ?? "inform";
+    const tone = goals?.tone ?? "professional";
+    if (kind === "objective") {
+        if (audience === "casual" || tone === "casual") {
+            if (family === "capitalization-sentence-start")
+                return 0.25;
+            if (family === "punctuation-missing-terminal")
+                return 0.3;
+            if (family === "punctuation-repeated")
+                return 0.45;
+        }
+        if (audience === "technical" && family === "spelling-lexicon")
+            return 0.55;
+        return 1;
+    }
+    if (kind === "clarity") {
+        if (family === "structure-fragment") {
+            return audience === "casual" || tone === "casual" || intent === "story" ? 0.3 : 0.6;
+        }
+        if (family === "clarity-vague-word") {
+            return audience === "academic" ? 1 : audience === "technical" ? 0.6 : audience === "casual" ? 0.55 : 0.8;
+        }
+        if (family === "wordiness") {
+            return audience === "professional" || audience === "academic" ? 1 : audience === "casual" ? 0.6 : 0.85;
+        }
+        if (family === "structure-long-sentence") {
+            return intent === "story" ? 0.5 : audience === "casual" ? 0.5 : 0.85;
+        }
+        if (family === "conciseness-filler") {
+            return audience === "casual" ? 0.6 : 0.9;
+        }
+        return 0.85;
+    }
+    // Style findings are preferences. Registers that lean expressive get fewer of them.
+    if (family === "style-passive-voice") {
+        return audience === "academic" ? 0.55 : intent === "story" ? 0.5 : audience === "professional" ? 0.7 : 0.6;
+    }
+    if (family === "cliche")
+        return audience === "academic" ? 0.7 : intent === "story" ? 0.5 : 0.65;
+    if (family === "style-intensifier")
+        return audience === "casual" || tone === "casual" ? 0.4 : 0.6;
+    if (family === "style-contractions")
+        return tone === "formal" ? 0.9 : 0.5;
+    if (family === "punctuation-oxford-comma")
+        return audience === "casual" ? 0.35 : 0.6;
+    return 0.65;
+}
+function contextRelevance(issue, kind, goals, document) {
+    let relevance = registerRelevance(issue, kind, goals);
+    const sentence = document.sentences.find((span) => issue.start >= span.start && issue.end <= span.end);
+    if (sentence && sentence.tokens.length <= 4 && kind !== "objective")
+        relevance *= 0.85;
+    return Math.max(0, Math.min(1, relevance));
+}
+function issueImpact(issue, kind, document) {
+    const severity = issue.severity === "high" ? 0.9 : issue.severity === "medium" ? 0.6 : 0.35;
+    const categoryWeight = kind === "objective" ? 1 : kind === "clarity" ? 0.8 : 0.45;
+    let impact = severity * categoryWeight;
+    if (ruleFamily(issue.ruleId) === "structure-long-sentence") {
+        const sentence = document.sentences.find((span) => issue.start >= span.start && issue.end <= span.end);
+        if (sentence)
+            impact = Math.min(0.9, 0.3 + Math.max(0, sentence.tokens.length - 32) * 0.02);
+    }
+    return Math.max(0, Math.min(1, impact));
+}
+function assignTier(kind, issue, relevance, impact) {
+    if (kind === "objective" && issue.confidence >= 0.9 && issue.severity !== "low")
+        return "fix-first";
+    if (kind === "style")
+        return "optional";
+    if (kind === "clarity" && relevance >= 0.55 && impact >= 0.45)
+        return "improve";
+    if (kind === "objective")
+        return relevance >= 0.5 ? "fix-first" : "optional";
+    return "optional";
+}
+function tierWeight(tier) {
+    return tier === "fix-first" ? 3 : tier === "improve" ? 2 : 1;
+}
+function reasonCodesFor(kind, tier, issue, relevance) {
+    const codes = [`kind:${kind}`, `tier:${tier}`];
+    if (issue.confidence >= 0.9)
+        codes.push("high-confidence");
+    if (relevance < 0.6)
+        codes.push("register-dampened");
+    return codes;
+}
+function emptyReport() {
+    return {
+        rawCount: 0,
+        displayedCount: 0,
+        suppressedCount: 0,
+        groupedCount: 0,
+        byTier: { "fix-first": 0, improve: 0, optional: 0 },
+        byCategory: {},
+        suppressedByRule: [],
+    };
+}
+function groupKey(issue) {
+    return `${issue.ruleId}\u0000${issue.original.trim().toLocaleLowerCase()}`;
+}
+/**
+ * Evaluate detected findings against context and return only what a writer
+ * should see, ranked, with the noise accounted for in the report.
+ */
+function prioritiseSuggestions(issues, options = {}) {
+    const document = options.document ?? parseDocument(options.text ?? issues.map((issue) => issue.original).join(" "));
+    const preferences = options.preferences;
+    const dismissed = [...(options.dismissed ?? [])];
+    const noise = options.ruleDismissalCounts ?? {};
+    const suppressed = [];
+    const report = emptyReport();
+    report.rawCount = issues.length;
+    const ruleOff = new Set((preferences?.ignoredRuleIds ?? []).map((id) => ruleFamily(id)));
+    const ruleReduced = new Set((preferences?.reducedRuleIds ?? []).map((id) => ruleFamily(id)));
+    const candidates = [];
+    for (const issue of issues) {
+        const kind = classifyIssueKind(issue);
+        const family = ruleFamily(issue.ruleId);
+        if (ruleOff.has(family)) {
+            suppressed.push({ issue, reason: "rule-off" });
+            continue;
+        }
+        const nearDismissal = dismissed.some((entry) => entry.ruleId === issue.ruleId
+            && (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original
+                || (entry.original.trim().toLocaleLowerCase() === issue.original.trim().toLocaleLowerCase()
+                    && issue.start >= entry.start - NEAR_DISMISSAL_CHARS && issue.start <= entry.end + NEAR_DISMISSAL_CHARS)));
+        if (nearDismissal) {
+            suppressed.push({ issue, reason: "near-dismissal" });
+            continue;
+        }
+        const relevance = contextRelevance(issue, kind, options.goals, document);
+        if (relevance < REGISTER_MISMATCH_THRESHOLD) {
+            suppressed.push({ issue, reason: "register-mismatch" });
+            continue;
+        }
+        const impact = issueImpact(issue, kind, document);
+        if (kind !== "objective" && issue.confidence < LOW_CONFIDENCE_STYLE_THRESHOLD && impact < 0.5) {
+            suppressed.push({ issue, reason: "low-confidence-style" });
+            continue;
+        }
+        const tier = assignTier(kind, issue, relevance, impact);
+        const noisePenalty = Math.min(1.5, (noise[issue.ruleId] ?? 0) * 0.35);
+        const profileAdjustment = (options.rankAdjustments ?? [])
+            .filter((adjustment) => adjustment.family === family)
+            .reduce((total, adjustment) => total + adjustment.rankDelta, 0);
+        const rank = tierWeight(tier) * 2 + issue.confidence * 2 + relevance * 1.5 + impact * 1.5 - noisePenalty + profileAdjustment;
+        candidates.push({
+            issue,
+            kind,
+            relevance,
+            impact,
+            tier,
+            rank,
+            reasonCodes: reasonCodesFor(kind, tier, issue, relevance),
+            groupedIds: [],
+            groupedCount: 0,
+        });
+    }
+    // Fold repeated patterns into one suggestion: the same rule on the same word
+    // or construction is advice the writer needs once, not once per occurrence.
+    const groups = new Map();
+    for (const candidate of candidates) {
+        const key = groupKey(candidate.issue);
+        const bucket = groups.get(key);
+        if (bucket)
+            bucket.push(candidate);
+        else
+            groups.set(key, [candidate]);
+    }
+    const grouped = [];
+    for (const bucket of groups.values()) {
+        const [first, ...rest] = bucket.sort((left, right) => right.rank - left.rank);
+        if (first.issue.ruleId === "spelling-common-typo" || first.issue.ruleId === "spelling-lexicon" || first.issue.ruleId === "consistency-preferred-term") {
+            // Spelling and terminology findings are distinct locations of a genuine
+            // mistake; each one is a separate fix, so keep them individually.
+            grouped.push(...bucket.map((candidate) => ({ ...candidate })));
+            continue;
+        }
+        const merged = { ...first, groupedIds: rest.map((candidate) => candidate.issue.id), groupedCount: rest.length };
+        grouped.push(merged);
+        for (const candidate of rest)
+            suppressed.push({ issue: candidate.issue, reason: "repeated-pattern" });
+        report.groupedCount += rest.length;
+    }
+    // A rule that keeps firing in one draft is offering the same advice again and
+    // again. Show its strongest instances, then stop.
+    grouped.sort((left, right) => right.rank - left.rank);
+    const perRuleShown = new Map();
+    const tierShown = { "fix-first": 0, improve: 0, optional: 0 };
+    const displayed = [];
+    for (const candidate of grouped) {
+        const family = ruleFamily(candidate.issue.ruleId);
+        // A family the writer repeatedly dismissed is dampened to one instance,
+        // the same treatment as an explicit "Show fewer" — still visible, never nagging.
+        const dampened = ruleReduced.has(family)
+            || (options.rankAdjustments ?? []).some((adjustment) => adjustment.family === family && adjustment.rankDelta <= -0.8);
+        const perRuleCap = dampened ? 1 : PER_RULE_CAPS[candidate.kind];
+        const shown = perRuleShown.get(family) ?? 0;
+        if (shown >= perRuleCap) {
+            suppressed.push({ issue: candidate.issue, reason: dampened ? "rule-reduced" : "density-cap" });
+            continue;
+        }
+        if (tierShown[candidate.tier] >= SUGGESTION_DENSITY_CAPS[candidate.tier]) {
+            suppressed.push({ issue: candidate.issue, reason: "density-cap" });
+            continue;
+        }
+        perRuleShown.set(family, shown + 1);
+        tierShown[candidate.tier] += 1;
+        displayed.push({
+            ...candidate.issue,
+            tier: candidate.tier,
+            kind: candidate.kind,
+            rank: candidate.rank,
+            contextRelevance: candidate.relevance,
+            impact: candidate.impact,
+            groupedCount: candidate.groupedCount,
+            groupedIds: candidate.groupedIds,
+            reasonCodes: candidate.reasonCodes,
+        });
+    }
+    displayed.sort((left, right) => right.rank - left.rank || left.start - right.start);
+    report.displayedCount = displayed.length;
+    report.suppressedCount = suppressed.length;
+    for (const issue of displayed) {
+        report.byTier[issue.tier] += 1;
+        report.byCategory[issue.category] = (report.byCategory[issue.category] ?? 0) + 1;
+    }
+    const ruleCounts = new Map();
+    for (const entry of suppressed) {
+        const counts = ruleCounts.get(entry.issue.ruleId) ?? { suppressed: 0, displayed: 0 };
+        counts.suppressed += 1;
+        ruleCounts.set(entry.issue.ruleId, counts);
+    }
+    for (const issue of displayed) {
+        const counts = ruleCounts.get(issue.ruleId) ?? { suppressed: 0, displayed: 0 };
+        counts.displayed += 1;
+        ruleCounts.set(issue.ruleId, counts);
+    }
+    report.suppressedByRule = [...ruleCounts.entries()]
+        .map(([ruleId, counts]) => ({ ruleId, ...counts }))
+        .sort((left, right) => right.suppressed - left.suppressed || left.ruleId.localeCompare(right.ruleId));
+    return { displayed, suppressed, report };
+}
 function countSyllables(word) {
     const normalized = word.toLocaleLowerCase().replace(/(?:e|es|ed)$/u, "");
     return Math.max(1, (normalized.match(/[aeiouy]{1,2}/gu) ?? []).length);
@@ -1515,7 +2026,10 @@ function analyzeLocally(text, options = {}, goals) {
     const startedAt = analysisNow();
     const preferences = mergePreferences(options);
     const document = analyzeDocument(text);
-    const issues = mergeWritingIssues([
+    // Markdown-aware: code fences, inline code and URLs are machine text that
+    // prose rules must not touch, and list items are structured content.
+    const protectedSpans = findProtectedSpans(text);
+    const rawIssues = mergeWritingIssues([
         ...findSpelling(text, preferences, document),
         ...findConfusedWords(text, preferences),
         ...findPrecisionGrammarIssues(text, preferences, document),
@@ -1524,7 +2038,19 @@ function analyzeLocally(text, options = {}, goals) {
         ...findRepeatedWordsAndPhrases(text, preferences, document),
         ...findStyleIssues(text, preferences, document),
         ...findStructureIssues(text, preferences, document),
+        ...findDocumentStructure(text, preferences, goals, document),
+        ...findGoalTerminology(text, goals, preferences, document),
     ]);
+    const issues = rawIssues.filter((issue) => {
+        if (isInsideProtectedSpan(protectedSpans, issue.start, issue.end))
+            return false;
+        // Fragment and terminal-punctuation advice does not apply to bullets,
+        // numbered steps or blockquotes: those are structured, not prose sentences.
+        if (issue.ruleId === "structure-fragment" || issue.ruleId === "punctuation-missing-terminal") {
+            return !isStructuredLineStart(text, issue.start);
+        }
+        return true;
+    });
     const stats = getWritingStats(text, document);
     const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "local");
     return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text, document), ...(diagnostics ? { diagnostics } : {}) };
@@ -1585,7 +2111,7 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
 }
 // Public surface preserved for the web app, the extension bundle, and the test suite.
 
-return { WORD_PATTERN, analyzeDocument, analyzeLocally, analyzeLocallyIncremental, categoryColors, createAnalysisDiagnostics, detectChangedRange, getWritingStats, inferTone, mergeWritingIssues, parseDocument, scoreWriting, suggestSpelling };
+return { WORD_PATTERN, analyzeDocument, analyzeLocally, analyzeLocallyIncremental, categoryColors, createAnalysisDiagnostics, detectChangedRange, getWritingStats, inferTone, mergeWritingIssues, parseDocument, prioritiseSuggestions, classifyIssueKind, ruleFamily, SUGGESTION_DENSITY_CAPS, scoreWriting, suggestSpelling };
 })();
 globalThis.DraftwiseGrammar = DraftwiseGrammarModule;
 })();

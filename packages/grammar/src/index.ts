@@ -36,6 +36,15 @@ import {
   findStyleIssues,
 } from "./style.ts";
 import {
+  findDocumentStructure,
+  findGoalTerminology,
+} from "./structure.ts";
+import {
+  findProtectedSpans,
+  isInsideProtectedSpan,
+  isStructuredLineStart,
+} from "./markdown.ts";
+import {
   createIssueId,
 } from "./util.ts";
 
@@ -47,7 +56,10 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
   const startedAt = analysisNow();
   const preferences = mergePreferences(options);
   const document = analyzeDocument(text);
-  const issues = mergeWritingIssues([
+  // Markdown-aware: code fences, inline code and URLs are machine text that
+  // prose rules must not touch, and list items are structured content.
+  const protectedSpans = findProtectedSpans(text);
+  const rawIssues = mergeWritingIssues([
     ...findSpelling(text, preferences, document),
     ...findConfusedWords(text, preferences),
     ...findPrecisionGrammarIssues(text, preferences, document),
@@ -56,7 +68,18 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
     ...findRepeatedWordsAndPhrases(text, preferences, document),
     ...findStyleIssues(text, preferences, document),
     ...findStructureIssues(text, preferences, document),
+    ...findDocumentStructure(text, preferences, goals, document),
+    ...findGoalTerminology(text, goals, preferences, document),
   ]);
+  const issues = rawIssues.filter((issue) => {
+    if (isInsideProtectedSpan(protectedSpans, issue.start, issue.end)) return false;
+    // Fragment and terminal-punctuation advice does not apply to bullets,
+    // numbered steps or blockquotes: those are structured, not prose sentences.
+    if (issue.ruleId === "structure-fragment" || issue.ruleId === "punctuation-missing-terminal") {
+      return !isStructuredLineStart(text, issue.start);
+    }
+    return true;
+  });
   const stats = getWritingStats(text, document);
   const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "local");
   return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text, document), ...(diagnostics ? { diagnostics } : {}) };

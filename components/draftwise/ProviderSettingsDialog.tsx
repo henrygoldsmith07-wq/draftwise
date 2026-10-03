@@ -188,6 +188,42 @@ export function ProviderSettingsDialog({
             <Switch checked={style.allowContractions} onCheckedChange={(value) => patchStyle({ allowContractions: value })} aria-label="Allow contractions" />
           </div>
 
+          <div className="writing-profile">
+            <div className="writing-profile-heading">
+              <strong>Writing profile</strong>
+              <span>What Draftwise has learned from how you use suggestions, on this device only. Every entry is editable and removable — nothing here is automatic or hidden.</span>
+            </div>
+            {style.learned?.length ? (
+              <div className="writing-profile-list">
+                {style.learned.map((entry) => (
+                  <div key={entry.id} className="writing-profile-entry">
+                    <div>
+                      <strong>{entry.label}</strong>
+                      <span>{entry.detail}</span>
+                    </div>
+                    <div className="writing-profile-actions">
+                      {entry.kind === "disabled-family" ? (
+                        <button type="button" onClick={() => patchStyle({ ignoredRuleIds: style.ignoredRuleIds.filter((id) => id !== entry.family), learned: style.learned?.filter((item) => item.id !== entry.id) })}>Turn back on</button>
+                      ) : entry.kind === "reduced-family" ? (
+                        <button type="button" onClick={() => patchStyle({ reducedRuleIds: style.reducedRuleIds.filter((id) => id !== entry.family), learned: style.learned?.filter((item) => item.id !== entry.id) })}>Show normally</button>
+                      ) : (
+                        <button type="button" onClick={() => patchStyle({ dismissalCounts: Object.fromEntries(Object.entries(style.dismissalCounts ?? {}).filter(([family]) => family !== entry.family)), learned: style.learned?.filter((item) => item.id !== entry.id) })}>Forget this</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="writing-profile-empty">Nothing learned yet. When you repeatedly dismiss or reduce a suggestion type, it appears here so you can see exactly what changed.</p>
+            )}
+            {style.personalDictionary.length ? (
+              <div className="writing-profile-dictionary">
+                <strong>Personal dictionary</strong>
+                <span>{style.personalDictionary.join(" · ")}</span>
+              </div>
+            ) : null}
+          </div>
+
           <div className="settings-footnote">
             <Info size={14} />
             No account or analytics are required. classifier.dev is keyless by default; an optional workspace key only changes its limits. Clearing local data removes the draft, preferences, credentials, and local analysis cache.

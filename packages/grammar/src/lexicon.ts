@@ -7,6 +7,7 @@ export const TYPO_FIXES : Record<string, string> = {
   arguement: "argument",
   becuase: "because",
   beleive: "believe",
+  basicly: "basically",
   calender: "calendar",
   comming: "coming",
   couldnt: "couldn't",

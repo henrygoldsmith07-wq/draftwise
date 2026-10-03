@@ -44,6 +44,7 @@ function evaluatePass(examples, mode) {
   const byCategory = new Map();
   const byRegister = new Map();
   const byRule = new Map();
+  const bySeverity = new Map();
   const severityCounts = { low: 0, medium: 0, high: 0 };
   const suppressionReasons = new Map();
   let truePositives = 0;
@@ -104,8 +105,13 @@ function evaluatePass(examples, mode) {
     }
     for (const issue of shown) severityCounts[issue.severity] = (severityCounts[issue.severity] ?? 0) + 1;
     for (let index = 0; index < shown.length; index += 1) {
-      if (used.has(index)) continue;
       const issue = shown[index];
+      // Precision by severity counts every displayed suggestion against whether
+      // it matched a labelled expectation (stylistic opinions included), so the
+      // number reflects what the writer sees at each severity level.
+      if (used.has(index)) bucket(bySeverity, issue.severity).truePositives += 1;
+      else bucket(bySeverity, issue.severity).falsePositives += 1;
+      if (used.has(index)) continue;
       if (isErrorCategory(issue.category)) {
         falsePositives += 1;
         bucket(byCategory, issue.category).falsePositives += 1;
@@ -145,6 +151,7 @@ function evaluatePass(examples, mode) {
     severityDistribution: severityCounts,
     highConfidencePrecision: ratio(highConfidenceCorrect, highConfidenceShown),
     byCategory: finalise(byCategory),
+    bySeverity: finalise(bySeverity),
     byRegister: finalise(byRegister),
     topNoisyRules: noisyRules,
     suppressedByReason: Object.fromEntries([...suppressionReasons.entries()].sort(([a], [b]) => a.localeCompare(b))),

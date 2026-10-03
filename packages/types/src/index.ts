@@ -58,6 +58,8 @@ export interface PrioritisedIssue extends WritingIssue {
   groupedIds: string[];
   /** Short machine-readable reasons for the tiering decision, for tests and insights. */
   reasonCodes: string[];
+  /** Surrounding passage, so the writer sees the suggestion in context. */
+  context?: string;
 }
 
 export interface SuppressedFinding {
@@ -215,10 +217,31 @@ export interface AnalysisResult {
   aiCoverage?: AiCoverage;
 }
 
+export type DocumentType = "essay" | "report" | "email" | "article" | "personal-statement" | "technical-explanation" | "notes" | "general";
+
 export interface WritingGoals {
   audience: "general" | "academic" | "professional" | "technical" | "casual";
   intent: "inform" | "explain" | "persuade" | "describe" | "story";
   tone: "neutral" | "confident" | "friendly" | "professional" | "formal" | "casual";
+  /** Optional document shape; adapts suggestion ranking without forcing a template. */
+  documentType?: DocumentType;
+  /** Approximate target length in words; drafts far off it get a gentle note, not a score. */
+  targetLength?: number;
+  /** Terms that must appear somewhere in the draft. */
+  requiredTerminology?: string[];
+  /** Terms the writer never wants to see. */
+  forbiddenTerminology?: string[];
+}
+
+/** A transparent entry in the local Writing Profile; every one is user-removable. */
+export interface LearnedPreference {
+  id: string;
+  kind: "dismissal-pattern" | "reduced-family" | "disabled-family";
+  label: string;
+  detail: string;
+  family: string;
+  createdAt: number;
+  source: "learned" | "manual";
 }
 
 export interface StylePreferences {
@@ -229,6 +252,10 @@ export interface StylePreferences {
   ignoredRuleIds: string[];
   /** Rules the writer asked to see less often: their cap drops to one per document. */
   reducedRuleIds: string[];
+  /** How many times the writer dismissed each suggestion family; drives learning. */
+  dismissalCounts?: Record<string, number>;
+  /** What the Writing Profile has learned; inspectable and editable in Settings. */
+  learned?: LearnedPreference[];
   preferredTerminology: Record<string, string>;
   oxfordComma: boolean;
   allowContractions: boolean;

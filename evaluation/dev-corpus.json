@@ -407,5 +407,168 @@
         "original": "w"
       }
     ]
+  },
+  {
+    "id": "dev-essay-005",
+    "register": "essay",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "neutral"
+    },
+    "text": "Every generation believes it invented irony, and every generation is wrong. The nineteenth-century novel thrives on it; the twentieth-century sitcom runs on it. What changes is not the device but the audience’s willingness to be caught using it themselves.",
+    "expected": []
+  },
+  {
+    "id": "dev-essay-006",
+    "register": "essay",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "text": "The distinction between equality of opportunity and equality of outcome is often drawn too sharply. A policy that equalises access while leaving outcomes untouched still shapes the next generation’s starting positions, which is why the two cannot be discussed in isolation from one another.",
+    "expected": []
+  },
+  {
+    "id": "dev-email-005",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "friendly"
+    },
+    "text": "Hi Ravi,\n\nQuick update: the design review moved to Thursday at 2pm. No prep needed beyond the mockups you already shared. If that time does not work, just reply and we will find another slot.\n\nBest,\nElena",
+    "expected": []
+  },
+  {
+    "id": "dev-email-006",
+    "register": "email",
+    "goals": {
+      "audience": "professional",
+      "intent": "persuade",
+      "tone": "professional"
+    },
+    "text": "Dear Hiring Committee,\n\nI am writing to support Dr. Nkemdirim’s application. Her record of mentoring junior researchers is unusually strong, and the department would benefit directly from that experience. I would be glad to provide further detail on request.\n\nYours sincerely,\nProf. Halden",
+    "expected": []
+  },
+  {
+    "id": "dev-casual-005",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "ok so basically the plan is: meet at 6, grab food, then decide after. no pressure if you can’t make it tho",
+    "expected": []
+  },
+  {
+    "id": "dev-casual-006",
+    "register": "casual",
+    "goals": {
+      "audience": "casual",
+      "intent": "story",
+      "tone": "casual"
+    },
+    "text": "so i get to the station right and the train is just gone. gone. so i sat there for like an hour lol",
+    "expected": []
+  },
+  {
+    "id": "dev-fragmented-001",
+    "register": "intentionally-fragmented",
+    "goals": {
+      "audience": "general",
+      "intent": "persuade",
+      "tone": "confident"
+    },
+    "text": "The pitch, in one line: faster onboarding, fewer drop-offs.\n\nWhy now. The market shifted last quarter. Our competitors are still shipping the old flow.\n\nWhat we need. One engineer for six weeks. Design support for the first two.",
+    "expected": []
+  },
+  {
+    "id": "dev-fragmented-002",
+    "register": "intentionally-fragmented",
+    "goals": {
+      "audience": "casual",
+      "intent": "describe",
+      "tone": "casual"
+    },
+    "text": "Notes from the walk-through:\n\n- main door sticks\n- kitchen light flickers\n- garden fence needs repair before winter\n- everything else fine",
+    "expected": []
+  },
+  {
+    "id": "dev-high-quality-001",
+    "register": "high-quality",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "neutral"
+    },
+    "text": "Good documentation is written for the reader who arrives frustrated. They have already tried the obvious thing and it failed, so the first page must acknowledge that failure and show the path around it. Everything else is secondary.",
+    "expected": []
+  },
+  {
+    "id": "dev-high-quality-002",
+    "register": "high-quality",
+    "goals": {
+      "audience": "professional",
+      "intent": "explain",
+      "tone": "professional"
+    },
+    "text": "The migration followed a simple rule: no behaviour change in the same release as the format change. By keeping the data conversion separate from the feature work, every bug report had exactly one plausible cause, and rollback remained a one-command operation throughout.",
+    "expected": []
+  },
+  {
+    "id": "dev-report-005",
+    "register": "report",
+    "goals": {
+      "audience": "professional",
+      "intent": "inform",
+      "tone": "professional"
+    },
+    "text": "Uptime for the quarter was 99.94%, above the 99.9% target. The two incidents lasting more than ten minutes both traced to a single configuration service; a fix has shipped and a second failure domain is now in place.",
+    "expected": []
+  },
+  {
+    "id": "dev-technical-005",
+    "register": "technical-doc",
+    "goals": {
+      "audience": "technical",
+      "intent": "explain",
+      "tone": "neutral"
+    },
+    "text": "When the queue is full, producers receive a backpressure signal instead of a silent drop. Callers should treat this as a retryable condition: wait for the recommended delay, then re-enqueue the message. Messages themselves are never discarded by the broker.",
+    "expected": []
+  },
+  {
+    "id": "dev-school-005",
+    "register": "school",
+    "goals": {
+      "audience": "academic",
+      "intent": "explain",
+      "tone": "formal"
+    },
+    "text": "The water cycle describes how water moves between the sea, the air and the land. Heat from the sun causes evaporation, which forms clouds. When the water condenses, it falls back to earth as rain.",
+    "expected": []
+  },
+  {
+    "id": "dev-imperfect-005",
+    "register": "imperfect-draft",
+    "goals": {
+      "audience": "general",
+      "intent": "inform",
+      "tone": "neutral"
+    },
+    "text": "I think that the new system is alot better then the old one. Its faster and it doesnt crash, although the setup was very confusing and we lost basicly a whole day to it.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "alot"
+      },
+      {
+        "category": "spelling",
+        "original": "basicly"
+      }
+    ]
   }
 ]

@@ -6,13 +6,17 @@ const pageUrl = new URL("../app/page.tsx", import.meta.url);
 const rewriteUrl = new URL("../hooks/useRewrite.ts", import.meta.url);
 const settingsUrl = new URL("../components/draftwise/ProviderSettingsDialog.tsx", import.meta.url);
 
-test("new drafts require confirmation and preserve the previous text in session history", async () => {
+test("new drafts require confirmation and start their own history", async () => {
   const page = await readFile(pageUrl, "utf8");
   assert.match(page, /Start a new draft\?/u);
   assert.match(page, /if \(!workspace\.draft\.trim\(\)\)/u);
   const start = page.match(/const startNewDocument = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
   assert.ok(start);
-  assert.match(start[1], /commit\(""\)/u);
+  // The new document opens its own history from its blank text: the previous
+  // document's content can never be undone into it. Recovery is via Documents
+  // and version history, not a cross-document undo chain.
+  assert.match(start[1], /historyStore\.open\(document\.id/u);
+  assert.doesNotMatch(start[1], /historyStore\.commit\(/u);
   assert.doesNotMatch(start[1], /resetHistory/u);
 });
 
@@ -55,7 +59,7 @@ test("Save & close remains open when immediate persistence fails", async () => {
 
 test("undo and redo cancel stale rewrite state and reset selection", async () => {
   const page = await readFile(pageUrl, "utf8");
-  const applyHistory = page.match(/const applyHistory = useCallback\(\(next: string \| undefined\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
+  const applyHistory = page.match(/const applyHistory = useCallback\(\(next: string \| null\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
   assert.ok(applyHistory, "applyHistory callback should exist");
   assert.match(applyHistory[1], /cancelRewrite\(\)/u);
   assert.match(applyHistory[1], /updateDraft\(next, false\)/u);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BarChart3, CircleHelp, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import { downloadFile, exportAsMarkdown, exportAsText, importDocument } from "@/
 import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
-import { useHistory } from "@/hooks/useHistory";
+import { DocumentHistoryStore } from "@/lib/document-history";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
 import { getAiReviewStatus, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
@@ -63,7 +63,7 @@ function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
         <DialogHeader>
           <DialogTitle>Start a new draft?</DialogTitle>
           <DialogDescription>
-            This replaces the current local document with a blank draft. The current text remains available through Undo during this session.
+            This starts a fresh blank document. Your current text stays intact in Documents and its version history — undo now works within each document, so return to the previous document to recover anything.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -98,8 +98,17 @@ export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(SAMPLE_DOCUMENT), []);
   const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   const documents = useDocuments({ title: workspace.title, draft: workspace.draft }, hydrated);
-  const { commit, undo: undoHistory, redo: redoHistory, reset: resetHistory, canUndo, canRedo } = useHistory(workspace.draft);
-  const historyReady = useRef(false);
+  // Undo/redo is scoped per document: each document owns its own stack, so
+  // switching documents can never expose one document's text to another's undo.
+  // The store is a proper external store: mutations notify React through
+  // useSyncExternalStore, never through render-time refs or effect setState.
+  const [historyStore] = useState(() => new DocumentHistoryStore());
+  const activeId = documents.activeId || "draft";
+  const historySnapshot = useSyncExternalStore(
+    historyStore.subscribe,
+    useCallback(() => historyStore.snapshot(activeId), [activeId, historyStore]),
+    useCallback(() => historyStore.snapshot(activeId), [activeId, historyStore]),
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const registerTextarea = useCallback((element: HTMLTextAreaElement | null) => { textareaRef.current = element; }, []);
@@ -125,10 +134,12 @@ export default function Home() {
   const issues = analysis.issues;
 
   useEffect(() => {
-    if (!hydrated || historyReady.current) return;
-    resetHistory(workspace.draft);
-    historyReady.current = true;
-  }, [hydrated, resetHistory, workspace.draft]);
+    // Each document opens its own history the first time it becomes active.
+    // Opening a document never adds its text to another document's undo chain.
+    if (!activeId) return;
+    historyStore.open(activeId, workspace.draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the active document changes
+  }, [activeId]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -141,8 +152,11 @@ export default function Home() {
   const updateDraft = useCallback((next: string, recordHistory = true) => {
     updateWorkspace({ draft: next });
     documents.updateActive({ draft: next });
-    if (recordHistory) commit(next);
-  }, [commit, documents, updateWorkspace]);
+    if (recordHistory) {
+      historyStore.commit(activeId || "draft", next);
+
+    }
+  }, [activeId, documents, updateWorkspace]);
 
   const updateGoals = useCallback((patch: Partial<WritingGoals>) => {
     cancelRewrite();
@@ -238,8 +252,8 @@ export default function Home() {
     setActiveIssueId(null);
   }, [documents, updateDraft, visibleIssues, workspace.draft]);
 
-  const applyHistory = useCallback((next: string | undefined) => {
-    if (next !== undefined) {
+  const applyHistory = useCallback((next: string | null) => {
+    if (next !== null) {
       cancelRewrite();
       updateDraft(next, false);
       setSelection({ start: 0, end: 0 });
@@ -247,8 +261,12 @@ export default function Home() {
     }
   }, [cancelRewrite, setSelection, updateDraft]);
 
-  const undo = useCallback(() => applyHistory(undoHistory()), [applyHistory, undoHistory]);
-  const redo = useCallback(() => applyHistory(redoHistory()), [applyHistory, redoHistory]);
+  const undo = useCallback(() => {
+    applyHistory(historyStore.undo(activeId || "draft"));
+  }, [activeId, applyHistory]);
+  const redo = useCallback(() => {
+    applyHistory(historyStore.redo(activeId || "draft"));
+  }, [activeId, applyHistory]);
 
   const runRewrite = useCallback((label: string, instruction: string) => {
     if (!selectedText.trim()) return;
@@ -286,12 +304,14 @@ export default function Home() {
   const startNewDocument = useCallback(() => {
     cancelRewrite();
     const document = documents.createNew("Untitled draft", "");
+    // The new document opens its own history with its blank text as the base
+    // state: the previous document's content can never be undone into it.
+    historyStore.open(document.id, document.draft);
     updateWorkspace({ title: document.title, draft: document.draft });
-    commit("");
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, commit, documents, setSelection, updateWorkspace]);
+  }, [cancelRewrite, documents, setSelection, updateWorkspace]);
 
   const newDocument = useCallback(() => {
     if (!workspace.draft.trim()) {
@@ -329,13 +349,15 @@ export default function Home() {
     if (!target) return;
     cancelRewrite();
     documents.open(id);
+    // Opening a document opens (or reuses) its own history. Nothing is ever
+    // appended to the previous document's undo chain here.
+    historyStore.open(id, target.draft);
     updateWorkspace({ title: target.title, draft: target.draft });
-    commit(target.draft);
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [cancelRewrite, commit, documents, setSelection, updateWorkspace]);
+  }, [cancelRewrite, documents, setSelection, updateWorkspace]);
 
   const importFromFile = useCallback((file: File) => {
     void file.text().then((content) => {
@@ -346,13 +368,14 @@ export default function Home() {
       }
       setImportError(null);
       const document = documents.createNew(result.title, result.text);
+      historyStore.open(document.id, document.draft);
+
       updateWorkspace({ title: document.title, draft: document.draft });
-      commit(document.draft);
       setDismissedIssueKeys([]);
       setActiveIssueId(null);
       setView("write");
     });
-  }, [commit, documents, updateWorkspace]);
+  }, [documents, updateWorkspace]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -364,16 +387,19 @@ export default function Home() {
   const duplicateDocument = useCallback((id: string) => {
     const copy = documents.duplicate(id);
     if (!copy) return;
+    // The duplicate's history starts from its copied text only.
+    historyStore.open(copy.id, copy.draft);
     updateWorkspace({ title: copy.title, draft: copy.draft });
-    commit(copy.draft);
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [commit, documents, setSelection, updateWorkspace]);
+  }, [documents, setSelection, updateWorkspace]);
 
   const deleteDocument = useCallback((id: string) => {
     const wasActive = id === documents.activeId;
+    // Drop the deleted document's undo history so its text cannot reappear.
+    historyStore.remove(id);
     documents.remove(id);
     if (!wasActive) return;
     // The lifecycle guarantees a real active document after deletion; mirror it.
@@ -389,7 +415,9 @@ export default function Home() {
     if (!documents.active) return;
     if (workspace.draft === documents.active.draft && workspace.title === documents.active.title) return;
     updateWorkspace({ title: documents.active.title, draft: documents.active.draft });
-    commit(documents.active.draft);
+    // The mirrored text is the active document's own state, committed to its
+    // own history — never to any other document's.
+    historyStore.open(documents.active.id, documents.active.draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documents.active?.id, documents.active?.updatedAt]);
 
@@ -449,7 +477,8 @@ export default function Home() {
         void documents.clearAll({ title: "Untitled draft", draft: "" });
       },
     });
-    resetHistory(SAMPLE_DOCUMENT);
+    // Clearing local data clears every undo history too.
+    historyStore.clear();
     updateWorkspace({ title: "Untitled draft", draft: "" });
     setSettingsOpen(false);
     setNewDraftOpen(false);
@@ -457,7 +486,7 @@ export default function Home() {
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, clearPersistedData, documents, resetHistory, setSelection, updateWorkspace]);
+  }, [cancelRewrite, clearPersistedData, documents, setSelection, updateWorkspace]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -473,15 +502,25 @@ export default function Home() {
   }, [acceptAll, cancelRewrite, clearDataOpen, newDraftOpen, rewritePreview, saveNow, settingsOpen, shortcutsOpen]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
+  // Truthful save state: combines workspace-settings persistence and the
+  // document store's own confirmed writes. "Saved locally" appears only after
+  // both persisted; degraded storage tiers are named rather than hidden.
+  const docSaving = documents.saveStatus === "saving" || saveStatus === "saving";
+  const docFailed = documents.saveStatus === "error" || saveStatus === "error";
+  const memoryOnly = documents.storageMode === "memory";
   const savedLabel = !hydrated
     ? "Loading local draft…"
-    : saveStatus === "saving"
-      ? "Saving locally…"
-      : saveStatus === "error"
-        ? "Could not save locally"
-        : saveStatus === "saved"
-          ? "Saved locally"
-          : "Not saved yet";
+    : docFailed
+      ? "Could not save locally — your text is still here; we'll retry"
+      : memoryOnly
+        ? "Storage unavailable — changes are kept only until this tab closes"
+        : docSaving
+          ? "Saving…"
+          : documents.saveStatus === "saved" || saveStatus === "saved"
+            ? documents.storageMode === "localstorage"
+              ? "Saved locally (fallback storage)"
+              : "Saved locally"
+            : "Unsaved changes";
   const providerConfigured = Boolean(workspace.provider.apiKey.trim() && workspace.provider.baseUrl.trim() && workspace.provider.model.trim());
   const analysisStatusLabel = getAiReviewStatus(analysis.aiCoverage, workspace.aiEnabled, providerConfigured, analysisState.status);
 
@@ -489,7 +528,14 @@ export default function Home() {
     <main className={`app-shell ${focusMode ? "focus-mode" : ""}`} data-theme={darkMode ? "dark" : "light"}>
       <header className="topbar">
         <div className="brand-lockup"><div className="brand-mark" aria-hidden="true"><span /></div><span className="brand-name">draftwise</span><Badge className="private-badge"><ShieldCheck size={12} /> private</Badge></div>
-        <div className="document-name"><FileText size={15} /><input aria-label="Document title" value={workspace.title} onChange={(event) => updateWorkspace({ title: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span className="saved-dot" title={savedLabel} /></div>
+        <div className="document-name"><FileText size={15} /><input aria-label="Document title" value={workspace.title} onChange={(event) => {
+          // The stored document is authoritative for the title: every rename
+          // writes through the lifecycle so dashboard, exports, history and
+          // reload all see the same name.
+          const title = event.target.value;
+          updateWorkspace({ title });
+          documents.updateActive({ title });
+        }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span className="saved-dot" title={savedLabel} /></div>
         <div className="topbar-actions"><div className="privacy-pill"><span className="privacy-dot" /> Local-first, cloud opt-in</div><Button variant="ghost" size="icon" aria-label={darkMode ? "Use light theme" : "Use dark theme"} onClick={() => updateWorkspace({ theme: darkMode ? "light" : "dark" })}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</Button><Button variant="ghost" size="icon" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></Button></div>
       </header>
 
@@ -503,7 +549,7 @@ export default function Home() {
 
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={workspace.draft} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={canUndo} canRedo={canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
+          {view === "write" ? <EditorWorkspace draft={workspace.draft} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}

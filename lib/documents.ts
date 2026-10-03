@@ -40,10 +40,13 @@ export interface DocumentSummary {
 export interface DocumentStoreBackend {
   list(): Promise<StoredDocument[]>;
   get(id: string): Promise<StoredDocument | null>;
+  /** Persists the document. Failure MUST reject: never report a silent success. */
   put(document: StoredDocument): Promise<void>;
   remove(id: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+export type DocumentBackendMode = "indexeddb" | "localstorage" | "memory";
 
 export const DOCUMENTS_DB_NAME = "draftwise-documents";
 export const DOCUMENTS_DB_VERSION = 1;
@@ -141,6 +144,7 @@ export function sanitiseStoredDocument(value: unknown): StoredDocument | null {
 
 export class MemoryDocumentBackend implements DocumentStoreBackend {
   private documents = new Map<string, StoredDocument>();
+  readonly mode: DocumentBackendMode = "memory";
 
   async list() {
     return [...this.documents.values()];
@@ -166,6 +170,7 @@ export class MemoryDocumentBackend implements DocumentStoreBackend {
 export class LocalStorageDocumentBackend implements DocumentStoreBackend {
   private storage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   private key: string;
+  readonly mode: DocumentBackendMode = "localstorage";
 
   constructor(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, key = "draftwise:documents:v1") {
     this.storage = storage;
@@ -187,6 +192,8 @@ export class LocalStorageDocumentBackend implements DocumentStoreBackend {
   }
 
   private writeAll(documents: StoredDocument[]) {
+    // Quota and storage errors must propagate: a swallowed failure here is
+    // exactly how "Saved locally" lies to the writer.
     this.storage.setItem(this.key, JSON.stringify(documents));
   }
 
@@ -232,22 +239,35 @@ function openDatabase(): Promise<IDBDatabase | null> {
 
 export class IndexedDbDocumentBackend implements DocumentStoreBackend {
   private database: Promise<IDBDatabase | null>;
+  readonly mode: DocumentBackendMode = "indexeddb";
 
   constructor() {
     this.database = openDatabase();
   }
 
-  private async transaction<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T | null> {
+  /** Resolves true only when the database actually opened and can run transactions. */
+  async isAvailable(): Promise<boolean> {
+    return Boolean(await this.database);
+  }
+
+  /**
+   * Runs one transaction. Every failure path rejects: a database that never
+   * opened, a failed request, an aborted transaction, or a thrown error.
+   * Callers must never mistake a failed write for a successful one.
+   */
+  private async transaction<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
     const database = await this.database;
-    if (!database) return null;
-    return new Promise((resolve) => {
+    if (!database) throw new Error("IndexedDB unavailable");
+    return new Promise<T>((resolve, reject) => {
       try {
         const transaction = database.transaction(DOCUMENTS_STORE, mode);
         const request = run(transaction.objectStore(DOCUMENTS_STORE));
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => resolve(null);
-      } catch {
-        resolve(null);
+        request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+        transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+        transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("IndexedDB transaction failed"));
       }
     });
   }
@@ -278,14 +298,106 @@ export class IndexedDbDocumentBackend implements DocumentStoreBackend {
   }
 }
 
-export function createDocumentBackend(): DocumentStoreBackend {
-  if (typeof indexedDB !== "undefined") {
-    const backend = new IndexedDbDocumentBackend();
-    // If IndexedDB never opens (private mode, disabled storage) the list call
-    // resolves to [] anyway; the localStorage backend below is only used when
-    // indexedDB itself is unavailable at construction time.
-    return backend;
+/**
+ * Resilient backend chain: IndexedDB when it genuinely works, localStorage
+ * when IndexedDB cannot open or write, memory-only as the last resort.
+ *
+ * `mode` reports which tier is active so the UI can tell the truth about
+ * durability — memory-only operation must never be reported as "Saved locally".
+ */
+export class ResilientDocumentBackend implements DocumentStoreBackend {
+  private current: DocumentStoreBackend;
+  private storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  private fallbackKey: string;
+  private memory = new MemoryDocumentBackend();
+  private demoted = false;
+
+  constructor(storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">, fallbackKey = "draftwise:documents:v1") {
+    this.storage = storage;
+    this.fallbackKey = fallbackKey;
+    this.current = typeof indexedDB !== "undefined"
+      ? new IndexedDbDocumentBackend()
+      : storage
+        ? new LocalStorageDocumentBackend(storage, fallbackKey)
+        : this.memory;
   }
-  if (typeof localStorage !== "undefined") return new LocalStorageDocumentBackend(localStorage);
-  return new MemoryDocumentBackend();
+
+  get mode(): DocumentBackendMode {
+    // Reports the tier actually holding the documents right now — not which
+    // tier was attempted. A memory-only fallback must never look persistent.
+    return (this.current as { mode?: DocumentBackendMode }).mode ?? "indexeddb";
+  }
+
+  get degraded() {
+    return this.demoted;
+  }
+
+  /** Move one tier down the chain and copy the documents across so nothing is lost. */
+  private async demote(documents: StoredDocument[]) {
+    this.demoted = true;
+    // Each tier is tried in turn: if localStorage is also unavailable, land on
+    // memory rather than throwing away the writer's text.
+    if (this.storage) {
+      const localTier = new LocalStorageDocumentBackend(this.storage, this.fallbackKey);
+      try {
+        for (const document of documents) await localTier.put(document);
+        this.current = localTier;
+        return;
+      } catch {
+        // Fall through to memory; the document set is retried there.
+      }
+    }
+    this.current = this.memory;
+    for (const document of documents) {
+      await this.memory.put(document);
+    }
+  }
+
+  async list(): Promise<StoredDocument[]> {
+    try {
+      return await this.current.list();
+    } catch {
+      return [];
+    }
+  }
+
+  async get(id: string): Promise<StoredDocument | null> {
+    try {
+      return await this.current.get(id);
+    } catch {
+      return null;
+    }
+  }
+
+  async put(document: StoredDocument): Promise<void> {
+    try {
+      await this.current.put(document);
+    } catch (error) {
+      if (this.current === this.memory) throw error;
+      // Preserve the failing document during fallback: data must survive the tier change.
+      const known = await this.list();
+      const merged = [...known.filter((item) => item.id !== document.id), document];
+      await this.demote(merged);
+    }
+  }
+
+  async remove(id: string): Promise<void> {
+    try {
+      await this.current.remove(id);
+    } catch (error) {
+      if (this.current === this.memory) throw error;
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      await this.current.clear();
+    } catch {
+      // Clearing is best-effort across tiers; each tier is attempted.
+    }
+  }
+}
+
+export function createDocumentBackend(): DocumentStoreBackend {
+  return new ResilientDocumentBackend(typeof localStorage !== "undefined" ? localStorage : undefined);
 }

@@ -26,13 +26,15 @@ import {
  *    creates a fresh blank draft rather than leaving the editor orphaned.
  */
 
-export type DocumentSaveStatus = "idle" | "saving" | "saved" | "error";
+export type DocumentSaveStatus = "idle" | "saving" | "saved" | "error" | "degraded";
 
 export interface DocumentLifecycleState {
   documents: StoredDocument[];
   activeId: string;
   hydrated: boolean;
   saveStatus: DocumentSaveStatus;
+  /** Which storage tier actually holds the documents right now. */
+  storageMode: "indexeddb" | "localstorage" | "memory";
 }
 
 export interface DocumentsSeed {
@@ -41,7 +43,12 @@ export interface DocumentsSeed {
 }
 
 export function emptyLifecycleState(): DocumentLifecycleState {
-  return { documents: [], activeId: "", hydrated: false, saveStatus: "idle" };
+  return { documents: [], activeId: "", hydrated: false, saveStatus: "idle", storageMode: "memory" };
+}
+
+function readStorageMode(backend: DocumentStoreBackend): DocumentLifecycleState["storageMode"] {
+  const mode = (backend as { mode?: string }).mode;
+  return mode === "indexeddb" || mode === "localstorage" ? mode : "memory";
 }
 
 export class DocumentLifecycle {
@@ -56,6 +63,7 @@ export class DocumentLifecycle {
   constructor(backend: DocumentStoreBackend, seed: DocumentsSeed) {
     this.backend = backend;
     this.seed = seed;
+    this.state = { ...this.state, storageMode: readStorageMode(backend) };
   }
 
   subscribe = (listener: () => void) => {
@@ -140,7 +148,10 @@ export class DocumentLifecycle {
         this.pending.set(document.id, document);
       }
     }
-    this.setState({ saveStatus: failed ? "error" : "saved" });
+    // A fallback demotion happens inside put(); refresh the reported tier so
+    // the UI never claims IndexedDB durability the app no longer has.
+    const storageMode = readStorageMode(this.backend);
+    this.setState({ saveStatus: failed ? "error" : "saved", storageMode });
   }
 
   /** Synchronous best-effort flush for page exit. */

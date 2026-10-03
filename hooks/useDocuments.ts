@@ -54,6 +54,7 @@ export function useDocuments(seed: DocumentsSeed, ready = true) {
     activeId: state.activeId,
     hydrated: state.hydrated,
     saveStatus: state.saveStatus as DocumentSaveStatus,
+    storageMode: state.storageMode,
     open: lifecycle.open,
     updateActive: lifecycle.updateActive,
     updateDocument: lifecycle.updateDocument,

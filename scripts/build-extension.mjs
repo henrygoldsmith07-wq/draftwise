@@ -84,6 +84,7 @@ const GRAMMAR_MODULES = [
   "packages/grammar/src/structure.ts",
   "packages/grammar/src/outline.ts",
   "packages/grammar/src/explain.ts",
+  "packages/grammar/src/consistency.ts",
   "packages/grammar/src/prioritise.ts",
   "packages/grammar/src/statistics.ts",
   "packages/grammar/src/scoring.ts",

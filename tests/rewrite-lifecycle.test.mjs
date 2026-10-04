@@ -26,7 +26,9 @@ test("settled and unmounted rewrites release transport state and invalidate stal
   assert.ok(source.includes("if (currentRun === runId.current && abort.current === controller) abort.current = null;"));
 
   const cleanupStart = source.indexOf("useEffect(() => () => {");
-  const returnStart = source.indexOf("return { preview, run, cancel, selectAlternative }", cleanupStart);
+  // The return's members grow as the hook gains capabilities, so assert on the
+  // ordering invariant the test exists to protect rather than on a literal.
+  const returnStart = source.indexOf("return { preview,", cleanupStart);
   assert.notEqual(cleanupStart, -1, "unmount cleanup should exist");
   assert.notEqual(returnStart, -1, "hook return should follow cleanup");
   const cleanup = source.slice(cleanupStart, returnStart);

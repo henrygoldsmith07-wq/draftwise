@@ -219,3 +219,63 @@ button { cursor: pointer; }
 .progress-up { color: #427c60; }
 .progress-down { color: #bd5c67; }
 .insight-progress-row small { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Whole-draft reading: focus, themes, editorial notes, outline. */
+.document-overview { display: grid; gap: 9px; margin: 12px 0 4px; padding: 12px 13px; border-radius: 11px; border: 1px solid var(--border); background: color-mix(in srgb, var(--card) 82%, var(--accent)); }
+.document-overview-head { display: flex; align-items: flex-start; gap: 8px; }
+.document-overview-head h3 { margin: 1px 0 3px; font-size: 12.5px; color: var(--ink); line-height: 1.35; }
+.document-overview-icon { margin-left: auto; color: var(--ink-soft); flex-shrink: 0; }
+.document-overview-summary { margin: 0; font-size: 10.5px; line-height: 1.5; color: var(--ink-soft); }
+.document-themes { display: flex; flex-wrap: wrap; gap: 4px; }
+.theme-chip { padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--muted); color: var(--ink-soft); font-size: 9.5px; }
+.document-notes { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.document-note-button { display: grid; gap: 3px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--border); border-left-width: 3px; background: color-mix(in srgb, var(--card) 70%, transparent); color: inherit; cursor: pointer; font: inherit; }
+.document-note-button:disabled { cursor: default; }
+.document-note-structure .document-note-button { border-left-color: var(--blue); }
+.document-note-balance .document-note-button { border-left-color: var(--amber); }
+.document-note-goal .document-note-button { border-left-color: var(--mint-deep); }
+.document-note-coverage .document-note-button { border-left-color: var(--violet); }
+.document-note-button strong { font-size: 11px; color: var(--ink); }
+.document-note-button span { font-size: 10.5px; line-height: 1.5; color: var(--ink-soft); }
+.document-note-button em { font-size: 10.5px; line-height: 1.5; font-style: normal; color: var(--mint-deep); }
+.document-outline-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--ink-soft); font-size: 10.5px; cursor: pointer; padding: 2px 0; }
+.document-outline-toggle svg:last-child { transition: transform .16s ease; }
+.document-outline-toggle svg.is-open { transform: rotate(180deg); }
+.document-outline { display: grid; gap: 5px; margin: 0; padding: 0 0 0 14px; list-style: none; }
+.document-section-button { display: grid; gap: 3px; width: 100%; text-align: left; padding: 7px 9px; border-radius: 8px; border: 1px solid transparent; background: color-mix(in srgb, var(--muted) 40%, transparent); color: inherit; cursor: pointer; font: inherit; }
+.document-section-button:disabled { cursor: default; }
+.document-section.is-filler .document-section-button { border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+.document-section-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.document-section-role { font-style: normal; text-transform: capitalize; font-size: 9.5px; font-weight: 750; color: var(--ink); }
+.document-section-meta { font-size: 9.5px; color: var(--ink-soft); }
+.document-section-opening { font-size: 10.5px; line-height: 1.45; color: var(--ink-soft); }
+
+/* Held-back findings stay inspectable rather than silently dropped. */
+.suppressed-findings { margin-top: 8px; }
+.suppressed-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--ink-soft); font-size: 10px; cursor: pointer; padding: 3px 0; }
+.suppressed-toggle svg:last-child { transition: transform .16s ease; }
+.suppressed-toggle svg.is-open { transform: rotate(180deg); }
+.suppressed-body { display: grid; gap: 6px; margin-top: 6px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.suppressed-body p { margin: 0; font-size: 10.5px; line-height: 1.5; color: var(--ink-soft); }
+.suppressed-body ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.suppressed-body li { display: flex; align-items: baseline; gap: 8px; font-size: 10px; color: var(--ink); }
+.suppressed-body li span { flex: 1; }
+.suppressed-body li em { font-style: normal; font-weight: 750; color: var(--ink-soft); }
+.suppressed-body small { font-size: 9.5px; line-height: 1.45; color: var(--ink-soft); }
+
+/* Goal-aware and ranking explanations on the suggestion card. */
+.suggestion-relevance { display: block; margin: 4px 0 2px; font-size: 10.5px; line-height: 1.5; color: var(--ink-soft); }
+.suggestion-relevance strong { color: var(--ink); font-weight: 700; }
+.suggestion-action { margin: 0; padding: 7px 11px; border-top: 1px solid var(--border); font-size: 10.5px; line-height: 1.5; color: var(--ink); background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.suggestion-action strong { font-weight: 750; }
+.suggestion-ranking { margin: 0; padding: 0 11px 7px; font-size: 9.5px; line-height: 1.4; color: var(--ink-soft); }
+
+/* The writer's own wording before it is applied. */
+.rewrite-edit { display: grid; gap: 5px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.rewrite-edit label small { color: var(--ink-soft); font-size: 10px; }
+.rewrite-edit textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--card) 80%, transparent); color: var(--ink); font: 12.5px/1.55 inherit; resize: vertical; }
+.rewrite-edit textarea:focus-visible { outline: 2px solid var(--mint-deep); outline-offset: 1px; }
+.rewrite-edit-bar { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--ink-soft); }
+.rewrite-edit-bar span { color: var(--mint-deep); font-weight: 700; }
+.rewrite-edit-bar button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; border: 0; background: transparent; color: var(--ink-soft); font-size: 10px; cursor: pointer; }
+.rewrite-edit-bar button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }

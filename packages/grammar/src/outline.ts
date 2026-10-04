@@ -276,6 +276,25 @@ function firstWords(text: string, count: number): string {
   return text.trim().split(/\s+/u).slice(0, count).join(" ");
 }
 
+/**
+ * The last few words the reader actually sees.
+ *
+ * The closing check used to look only at where the final section begins. On a
+ * long draft the final section usually runs for many paragraphs, so a summary
+ * written as the last paragraph — the most ordinary way to end — sat inside the
+ * section and was never examined. The closing cue is looked for in the opening
+ * of the last section and in the document's own ending.
+ */
+function closingWords(document: ParsedDocument, text: string): string {
+  const parts: string[] = [];
+  const paragraphs = document.paragraphs.filter((paragraph) => paragraph.tokens.length > 0);
+  const lastParagraph = paragraphs[paragraphs.length - 1];
+  if (lastParagraph) parts.push(lastParagraph.text);
+  const lastSentence = document.sentences[document.sentences.length - 1];
+  if (lastSentence) parts.push(text.slice(lastSentence.start, lastSentence.end));
+  return firstWords(parts.join(" "), 14).toLocaleLowerCase();
+}
+
 export interface DocumentOutlineOptions {
   goals?: WritingGoals;
   preferences?: StylePreferences;
@@ -342,7 +361,8 @@ export function buildDocumentOutline(
     const last = sections[sections.length - 1];
     const closer = firstWords(last.opening, 12).toLocaleLowerCase();
     const openingTurns = OPENING_CUES.some((cue) => opener.includes(cue));
-    const closingTurns = CLOSING_CUES.some((cue) => closer.includes(cue));
+    const closingTurns = CLOSING_CUES.some((cue) => closer.includes(cue))
+      || CLOSING_CUES.some((cue) => closingWords(document, text).includes(cue));
     if (openingTurns) {
       notes.push({
         id: "note-opening-turn",
@@ -357,15 +377,23 @@ export function buildDocumentOutline(
       });
     }
     if (closingTurns) {
+      // Point at the final paragraph when that is where the summary actually
+      // is, so following the note lands on the wording being criticised.
+      const paragraphs = document.paragraphs.filter((paragraph) => paragraph.tokens.length > 0);
+      const lastParagraph = paragraphs[paragraphs.length - 1];
+      const endsWithCue = lastParagraph
+        && CLOSING_CUES.some((cue) => firstWords(lastParagraph.text, 6).toLocaleLowerCase().includes(cue));
       notes.push({
         id: "note-closing-summary",
         kind: "structure",
         title: "The ending summarises rather than lands",
-        detail: "The closing section begins by summarising (“overall”, “in conclusion”). A summary is useful once the reader already agrees; it is less useful as the last thing they read.",
+        detail: endsWithCue
+          ? "The final paragraph summarises (“overall”, “in conclusion”). A summary is useful once the reader already agrees; it is less useful as the last thing they read."
+          : "The closing section begins by summarising (“overall”, “in conclusion”). A summary is useful once the reader already agrees; it is less useful as the last thing they read.",
         suggestion: "Consider ending on the single most consequential point, or a concrete next step, and moving the summary one paragraph earlier.",
         sectionIds: [last.id],
-        start: last.start,
-        end: last.end,
+        start: endsWithCue ? lastParagraph.start : last.start,
+        end: endsWithCue ? lastParagraph.end : last.end,
         confidence: 0.5,
       });
     }

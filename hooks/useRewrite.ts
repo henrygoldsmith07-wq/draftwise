@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { rewriteWithProvider, ProviderError } from "@/packages/ai/src";
+import { surroundingContext } from "@/lib/rewrite-context";
 import type { ProviderSettings, RewriteResult, StylePreferences, WritingGoals } from "@/packages/types/src";
 export { createRewriteRetryArgs } from "@/lib/rewrite-retry";
+export { surroundingContext } from "@/lib/rewrite-context";
+
+/** Shown when a manual edit leaves nothing to apply. */
+export const NOTHING_TO_APPLY = "Nothing to apply. Restore a suggestion or write your own version.";
 
 export interface RewritePreviewState extends RewriteResult {
   label: string;
@@ -15,6 +20,11 @@ export interface RewritePreviewState extends RewriteResult {
   aiEnabled: boolean;
   /** Kept so a retry re-sends the same surrounding context as the first attempt. */
   draft?: string;
+  /**
+   * What was suggested, held separately from `replacement` so a writer who edits
+   * the wording by hand can always get back to the original suggestion.
+   */
+  suggested?: string;
   loading?: boolean;
   failed?: boolean;
 }
@@ -22,26 +32,9 @@ export interface RewritePreviewState extends RewriteResult {
 /**
  * The sentences immediately around a selection.
  *
- * Sentences, not characters: a context window cut mid-word misleads the model
- * about what the selection is, and a half-sentence in the prompt reads as part
- * of the thing to rewrite. Bounded so a selection inside a very long document
- * does not send the whole draft to the provider.
+ * Lives in lib/ so it can be tested without a React runtime; re-exported here
+ * because callers already reach for the hook module.
  */
-export function surroundingContext(draft: string, selection: { start: number; end: number }, limit = 600) {
-  const before = draft.slice(Math.max(0, selection.start - limit), selection.start);
-  const after = draft.slice(selection.end, Math.min(draft.length, selection.end + limit));
-  const trimBack = (value: string) => {
-    const boundary = value.search(/[.!?…](?:\s|$)/u);
-    // Drop a trailing fragment, but keep enough that the model has a sentence.
-    return boundary >= 0 && boundary < value.length - 40 ? value.slice(boundary + 1).trim() : value.trim();
-  };
-  const trimForward = (value: string) => {
-    const boundary = value.search(/[.!?…](?:\s|$)/u);
-    return boundary >= 0 ? value.slice(0, boundary + 1).trim() : value.trim();
-  };
-  return { contextBefore: trimBack(before), contextAfter: trimForward(after) };
-}
-
 export function useRewrite() {
   const [preview, setPreview] = useState<RewritePreviewState | null>(null);
   const runId = useRef(0);
@@ -80,7 +73,7 @@ export function useRewrite() {
       const context = args.draft ? surroundingContext(args.draft, args.selection) : {};
       const result = await rewriteWithProvider({ text: args.text, instruction: args.instruction, goals: args.goals, preferences: args.style, ...context }, provider, controller.signal);
       if (controller.signal.aborted || currentRun !== runId.current) return;
-      setPreview({ ...base, ...result });
+      setPreview({ ...base, ...result, suggested: result.replacement });
     } catch (reason: unknown) {
       if (controller.signal.aborted || currentRun !== runId.current) return;
       setPreview({ ...base, replacement: "", explanation: reason instanceof ProviderError ? reason.message : "Rewrite failed. Nothing was changed.", source: "local", failed: true });
@@ -101,7 +94,35 @@ export function useRewrite() {
   const selectAlternative = useCallback((index: number) => {
     setPreview((current) => {
       const alternative = current?.alternatives?.[index];
-      return current && alternative ? { ...current, replacement: alternative } : current;
+      return current && alternative ? { ...current, replacement: alternative, suggested: alternative } : current;
+    });
+  }, []);
+
+  /**
+   * Let the writer adjust the wording before it is applied.
+   *
+   * A suggested rewrite is a draft, not an instruction. Being able to take it
+   * and finish it by hand is the difference between a preview the writer
+   * approves and a preview the writer works around. The edited text goes
+   * through exactly the same validation as the suggestion on the way out, so a
+   * writer cannot apply an empty replacement or reintroduce the original text
+   * by accident.
+   */
+  const editReplacement = useCallback((value: string) => {
+    setPreview((current) => {
+      if (!current || current.loading || current.failed) return current;
+      if (value.trim() === "" || value === current.original) {
+        return { ...current, replacement: value, failed: true, explanation: NOTHING_TO_APPLY };
+      }
+      return { ...current, replacement: value, failed: false, explanation: current.explanation === NOTHING_TO_APPLY ? "" : current.explanation };
+    });
+  }, []);
+
+  /** Discard the writer's manual edit and go back to the original suggestion. */
+  const resetReplacement = useCallback(() => {
+    setPreview((current) => {
+      if (!current || current.suggested === undefined || current.replacement === current.suggested) return current;
+      return { ...current, replacement: current.suggested, failed: false, explanation: current.explanation === NOTHING_TO_APPLY ? "" : current.explanation };
     });
   }, []);
 
@@ -111,5 +132,5 @@ export function useRewrite() {
     abort.current = null;
   }, []);
 
-  return { preview, run, cancel, selectAlternative };
+  return { preview, run, cancel, selectAlternative, editReplacement, resetReplacement };
 }

@@ -142,7 +142,7 @@ export default function Home() {
   const [importError, setImportError] = useState<string | null>(null);
   const [systemDark, setSystemDark] = useState(false);
   const { selection, selectedText, updateFromElement, setSelection } = useSelection(draftText);
-  const { preview: rewritePreview, run: requestRewrite, cancel: cancelRewrite, selectAlternative } = useRewrite();
+  const { preview: rewritePreview, run: requestRewrite, cancel: cancelRewrite, selectAlternative, editReplacement, resetReplacement } = useRewrite();
   const analysisState = useAnalysis({ text: draftText, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled, classifier: workspace.classifier ?? null });
   const analysis = analysisState.analysis;
   const issues = analysis.issues;
@@ -487,6 +487,18 @@ export default function Home() {
     window.setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(issue.start, issue.end); }, 0);
   }, []);
 
+  // Jump from a document-level note or outline section to the passage it is
+  // about, so whole-draft feedback is navigable rather than abstract.
+  const onSelectRange = useCallback((start: number, end: number) => {
+    setActiveIssueId(null);
+    setSelection({ start, end });
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(start, end);
+      textareaRef.current?.scrollIntoView?.({ block: "center" });
+    }, 0);
+  }, [setSelection]);
+
   const clearLocalData = useCallback(() => {
     cancelRewrite();
     void clearAllLocalData({
@@ -589,7 +601,7 @@ export default function Home() {
 
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
+          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}

@@ -23,14 +23,19 @@ interface InsightReason {
   issues: WritingIssue[];
 }
 
+// Every score dimension must name the categories that move it, or findings fall
+// through the cracks. "fluency" was missing here, which silently orphaned every
+// whole-document structure note (repeated ideas, unsupported claims, stacked
+// hedges, abrupt transitions) from the insights view even though the rules were
+// finding them and the sidebar was showing them.
 const DIMENSION_CATEGORIES: Record<ScoreDimension, string[]> = {
   correctness: ["spelling", "grammar", "punctuation", "capitalization"],
-  clarity: ["clarity", "sentence structure", "passive voice"],
+  clarity: ["clarity", "sentence structure", "passive voice", "fluency"],
   conciseness: ["conciseness", "repetition", "word choice"],
   readability: ["sentence structure", "readability"],
   engagement: ["repetition", "tone"],
   consistency: ["consistency", "spelling", "capitalization"],
-  goalAlignment: ["formality", "tone"],
+  goalAlignment: ["formality", "tone", "fluency", "consistency"],
 };
 
 function reasonsFor(dimension: ScoreDimension, analysis: AnalysisResult, issues: WritingIssue[]): InsightReason[] {

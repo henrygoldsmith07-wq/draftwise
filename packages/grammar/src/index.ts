@@ -40,6 +40,9 @@ import {
   findGoalTerminology,
 } from "./structure.ts";
 import {
+  findConsistencyIssues,
+} from "./consistency.ts";
+import {
   findProtectedSpans,
   isInsideProtectedSpan,
   isStructuredLineStart,
@@ -70,6 +73,9 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
     ...findStructureIssues(text, preferences, document),
     ...findDocumentStructure(text, preferences, goals, document),
     ...findGoalTerminology(text, goals, preferences, document),
+    // Runs last: it needs the whole document to tell a consistent choice from a
+    // drifting one, and it never overlaps a span an earlier rule already claimed.
+    ...findConsistencyIssues(text, preferences, document),
   ]);
   const issues = rawIssues.filter((issue) => {
     if (isInsideProtectedSpan(protectedSpans, issue.start, issue.end)) return false;
@@ -164,3 +170,7 @@ export type { DocumentNote, DocumentOutline, DocumentOutlineOptions, DocumentSec
 // Goal-aware, contextual explanation. Local and deterministic.
 export { buildAction, buildExplanation, explainRanking, explainRelevance } from "./explain.ts";
 export type { ContextualExplanation } from "./explain.ts";
+// Document-wide consistency: only flags a form the writer used less often, and
+// only when the document actually mixes variants.
+export { findConsistencyIssues, summariseConsistency } from "./consistency.ts";
+export type { ConsistencyReport } from "./consistency.ts";

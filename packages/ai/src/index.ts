@@ -420,7 +420,7 @@ async function requestProvider(
  * Bounded on purpose: a writer with a long dictionary should not pay for it in
  * every request, and a prompt full of noise is a prompt full of ignored rules.
  */
-function buildGoalsContext(goals: WritingGoals, preferences?: StylePreferences) {
+export function buildGoalsContext(goals: WritingGoals, preferences?: StylePreferences) {
   const lines = [
     `Audience: ${goals.audience}.`,
     `Intent: ${goals.intent}.`,
@@ -954,7 +954,19 @@ function normaliseAllowedTokensInQuote(value: string, allowedKinds: Set<Protecte
   return result;
 }
 
-function protectedTokenCounts(text: string, allowedKinds = new Set<ProtectedTokenKind>()) {
+/**
+ * The machine-like spans in a piece of text that a rewrite must preserve.
+ *
+ * Exported so the patterns can be tested directly. Getting this wrong is
+ * expensive in both directions: a token pattern that is too loose protects
+ * ordinary prose and silently stops the editor helping, and one that is too
+ * narrow lets a rewrite quietly corrupt a filename or a version number.
+ */
+export function protectedTokensIn(text: string): string[] {
+  return [...protectedTokenCounts(text).keys()].map((key) => key.slice(key.indexOf("") + 1));
+}
+
+export function protectedTokenCounts(text: string, allowedKinds = new Set<ProtectedTokenKind>()) {
   const counts = new Map<string, number>();
   const claimed: ProtectedRange[] = [];
   const add = (kind: ProtectedTokenKind, token: string) => {

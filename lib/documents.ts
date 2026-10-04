@@ -26,6 +26,23 @@ export interface StoredDocument {
   updatedAt: number;
   wordCount: number;
   snapshots: DocumentSnapshot[];
+  /**
+   * What the last analysis found, kept so the document list can show it.
+   *
+   * Stored rather than recomputed on the dashboard: that view lists every draft
+   * the writer has, and re-analysing all of them to draw a list would turn
+   * opening the app into a long pause. The numbers are only as fresh as the
+   * last time the writer had that draft open, and the label says so.
+   */
+  review?: DocumentReview;
+}
+
+export interface DocumentReview {
+  /** Suggestions the writer should deal with: fix-first plus improve. */
+  worthMaking: number;
+  /** Findings likely to be genuine mistakes or meaning problems. */
+  fixFirst: number;
+  analysedAt: number;
 }
 
 export interface DocumentSummary {
@@ -35,6 +52,7 @@ export interface DocumentSummary {
   updatedAt: number;
   wordCount: number;
   excerpt: string;
+  review?: DocumentReview;
 }
 
 export interface DocumentStoreBackend {
@@ -82,6 +100,7 @@ function summarise(document: StoredDocument): DocumentSummary {
     updatedAt: document.updatedAt,
     wordCount: document.wordCount,
     excerpt: document.draft.trim().replace(/\s+/gu, " ").slice(0, 120),
+    ...(document.review ? { review: document.review } : {}),
   };
 }
 
@@ -139,7 +158,17 @@ export function sanitiseStoredDocument(value: unknown): StoredDocument | null {
     updatedAt,
     wordCount: typeof record.wordCount === "number" && Number.isFinite(record.wordCount) ? record.wordCount : countWords(draft),
     snapshots,
+    ...(isDocumentReview(record.review) ? { review: record.review } : {}),
   };
+}
+
+/** Stored data is untrusted: anything odd is dropped rather than trusted. */
+function isDocumentReview(value: unknown): value is DocumentReview {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.worthMaking === "number" && Number.isFinite(candidate.worthMaking)
+    && typeof candidate.fixFirst === "number" && Number.isFinite(candidate.fixFirst)
+    && typeof candidate.analysedAt === "number" && Number.isFinite(candidate.analysedAt);
 }
 
 export class MemoryDocumentBackend implements DocumentStoreBackend {

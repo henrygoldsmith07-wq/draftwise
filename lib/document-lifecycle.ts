@@ -6,6 +6,7 @@ import {
   type DocumentSnapshot,
   type DocumentStoreBackend,
   type DocumentSummary,
+  type DocumentReview,
   type StoredDocument,
 } from "./documents.ts";
 
@@ -185,7 +186,7 @@ export class DocumentLifecycle {
     return this.findById(id);
   }
 
-  updateDocument(id: string, patch: Partial<Pick<StoredDocument, "title" | "draft">>, snapshot?: DocumentSnapshot["reason"]): boolean {
+  updateDocument(id: string, patch: Partial<Pick<StoredDocument, "title" | "draft" | "review">>, snapshot?: DocumentSnapshot["reason"]): boolean {
     const current = this.findById(id);
     if (!current) return false;
     const merged: StoredDocument = {
@@ -200,8 +201,25 @@ export class DocumentLifecycle {
     return true;
   }
 
-  updateActive(patch: Partial<Pick<StoredDocument, "title" | "draft">>, snapshot?: DocumentSnapshot["reason"]): boolean {
+  updateActive(patch: Partial<Pick<StoredDocument, "title" | "draft" | "review">>, snapshot?: DocumentSnapshot["reason"]): boolean {
     return this.state.activeId ? this.updateDocument(this.state.activeId, patch, snapshot) : false;
+  }
+
+  /**
+   * Store what the last analysis found, without marking the document edited.
+   *
+   * Going through updateActive would move updatedAt on every analysis, and the
+   * document list would claim a draft had just been worked on when the writer
+   * had only opened it.
+   */
+  recordReview(review: DocumentReview): boolean {
+    const id = this.state.activeId;
+    const current = id ? this.findById(id) : undefined;
+    if (!id || !current) return false;
+    const next: StoredDocument = { ...current, review };
+    this.setState({ documents: this.state.documents.map((document) => (document.id === id ? next : document)) });
+    this.queueWrite(next);
+    return true;
   }
 
   open(id: string): boolean {

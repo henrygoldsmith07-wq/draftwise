@@ -204,6 +204,23 @@ export default function Home() {
     [categoryFilter, filter, suggestions.displayed],
   );
 
+  // Keep the document list's review signal current with what we just found.
+  // Only stored, never re-derived by the list view, so opening the dashboard
+  // does not mean re-analysing every draft the writer has.
+  //
+  // Guarded by the values themselves rather than by effect dependencies: the
+  // hook returns a fresh object every render, so depending on it re-ran this
+  // effect on every render, and writing on every render is an update loop.
+  const recordedReviewRef = useRef<string | null>(null);
+  useEffect(() => {
+    const fixFirst = suggestions.report.byTier["fix-first"];
+    const worthMaking = suggestions.changesWorthMaking;
+    const key = `${activeId}:${draftText.length}:${worthMaking}:${fixFirst}`;
+    if (recordedReviewRef.current === key) return;
+    recordedReviewRef.current = key;
+    documents.recordReview({ worthMaking, fixFirst, analysedAt: Date.now() });
+  }, [activeId, documents, draftText, suggestions.changesWorthMaking, suggestions.report.byTier]);
+
   // Insights progress: the baseline is captured when the document becomes
   // active, so the writer sees what their editing actually changed.
   const baselineKeyRef = useRef<string | null>(null);
@@ -253,7 +270,7 @@ export default function Home() {
     // The Writing Profile learns from repeated dismissals of the same type.
     updateWorkspace((current) => ({ ...current, style: recordDismissal(current.style, issue) }));
     advanceFocus(visibleIssues, issue);
-  }, [advanceFocus, updateWorkspace, visibleIssues]);
+  }, [advanceFocus, draftText, updateWorkspace, visibleIssues]);
 
   const acceptAll = useCallback(() => {
     const next = applyIssueReplacements(draftText, visibleIssues);
@@ -445,7 +462,7 @@ export default function Home() {
     if (!value) return;
     updateWorkspace((current) => ({ ...current, style: { ...current.style, personalDictionary: [...new Set([...current.style.personalDictionary, value])] } }));
     setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map((entry) => getIssueDismissalKey(entry, draftText))])]);
-  }, [issues, updateWorkspace]);
+  }, [draftText, issues, updateWorkspace]);
 
   const ruleControl = useCallback((ruleId: string, action: "reduce" | "off") => {
     updateWorkspace((current) => {
@@ -474,7 +491,7 @@ export default function Home() {
   const dismissGroup = useCallback((groupIssues: WritingIssue[]) => {
     setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setActiveIssueId(null);
-  }, []);
+  }, [draftText]);
 
   const scrollEditor = useCallback(() => {
     if (textareaRef.current && highlightRef.current) {

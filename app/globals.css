@@ -166,7 +166,7 @@ button { cursor: pointer; }
 .document-card-main { display: grid; gap: 6px; border: 0; background: transparent; text-align: left; padding: 14px 14px 10px; cursor: pointer; }
 .document-card-title { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 750; color: var(--ink); }
 .document-card-excerpt { color: var(--ink-soft); font-size: 11px; line-height: 1.45; min-height: 30px; }
-.document-card-meta { color: var(--ink-soft); font-size: 10px; }
+.document-card-meta { color: var(--ink-soft); font-size: 10px; }.document-card-review { color: var(--ink-soft); font-size: 10px; opacity: .8; }.document-card-review.has-work { color: #8a6a2f; font-weight: 650; opacity: 1; }
 .document-card-actions { display: flex; gap: 3px; padding: 7px 9px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 58%, transparent); }
 .settings-advanced { border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
 .settings-advanced summary { display: flex; align-items: center; gap: 6px; padding: 11px 13px; cursor: pointer; font-size: 11.5px; font-weight: 750; color: var(--ink); list-style: none; user-select: none; }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { createDocumentBackend, summariseDocuments, type DocumentSummary, type StoredDocument } from "@/lib/documents";
+import { createDocumentBackend, summariseDocuments, type DocumentSummary, type DocumentReview, type StoredDocument } from "@/lib/documents";
 import { DocumentLifecycle, type DocumentSaveStatus, type DocumentsSeed } from "@/lib/document-lifecycle";
 
 /**
@@ -65,7 +65,8 @@ export function useDocuments(seed: DocumentsSeed, ready = true, preferredActiveI
     storageMode: state.storageMode,
     open: useCallback((id: string) => lifecycle.open(id), [lifecycle]),
     updateActive: useCallback((patch: Partial<Pick<StoredDocument, "title" | "draft">>, snapshot?: "autosave" | "manual" | "import") => lifecycle.updateActive(patch, snapshot), [lifecycle]),
-    updateDocument: useCallback((id: string, patch: Partial<Pick<StoredDocument, "title" | "draft">>, snapshot?: "autosave" | "manual" | "import") => lifecycle.updateDocument(id, patch, snapshot), [lifecycle]),
+    recordReview: useCallback((review: DocumentReview) => lifecycle.recordReview(review), [lifecycle]),
+    updateDocument: useCallback((id: string, patch: Partial<Pick<StoredDocument, "title" | "draft" | "review">>, snapshot?: "autosave" | "manual" | "import") => lifecycle.updateDocument(id, patch, snapshot), [lifecycle]),
     createNew: useCallback((title?: string, draft?: string) => lifecycle.createNew(title, draft), [lifecycle]),
     duplicate: useCallback((id: string) => lifecycle.duplicate(id), [lifecycle]),
     remove: useCallback((id: string) => lifecycle.remove(id), [lifecycle]),

@@ -13,7 +13,7 @@ import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
 import { canApplyRewritePreview } from "@/lib/rewrite-retry";
-import { buildSuggestionState, filterByTier, ruleFamily, type TierFilter } from "@/lib/suggestions";
+import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
 import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
@@ -129,6 +129,7 @@ export default function Home() {
   const registerHighlight = useCallback((element: HTMLDivElement | null) => { highlightRef.current = element; }, []);
   const [view, setView] = useState<WorkspaceView>("write");
   const [filter, setFilter] = useState<TierFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
   const [reviewedCount, setReviewedCount] = useState(0);
@@ -191,16 +192,16 @@ export default function Home() {
   }, [cancelRewrite, updateWorkspace]);
 
   const openIssues = useMemo(
-    () => getOpenIssues(issues, dismissedIssueKeys),
-    [issues, dismissedIssueKeys],
+    () => getOpenIssues(issues, dismissedIssueKeys, draftText),
+    [issues, dismissedIssueKeys, draftText],
   );
   const suggestions = useMemo(
     () => buildSuggestionState({ issues: openIssues, goals: workspace.goals, style: workspace.style, dismissedKeys: dismissedIssueKeys, text: draftText }),
     [dismissedIssueKeys, openIssues, draftText, workspace.goals, workspace.style],
   );
   const visibleIssues = useMemo(
-    () => filterByTier(suggestions.displayed, filter),
-    [filter, suggestions.displayed],
+    () => sortForReview(filterByTier(filterByCategory(suggestions.displayed, categoryFilter), filter)),
+    [categoryFilter, filter, suggestions.displayed],
   );
 
   // Insights progress: the baseline is captured when the document becomes
@@ -248,7 +249,7 @@ export default function Home() {
   }, [advanceFocus, updateDraft, visibleIssues, draftText]);
 
   const dismissIssue = useCallback((issue: WritingIssue) => {
-    setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue, draftText)])]);
     // The Writing Profile learns from repeated dismissals of the same type.
     updateWorkspace((current) => ({ ...current, style: recordDismissal(current.style, issue) }));
     advanceFocus(visibleIssues, issue);
@@ -443,7 +444,7 @@ export default function Home() {
     const value = word.trim();
     if (!value) return;
     updateWorkspace((current) => ({ ...current, style: { ...current.style, personalDictionary: [...new Set([...current.style.personalDictionary, value])] } }));
-    setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map(getIssueDismissalKey)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map((entry) => getIssueDismissalKey(entry, draftText))])]);
   }, [issues, updateWorkspace]);
 
   const ruleControl = useCallback((ruleId: string, action: "reduce" | "off") => {
@@ -465,13 +466,13 @@ export default function Home() {
     if (next === draftText) return;
     documents.saveSnapshot("manual");
     updateDraft(next);
-    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map(getIssueDismissalKey)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setReviewedCount((count) => count + 1);
     setActiveIssueId(null);
   }, [documents, updateDraft, draftText]);
 
   const dismissGroup = useCallback((groupIssues: WritingIssue[]) => {
-    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map(getIssueDismissalKey)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setActiveIssueId(null);
   }, []);
 
@@ -601,7 +602,7 @@ export default function Home() {
 
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
+          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}

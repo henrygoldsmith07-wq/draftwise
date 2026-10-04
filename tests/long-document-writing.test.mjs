@@ -436,3 +436,60 @@ test("a long draft never marks something clean", () => {
   const objective = issues.filter((item) => ["spelling", "grammar", "punctuation", "capitalization"].includes(item.category));
   assert.ok(objective.length < issues.length / 4, "clean prose must not generate a wall of objective findings");
 });
+
+test("a score describes the writing, not how long the draft is", () => {
+  // The penalties used to be a plain sum of issue weights, so at a constant
+  // error rate correctness fell from 93 on a 170-word draft to 0 on a
+  // 3,400-word one and stayed pinned there however much worse the writing
+  // became. A long draft could not report on itself at all.
+  const sentence = (index) => `The committee reviewed the quarterly budget figures for region ${index + 1} and agreed the revised totals in the usual way. `;
+  const withTypoEveryTen = (paragraphs) => Array.from({ length: paragraphs }, (_, index) =>
+    sentence(index).replace(/region (\d+)/u, (match, digits) => (Number(digits) % 10 === 0 ? "reigon" : match)),
+  ).join("\n\n");
+
+  const scored = [10, 50, 200, 800].map((paragraphs) => analyzeLocally(withTypoEveryTen(paragraphs), style, DEFAULT_GOALS).scores.correctness);
+  const spread = Math.max(...scored) - Math.min(...scored);
+  assert.ok(spread <= 4, `the same error rate should score the same at any length, spread was ${spread}: ${scored.join(", ")}`);
+
+  // And it must still fall when the writing genuinely gets worse.
+  const fixed = 50;
+  const rate = (every) => analyzeLocally(
+    Array.from({ length: fixed }, (_, index) => sentence(index).replace(/region (\d+)/u, (match, digits) => (Number(digits) % every === 0 ? "reigon" : match))).join("\n\n"),
+    style,
+    DEFAULT_GOALS,
+  ).scores.correctness;
+  const better = rate(100);
+  const worse = rate(4);
+  assert.ok(worse < better, `worse writing must score lower at a fixed length: ${better} vs ${worse}`);
+});
+
+test("hundreds of errors are not excused by a long draft", () => {
+  // Rate alone would call a large document with hundreds of typos "fine". The
+  // volume term is what stops that.
+  const text = Array.from({ length: 800 }, (_, index) =>
+    `The committee reviewed the quarterly budget figures for region ${index + 1} and agreed the revised totals in the usual way. `.replace(/region (\d+)/u, (match, digits) => (Number(digits) % 2 === 0 ? "reigon" : match)),
+  ).join("\n\n");
+  const result = analyzeLocally(text, style, DEFAULT_GOALS);
+  assert.ok(result.scores.correctness < 80, `a draft with hundreds of typos must not read as good, got ${result.scores.correctness}`);
+});
+
+test("goal alignment does not saturate once a draft gets long", () => {
+  // Markers were matched by substring and scored by presence, so the inform
+  // intent was satisfied by "is" inside "this", and any draft past a few
+  // hundred words contained every marker somewhere and scored full marks on
+  // every dimension regardless of what it was about.
+  const technical = (index) => `The system data function configuration ${index} implements the api test code method for the model.`;
+  const offTopic = (index) => `We you our us feel really thanks ${index} it just the thing we like.`;
+  const goalsForTechnical = goals({ audience: "technical", intent: "inform", tone: "confident" });
+
+  const matched = [20, 60, 200].map((paragraphs) => analyzeLocally(Array.from({ length: paragraphs }, (_, index) => technical(index)).join(" "), style, goalsForTechnical).scores.goalAlignment);
+  const mismatched = [20, 60, 200].map((paragraphs) => analyzeLocally(Array.from({ length: paragraphs }, (_, index) => offTopic(index)).join(" "), style, goalsForTechnical).scores.goalAlignment);
+
+  for (const score of mismatched) {
+    assert.ok(score <= 65, `off-topic prose must not score well against technical goals, got ${score}`);
+  }
+  for (const score of matched) {
+    assert.ok(score >= 85, `on-topic prose must score well against technical goals, got ${score}`);
+  }
+  assert.ok(Math.max(...mismatched) < Math.min(...matched), "aligned and misaligned drafts must stay distinguishable at every length");
+});

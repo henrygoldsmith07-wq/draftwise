@@ -2597,6 +2597,8 @@ function perRuleCapsFor(words) {
 const LOW_CONFIDENCE_STYLE_THRESHOLD = 0.7;
 const REGISTER_MISMATCH_THRESHOLD = 0.35;
 const NEAR_DISMISSAL_CHARS = 240;
+const NEAR_DISMISSAL_CHARS_PER_WORD = 0.5;
+const NEAR_DISMISSAL_MAX_CHARS = 2500;
 function classifyIssueKind(issue) {
     if (STYLE_RULE_PREFIXES.some((prefix) => issue.ruleId.startsWith(prefix)))
         return "style";
@@ -2797,11 +2799,29 @@ function prioritiseSuggestions(issues, options = {}) {
         else
             dismissalByText.set(textKey, [entry]);
     }
+    // How far a finding may move before its dismissal stops applying to it.
+    //
+    // Dismissals are stored with character offsets, and analysis reruns on every
+    // edit, so anything the writer does above a dismissed finding pushes it down
+    // the document. A flat 240-character window is generous in a short note and
+    // almost nothing in a long draft: rewrite a paragraph near the top and every
+    // dismissal below it was forgotten, and the writer was shown again the things
+    // they had already said no to. The window now grows with the draft, still
+    // bounded so one dismissal cannot swallow the rest of the document.
+    const dismissalSlack = Math.max(NEAR_DISMISSAL_CHARS, Math.min(NEAR_DISMISSAL_MAX_CHARS, document.tokens.length * NEAR_DISMISSAL_CHARS_PER_WORD));
     const isDismissalNear = (issue) => {
+        const live = options.anchorFor?.(issue);
+        const anchored = (entry) => entry.before !== undefined
+            && entry.after !== undefined
+            && live !== undefined
+            && live.before.endsWith(entry.before)
+            && live.after.startsWith(entry.after);
         const exact = dismissalByRule.get(issue.ruleId);
         if (exact) {
             for (const entry of exact) {
                 if (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original)
+                    return true;
+                if (anchored(entry))
                     return true;
             }
         }
@@ -2809,7 +2829,9 @@ function prioritiseSuggestions(issues, options = {}) {
         if (!similar)
             return false;
         for (const entry of similar) {
-            if (issue.start >= entry.start - NEAR_DISMISSAL_CHARS && issue.start <= entry.end + NEAR_DISMISSAL_CHARS)
+            if (anchored(entry))
+                return true;
+            if (issue.start >= entry.start - dismissalSlack && issue.start <= entry.end + dismissalSlack)
                 return true;
         }
         return false;

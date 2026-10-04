@@ -160,3 +160,42 @@ test("a changed suggestion at the same rule and range does not inherit an old di
   assert.deepEqual(getOpenIssues([oldIssue], dismissed), []);
   assert.deepEqual(getOpenIssues([changedIssue], dismissed).map((item) => item.original), ["odd"]);
 });
+
+test("a dismissal survives an edit above it that shifts every offset below", () => {
+  // The stored key carries character offsets, so rewriting anything above the
+  // finding used to bring it straight back. Anchoring on the surrounding draft
+  // text is what makes a dismissal mean "this sentence, not this position".
+  const original = `${"padding sentence to push the finding down the page. ".repeat(20)}the team reigon lead confirmed it. ${"more of the same padding follows here. ".repeat(20)}`;
+  const start = original.indexOf("reigon");
+  const found = issue({ id: "typo", ruleId: "spelling/test", start, end: start + 6, original: "reigon", replacement: "region" });
+  const dismissed = [getIssueDismissalKey(found, original)];
+
+  const inserted = "a whole new opening paragraph. ".repeat(10);
+  const edited = inserted + original;
+  const moved = issue({ id: "typo", ruleId: "spelling/test", start: start + inserted.length, end: start + inserted.length + 6, original: "reigon", replacement: "region" });
+
+  assert.ok(edited.slice(moved.start, moved.end) === "reigon", "the fixture must keep the typo at the shifted offset");
+  assert.deepEqual(getOpenIssues([moved], dismissed, edited), []);
+});
+
+test("an anchored dismissal does not follow the word to a new occurrence elsewhere", () => {
+  // The same word written somewhere else is a new finding, not the dismissed
+  // one. Both anchors must agree for a dismissal to apply.
+  const text = `${"padding sentence to push the finding down the page. ".repeat(20)}the team reigon lead confirmed it.`;
+  const start = text.indexOf("reigon");
+  const found = issue({ id: "typo", ruleId: "spelling/test", start, end: start + 6, original: "reigon", replacement: "region" });
+  const dismissed = [getIssueDismissalKey(found, text)];
+
+  const grown = `${text} A reigon appeared in the summary table at the end.`;
+  const added = grown.lastIndexOf("reigon");
+  const fresh = issue({ id: "typo", ruleId: "spelling/test", start: added, end: added + 6, original: "reigon", replacement: "region" });
+
+  assert.deepEqual(getOpenIssues([found, fresh], dismissed, grown).map((item) => item.start), [added]);
+});
+
+test("dismissal keys written before anchoring still parse", () => {
+  const legacy = JSON.stringify(["id", "test", "local", 0, 3, "bad", "good"]);
+  const found = issue({ start: 0, end: 3 });
+  assert.deepEqual(getOpenIssues([found], [legacy]), []);
+  assert.doesNotThrow(() => getOpenIssues([found], [legacy], "bad whatever follows"));
+});

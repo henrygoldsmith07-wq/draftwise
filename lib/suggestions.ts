@@ -1,7 +1,8 @@
 import { prioritiseSuggestions, ruleFamily } from "../packages/grammar/src/index.ts";
 import type { DismissedFinding, PrioritiseResult } from "../packages/grammar/src/index.ts";
+import { issueAnchors } from "./issue-actions.ts";
 import { profileAdjustments } from "./writing-profile.ts";
-import type { PrioritisedIssue, StylePreferences, SuggestionTier, WritingGoals, WritingIssue } from "../packages/types/src/index.ts";
+import type { PrioritisedIssue, StylePreferences, SuggestionTier, WritingGoals, WritingIssue, IssueCategory } from "../packages/types/src/index.ts";
 
 export { ruleFamily };
 
@@ -45,13 +46,48 @@ export type TierFilter = SuggestionTier | "all";
 
 const TIER_ORDER: Record<SuggestionTier, number> = { "fix-first": 0, improve: 1, optional: 2 };
 
+/** How far out to look for a sentence boundary when building passage context. */
+const CONTEXT_CHARS = 160;
+const SENTENCE_END = /[.!?…]["'”)]?(\s|$)/u;
+
+interface ContextEdge {
+  offset: number;
+  /** False when no boundary was reachable and the text is cut mid-sentence. */
+  complete: boolean;
+}
+
+/** Start of the last whole sentence at or before `offset`. */
+function sentenceEdgeBackwards(text: string, offset: number, limit: number): ContextEdge {
+  const from = Math.max(0, offset - limit);
+  if (from === 0) return { offset: 0, complete: true };
+  const match = [...text.slice(from, offset).matchAll(/[.!?…]["'”)]?(\s|$)/gu)].pop();
+  if (!match || match.index === undefined) return { offset: from, complete: false };
+  return { offset: from + match.index + match[0].length, complete: true };
+}
+
+/** End of the first whole sentence at or after `offset`. */
+function sentenceEdgeForwards(text: string, offset: number, limit: number): ContextEdge {
+  const end = Math.min(text.length, offset + limit);
+  if (end === text.length) return { offset: end, complete: true };
+  const match = SENTENCE_END.exec(text.slice(offset, end));
+  return match ? { offset: offset + match.index + match[0].length, complete: true } : { offset: end, complete: false };
+}
+
 function dismissalFromKey(key: string): DismissedFinding | null {
   try {
     const parsed: unknown = JSON.parse(key);
-    if (!Array.isArray(parsed) || parsed.length !== 7) return null;
-    const [, ruleId, , start, end, original] = parsed;
+    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
+    const [, ruleId, , start, end, original, , before, after] = parsed;
     if (typeof ruleId !== "string" || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || typeof original !== "string") return null;
-    return { ruleId, start: start as number, end: end as number, original };
+    return {
+      ruleId,
+      start: start as number,
+      end: end as number,
+      original,
+      // Keys written before anchoring was added carry no anchors; those
+      // dismissals fall back to matching by position.
+      ...(typeof before === "string" && typeof after === "string" ? { before, after } : {}),
+    };
   } catch {
     return null;
   }
@@ -84,18 +120,25 @@ export function buildSuggestionState(args: {
     ruleDismissalCounts: args.ruleDismissalCounts,
     rankAdjustments,
     text: args.text,
+    anchorFor: args.text === undefined ? undefined : (issue) => issueAnchors(args.text as string, issue),
   });
 
   // Show each suggestion in its passage: the writer judges it in context, not
   // as an isolated span.
+  //
+  // The window snaps out to the nearest sentence boundary instead of stopping
+  // at a fixed character count. A fixed cut lands mid-clause often enough to
+  // be unreadable, and the ellipsis in front of it said nothing about what was
+  // missing. When no boundary is reachable the window stays short and is
+  // marked, because a partial clause is worse than a shorter whole one.
   const text = args.text ?? "";
   const withContext = result.displayed.map((issue) => {
     if (!text) return issue;
-    const contextStart = Math.max(0, issue.start - 60);
-    const contextEnd = Math.min(text.length, issue.end + 60);
+    const before = sentenceEdgeBackwards(text, issue.start, CONTEXT_CHARS);
+    const after = sentenceEdgeForwards(text, issue.end, CONTEXT_CHARS);
     return {
       ...issue,
-      context: `${contextStart > 0 ? "…" : ""}${text.slice(contextStart, contextEnd)}${contextEnd < text.length ? "…" : ""}`,
+      context: `${before.complete ? "" : "…"}${text.slice(before.offset, after.offset)}${after.complete ? "" : "…"}`,
     };
   });
 
@@ -142,6 +185,46 @@ export function buildSuggestionState(args: {
 export function filterByTier(issues: PrioritisedIssue[], filter: TierFilter) {
   if (filter === "all") return issues;
   return issues.filter((issue) => issue.tier === filter);
+}
+
+export type CategoryFilter = IssueCategory | "all" | "grammar" | "style";
+
+const MECHANICAL: IssueCategory[] = ["grammar", "spelling", "punctuation", "capitalization"];
+
+/**
+ * Narrow the list by what kind of problem it is, as well as how urgent.
+ *
+ * Tier answers "what should I deal with first"; category answers "I want to
+ * see everything about wording and nothing else". On a long draft the tier
+ * alone mixes a hundred mechanical slips with every editorial note, and
+ * neither tab can separate them. Both filters compose, so a writer can ask for
+ * the terminology that is also worth fixing.
+ */
+export function categoryMatches(issue: WritingIssue, filter: CategoryFilter) {
+  if (filter === "all") return true;
+  if (filter === "grammar") return MECHANICAL.includes(issue.category);
+  if (filter === "style") return !MECHANICAL.includes(issue.category);
+  return issue.category === filter;
+}
+
+export function filterByCategory(issues: PrioritisedIssue[], filter: CategoryFilter) {
+  if (filter === "all") return issues;
+  return issues.filter((issue) => categoryMatches(issue, filter));
+}
+
+/**
+ * Categories worth offering as a filter, largest first.
+ *
+ * Only categories that actually have findings are offered: a row of filters
+ * with most of them empty is noise, and on a short draft it is all noise.
+ */
+export function filterableCategories(report: PrioritiseResult["report"], limit = 6): Array<{ value: CategoryFilter; label: string; count: number }> {
+  const entries = Object.entries(report.byCategory ?? {}) as Array<[IssueCategory, number]>;
+  return entries
+    .filter(([, count]) => count > 0)
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([category, count]) => ({ value: category, label: category, count }));
 }
 
 export function sortForReview(issues: PrioritisedIssue[]) {

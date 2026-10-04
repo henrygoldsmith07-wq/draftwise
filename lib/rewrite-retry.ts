@@ -8,6 +8,13 @@ export interface RewriteRetryPreview {
   goals: WritingGoals;
   style: StylePreferences;
   aiEnabled: boolean;
+  /**
+   * The draft the rewrite was requested from, kept so a retry carries the same
+   * surrounding context as the original attempt. Without it a retry silently
+   * degrades to an isolated selection, which is the case most likely to fail
+   * again.
+   */
+  draft?: string;
 }
 
 export function createRewriteRetryArgs(preview: RewriteRetryPreview, settings: ProviderSettings) {
@@ -20,6 +27,7 @@ export function createRewriteRetryArgs(preview: RewriteRetryPreview, settings: P
     style: preview.style,
     settings,
     aiEnabled: preview.aiEnabled,
+    draft: preview.draft,
   };
 }
 

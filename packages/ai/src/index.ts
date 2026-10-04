@@ -8,10 +8,12 @@ import {
 } from "../../analysis/src/index.ts";
 import {
   analyzeLocally,
+  buildDocumentOutline,
   createAnalysisDiagnostics,
   getWritingStats,
   inferTone,
   scoreWriting,
+  type DocumentOutline,
   type GrammarOptions,
 } from "../../grammar/src/index.ts";
 import type {
@@ -405,24 +407,132 @@ async function requestProvider(
   }
 }
 
+/**
+ * Everything the model must respect about this writer's setup.
+ *
+ * The previous version sent only audience, intent, tone, dialect and a
+ * contractions flag. Everything else the writer had configured was invisible to
+ * the model, which is how an AI suggestion could propose "correcting" a term the
+ * writer had explicitly required, or normalising a name in their personal
+ * dictionary. Local rules already honoured all of this; the provider now does
+ * too, so both halves of Draftwise agree about what is intentional.
+ *
+ * Bounded on purpose: a writer with a long dictionary should not pay for it in
+ * every request, and a prompt full of noise is a prompt full of ignored rules.
+ */
 function buildGoalsContext(goals: WritingGoals, preferences?: StylePreferences) {
-  return [
+  const lines = [
     `Audience: ${goals.audience}.`,
     `Intent: ${goals.intent}.`,
     `Desired tone: ${goals.tone}.`,
     `Dialect: ${preferences?.dialect ?? "en-GB"}.`,
     `Contractions: ${preferences?.allowContractions === false ? "avoid" : "allowed"}.`,
-  ].join(" ");
+  ];
+  if (preferences) {
+    if (preferences.preferredSentenceLength) {
+      lines.push(`Preferred sentence length: ${preferences.preferredSentenceLength}.`);
+    }
+    if (preferences.oxfordComma === false) lines.push("Oxford comma: omit.");
+  }
+  if (goals.documentType) lines.push(`Document type: ${goals.documentType}.`);
+  if (typeof goals.targetLength === "number" && goals.targetLength > 0) {
+    lines.push(`Target length: about ${goals.targetLength} words.`);
+  }
+
+  // Required terminology is a hard constraint, not a hint: the local rules flag
+  // its absence, so the provider must never suggest removing or rewording it.
+  const required = (goals.requiredTerminology ?? []).map((term) => term.trim()).filter(Boolean);
+  if (required.length) lines.push(`Must use and must not be altered: ${required.map((term) => `"${term}"`).join(", ")}.`);
+
+  const forbidden = (goals.forbiddenTerminology ?? []).map((term) => term.trim()).filter(Boolean);
+  if (forbidden.length) lines.push(`Never use: ${forbidden.map((term) => `"${term}"`).join(", ")}.`);
+
+  if (preferences) {
+    const preferred = Object.entries(preferences.preferredTerminology ?? {})
+      .filter(([from, to]) => from && to)
+      .slice(0, 12);
+    if (preferred.length) {
+      lines.push(`Use these exact terms: ${preferred.map(([from, to]) => `"${from}" -> "${to}"`).join(", ")}.`);
+    }
+    const dictionary = (preferences.personalDictionary ?? []).map((word) => word.trim()).filter(Boolean).slice(0, 30);
+    if (dictionary.length) lines.push(`Correct as written, never flag: ${dictionary.join(", ")}.`);
+    const names = (preferences.names ?? []).map((name) => name.trim()).filter(Boolean).slice(0, 20);
+    if (names.length) lines.push(`Proper names, leave alone: ${names.join(", ")}.`);
+    const blocked = (preferences.blockedWords ?? []).map((word) => word.trim()).filter(Boolean).slice(0, 20);
+    if (blocked.length) lines.push(`Words the writer rejects: ${blocked.join(", ")}.`);
+  }
+
+  return lines.join(" ");
 }
 
-function analysisPrompt(chunk: AnalysisChunk, goals: WritingGoals, preferences?: StylePreferences) {
+/**
+ * A compact outline of the whole document, so a chunk is read in the context of
+ * the argument it belongs to rather than as an isolated passage.
+ *
+ * This is what makes long-document feedback improve instead of fragmenting: the
+ * model can tell which section it is looking at and what the draft is trying to
+ * do overall. Bounded to a short list of openings so it never dominates the
+ * request.
+ */
+function buildDocumentContext(outline?: DocumentOutline) {
+  if (!outline || outline.sections.length === 0) return "";
+  const parts: string[] = [];
+  if (outline.focus) parts.push(`Draft focus: ${outline.focus}`);
+  if (outline.themes.length) {
+    parts.push(`Recurring subjects: ${outline.themes.slice(0, 6).map((theme) => theme.term).join(", ")}.`);
+  }
+  parts.push(
+    `Structure (${outline.sections.length} section${outline.sections.length === 1 ? "" : "s"}): `
+    + outline.sections.slice(0, 12).map((section) => {
+      const label = section.topic ? `${section.topic}` : firstSentenceLabel(section.opening);
+      return `${section.index + 1}. ${label}`;
+    }).join(" | "),
+  );
+  return parts.join(" ");
+}
+
+function firstSentenceLabel(opening: string): string {
+  const words = opening.trim().split(/\s+/u).slice(0, 7).join(" ");
+  return words.length > 60 ? `${words.slice(0, 59)}…` : words;
+}
+
+function analysisPrompt(
+  chunk: AnalysisChunk,
+  goals: WritingGoals,
+  preferences?: StylePreferences,
+  outline?: DocumentOutline,
+  foundRules: string[] = [],
+) {
+  // The chunk text carries a context window on both sides of the span it owns.
+  // Saying which part is which stops the model reporting issues in text that a
+  // neighbouring chunk already owns, which is wasted spend and duplicate advice.
+  const contextLength = chunk.startOffset > chunk.contentStartOffset
+    ? chunk.contentStartOffset - chunk.startOffset
+    : 0;
+  const trailingLength = chunk.endOffset > chunk.contentEndOffset ? chunk.endOffset - chunk.contentEndOffset : 0;
+  const spanNote = contextLength || trailingLength
+    ? `The passage below includes surrounding context for reference. Only the passage between the CONTEXT markers is yours to report on; report ranges as offsets into the whole block below, and do not raise issues in the context.`
+    : `Report ranges as offsets into the text below.`;
+
+  const previous = foundRules.length
+    ? `\nOther checks have already covered: ${foundRules.slice(0, 12).join(", ")}. Do not repeat those findings unless you are correcting something they got wrong.`
+    : "";
+
+  const document = buildDocumentContext(outline);
+
   return `You are Draftwise, a careful writing editor. Return JSON only. ${buildGoalsContext(goals, preferences)}
 Preserve meaning, facts, names, numbers, URLs, and quoted text. Suggest only high-confidence, useful changes. Never silently rewrite the whole passage.
-This is chunk ${chunk.id}. Return ranges relative to the text below, not the full document. Every original must exactly match its range. Use one of these stable categories: spelling, grammar, punctuation, clarity, conciseness, word choice, repetition, tone, formality, readability, fluency, passive voice, sentence structure, consistency, capitalization. Include confidence from 0 to 1 and a ruleId.
+${document}${document ? "\n" : ""}This is chunk ${chunk.id} of a larger document. Return ranges relative to the text below, not the full document. Every original must exactly match its range. Use one of these stable categories: spelling, grammar, punctuation, clarity, conciseness, word choice, repetition, tone, formality, readability, fluency, passive voice, sentence structure, consistency, capitalization. Include confidence from 0 to 1 and a ruleId.${previous}
+${spanNote} Begin and end your CONTEXT markers on their own lines.
 JSON shape: {"issues":[{"start":0,"end":4,"original":"text","replacement":"Text","category":"grammar","severity":"medium","confidence":0.9,"ruleId":"grammar-example","title":"Short title","explanation":"Plain explanation."}],"tone":["direct"]}
 
-Text for ${chunk.id}:
-${chunk.text}`;
+--- CONTEXT START (do not report on this) ---
+${chunk.text.slice(0, contextLength)}
+--- CONTEXT END ---
+${chunk.text.slice(contextLength, chunk.text.length - trailingLength)}
+--- CONTEXT START (do not report on this) ---
+${chunk.text.slice(chunk.text.length - trailingLength)}
+--- CONTEXT END ---`;
 }
 
 function normaliseCategory(value: string): IssueCategory | null {
@@ -619,6 +729,12 @@ export interface ProviderAnalysisOptions {
   maxAiChunks?: number;
   maxAiChars?: number;
   triageDecisions?: ClassifierChunkDecision[];
+  /**
+   * Whole-document outline, reused when the caller already has one. Falls back to
+   * building it locally. Purely prompt context: it changes what the model knows
+   * about the draft, never what the local rules found.
+   */
+  outline?: DocumentOutline;
 }
 
 export async function analyzeWithProvider(
@@ -630,6 +746,11 @@ export async function analyzeWithProvider(
   const startedAt = providerAnalysisNow();
   const preferences = options.preferences;
   const local = options.localAnalysis ?? analyzeLocally(text, preferences, goals);
+  // Whole-document context, so the model reads a chunk as part of an argument
+  // rather than an isolated passage. Built locally: no extra network call, and
+  // it is the same outline the writer already sees in the app.
+  const outline = options.outline ?? buildDocumentOutline(text, local.stats);
+  const alreadyFound = [...new Set(local.issues.map((issue) => issue.ruleId))];
   const changed = options.changedRange && text.length > options.changedRange.start
     ? expandRangeToContext(text, options.changedRange, options.contextWindow ?? 320)
     : null;
@@ -656,7 +777,7 @@ export async function analyzeWithProvider(
   const settled = await mapWithConcurrency(workload.selected, async (chunk) => {
     const messages = [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
-      { role: "user", content: analysisPrompt(chunk, goals, preferences) },
+      { role: "user", content: analysisPrompt(chunk, goals, preferences, outline, alreadyFound) },
     ] as Array<{ role: "system" | "user"; content: string }>;
     recordProviderRequest(providerMetrics, settings, messages);
     return {
@@ -765,10 +886,20 @@ const PROTECTED_TOKEN_PATTERNS: Array<{ kind: Exclude<ProtectedTokenKind, "quote
   { kind: "date", pattern: /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,4}[/-]\d{1,2}[/-]\d{1,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*|\s+)\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})\b/giu },
   { kind: "currency", pattern: /(?:[$€£¥]\s?\d[\d,.]*|\b\d[\d,.]*\s?(?:usd|eur|gbp|jpy)\b)/giu },
   { kind: "percentage", pattern: /\b\d[\d,.]*%/gu },
-  { kind: "identifier", pattern: /\b(?:id|ticket|case|ref(?:erence)?)[#\s:-]*[a-z0-9][a-z0-9_-]{2,}\b|\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/giu },
+  // An identifier needs an explicit label separator and a value that looks like
+  // a reference rather than a word: "id: 4021", "ref A-99", "ticket#88213",
+  // "case 117". Requiring a digit (or an alphanumeric run with no spaces) is
+  // what separates an identifier from ordinary English — without it the
+  // pattern matched "identity", "ideology", "case study" and "refine", and any
+  // rewrite that legitimately touched one of those was rejected as damaging a
+  // protected token.
+  { kind: "identifier", pattern: /\b(?:id|ticket|case|ref(?:erence)?)(?:#[a-z0-9][a-z0-9_-]{2,}|[:\s]\s*(?:[a-z]-)?[a-z0-9][a-z0-9_-]*\d[a-z0-9_-]*)\b|\b[A-Z][A-Z0-9]{1,}(?:-[A-Z0-9]+)+\b/giu },
   { kind: "uuid", pattern: /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/giu },
   { kind: "filename", pattern: /\b[\w.-]+\.(?:pdf|docx?|csv|xlsx?|json|ts|tsx|js|jsx|md|png|jpe?g|gif)\b/giu },
-  { kind: "model", pattern: /\b(?:gpt|claude|gemini|llama|model|v)\s*[-_.]?\d[\w.-]*/giu },
+  // Model names need a recognisable product stem, or an explicit "model 3"
+  // style label. A bare "v" matched every "v2"-looking token and "model" on its
+  // own matched ordinary sentences about a model of anything.
+  { kind: "model", pattern: /\b(?:gpt|claude|gemini|llama|mistral|grok|llama-?[\w.]+)[-_. ]?\d[\w.-]*\b|\b(?:model|version)[#:\s]\s*v?\d[\w.-]*\b|\bv\d+(?:\.\d+)+\b/giu },
 ];
 
 const QUOTED_PASSAGE_PATTERN = /[“"'](?:[^“"']|[“"']{1,2})+[”"']/gu;
@@ -887,6 +1018,33 @@ function validateRewrite(original: string, replacement: string, options: { allow
   return preserveBoundaryWhitespace(original, replacement);
 }
 
+/**
+ * The rewrite prompt, with the selection delimited from its surroundings.
+ *
+ * Sending only the selection is what makes AI rewrites feel alien: the model
+ * cannot see a referent for "it", does not know a term is the writer's own, and
+ * defaults to a register the writer never used. Showing the surrounding text
+ * fixes all three without widening the edit — the response is still validated
+ * and applied against the selection alone, and the writer still chooses whether
+ * to accept it.
+ */
+function buildRewritePrompt(request: RewriteRequest): string {
+  const before = (request.contextBefore ?? "").trim();
+  const after = (request.contextAfter ?? "").trim();
+  if (!before && !after) {
+    return `Instruction: ${request.instruction}\n\nText to rewrite:\n${request.text}`;
+  }
+  return [
+    `Instruction: ${request.instruction}`,
+    "",
+    "Rewrite ONLY the passage between the markers. The text outside the markers is context: keep it out of your answer, and match its voice, tense, and terminology.",
+    before ? `BEFORE:\n${before}\n<<<REWRITE>>>${before.endsWith("\n") ? "\n" : " "}` : "<<<REWRITE>>>",
+    request.text,
+    "<<<END>>>",
+    after ? ` ${after}\nAFTER:\n${after}` : "",
+  ].filter((line) => line !== "").join("\n");
+}
+
 export async function rewriteWithProvider(
   request: RewriteRequest,
   settings: ProviderSettings,
@@ -895,7 +1053,7 @@ export async function rewriteWithProvider(
   if (!settings.apiKey.trim()) return { replacement: localRewrite(request.text, request.instruction), alternatives: [], explanation: "Local rewrite: AI is off, so your text stayed on this device.", source: "local" };
   const response = await requestProvider(settings, [
     { role: "system", content: `You are a careful writing partner. Return JSON only with {"replacement":"...","alternatives":["..."],"explanation":"..."}. Include up to two genuinely different alternatives when useful. ${buildGoalsContext(request.goals, request.preferences)} Preserve meaning, facts, names, numbers, URLs, dates, identifiers, filenames, and quoted text. Do not add HTML or markdown.` },
-    { role: "user", content: `Instruction: ${request.instruction}\n\nText to rewrite:\n${request.text}` },
+    { role: "user", content: buildRewritePrompt(request) },
   ], signal, 25_000, { responseKind: "rewrite" });
   const parsed = parseJsonContent(response);
   if (!isRecord(parsed) || typeof parsed.replacement !== "string" || !parsed.replacement.trim()) throw new ProviderError("invalid-json", "The provider returned an invalid rewrite. Nothing was changed.");
@@ -1680,6 +1838,11 @@ export async function analyzeWithTriage(
   const startedAt = providerAnalysisNow();
   const preferences = options.preferences;
   const local = options.localAnalysis ?? analyzeLocally(text, preferences, goals);
+  // Whole-document context, so the model reads a chunk as part of an argument
+  // rather than an isolated passage. Built locally: no extra network call, and
+  // it is the same outline the writer already sees in the app.
+  const outline = options.outline ?? buildDocumentOutline(text, local.stats);
+  const alreadyFound = [...new Set(local.issues.map((issue) => issue.ruleId))];
   const changed = options.changedRange && text.length > options.changedRange.start
     ? expandRangeToContext(text, options.changedRange, options.contextWindow ?? 320)
     : null;
@@ -1759,7 +1922,7 @@ export async function analyzeWithTriage(
   const settled = await mapWithConcurrency(workload.selected, async (chunk) => {
     const messages = [
       { role: "system", content: "You are a privacy-first writing assistant. Do not return HTML, markdown, or secrets." },
-      { role: "user", content: analysisPrompt(chunk, goals, preferences) },
+      { role: "user", content: analysisPrompt(chunk, goals, preferences, outline, alreadyFound) },
     ] as Array<{ role: "system" | "user"; content: string }>;
     recordProviderRequest(providerMetrics, settings, messages);
     return {

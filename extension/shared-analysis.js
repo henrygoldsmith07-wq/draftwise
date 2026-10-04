@@ -96,10 +96,28 @@ function createAnalysisChunks(text, options = {}) {
     }
     return chunks;
 }
+/**
+ * Map a range the provider returned inside a chunk back to document offsets.
+ *
+ * A chunk's `text` deliberately includes a context window on both sides of the
+ * span it owns, so the model can see enough to judge a sentence in place. But
+ * only `contentStartOffset..contentEndOffset` belongs to this chunk: the
+ * neighbouring context is already owned by the adjacent chunk, and accepting a
+ * finding reported there analyses the same words twice.
+ *
+ * Clamping to the owned span (rather than the wider sent span) is what makes
+ * chunked analysis on a long document agree with a single-pass analysis. A
+ * range that falls in the overlap is rejected and that chunk contributes
+ * nothing for it, which is correct: the chunk that owns those words reports it.
+ */
 function mapRelativeRange(range, chunk, sourceText) {
     const start = chunk.startOffset + Math.floor(range.start);
     const end = chunk.startOffset + Math.floor(range.end);
-    if (start < chunk.startOffset || end > chunk.endOffset || end <= start)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+        return null;
+    if (start < chunk.contentStartOffset || end > chunk.contentEndOffset)
+        return null;
+    if (start < chunk.startOffset || end > chunk.endOffset)
         return null;
     const original = sourceText.slice(start, end);
     if (!original || original !== range.original)
@@ -1543,18 +1561,724 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
     }
     return issues;
 }
+const OUTLINE_STOP_WORDS = new Set([
+    "the", "a", "an", "and", "or", "but", "if", "then", "than", "that", "this", "these", "those", "there", "here",
+    "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "done", "have", "has", "had",
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their",
+    "in", "on", "at", "to", "for", "of", "with", "from", "by", "as", "into", "about", "over", "after", "before",
+    "not", "no", "so", "because", "while", "although", "though", "which", "who", "whom", "what", "when", "where", "how", "why",
+    "will", "would", "can", "could", "should", "may", "might", "must", "shall", "also", "more", "most", "some", "any", "each", "every", "all", "both",
+    "up", "out", "down", "off", "own", "same", "very", "just", "now", "only", "even", "still", "much", "many", "one", "two", "first", "last",
+]);
+const OPENING_CUES = ["however", "but", "yet", "nevertheless", "although", "though", "instead", "on the other hand", "meanwhile", "now"];
+const CLOSING_CUES = ["overall", "in conclusion", "to conclude", "to sum up", "in summary", "finally", "ultimately", "in short", "therefore", "for these reasons"];
+const TRANSITION_CUES = ["moreover", "furthermore", "in addition", "additionally", "similarly", "likewise", "consequently", "as a result", "for instance", "for example"];
+/**
+ * A conservative stem so inflections of one word count as one theme.
+ *
+ * The failure mode to avoid is worse than missing a match: "across" must never
+ * become "acros", and "carefully" must not become "careful" while "detail"
+ * stays "detail". Only endings that are unambiguous evidence of inflection are
+ * removed, and never below three remaining characters, so no theme is ever
+ * shorter than a real word fragment.
+ */
+function stem(word) {
+    if (word.length <= 4)
+        return word;
+    let result = word;
+    // -ss plurals and -es verb endings: boxes -> box, watches -> watch.
+    if (/(?:sses|xes|zes|ches|shes)$/u.test(result))
+        result = result.slice(0, -2);
+    // -ies -> -y: studies -> study.
+    else if (/ies$/u.test(result))
+        result = `${result.slice(0, -3)}y`;
+    // -ing only after a plausible stem, and only when something remains.
+    else if (/ing$/u.test(result) && result.length >= 8)
+        result = result.slice(0, -3);
+    // -ed likewise.
+    else if (/ed$/u.test(result) && result.length >= 6)
+        result = result.slice(0, -2);
+    // A plain plural -s, but never a genuine -ss word ("across", "analysis").
+    else if (/s$/u.test(result) && !/(?:ss|us|is)$/u.test(result))
+        result = result.slice(0, -1);
+    return result.length >= 3 ? result : word;
+}
+function sectionTopic(words) {
+    const counts = new Map();
+    for (const raw of words) {
+        const key = stem(raw);
+        if (key.length < 4)
+            continue;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let best = "";
+    let bestCount = 0;
+    for (const [term, count] of counts) {
+        if (count > bestCount || (count === bestCount && term < best)) {
+            best = term;
+            bestCount = count;
+        }
+    }
+    return bestCount >= 2 ? best : "";
+}
+/**
+ * Split the draft into sections. Paragraphs are the writer's own unit of
+ * thought, so sections are built from consecutive paragraphs rather than an
+ * arbitrary character count: a section boundary should mean the argument moved.
+ * A run of paragraphs is cut when the vocabulary turns over enough that the
+ * writer is clearly onto something new.
+ */
+function buildSections(document, stats) {
+    const paragraphs = document.paragraphs.filter((paragraph) => paragraph.tokens.length > 0);
+    if (paragraphs.length === 0)
+        return [];
+    // Target a section roughly every 180 words, but never split a paragraph.
+    const targetWords = 180;
+    const groups = [];
+    let current = [];
+    let currentWords = 0;
+    for (const paragraph of paragraphs) {
+        current.push(paragraph);
+        currentWords += paragraph.tokens.length;
+        if (currentWords >= targetWords && paragraph.tokens.length < 120) {
+            groups.push(current);
+            current = [];
+            currentWords = 0;
+        }
+    }
+    if (current.length)
+        groups.push(current);
+    // Now merge adjacent groups that share too much vocabulary to be a real turn.
+    const merged = [];
+    for (const group of groups) {
+        const words = new Set();
+        for (const paragraph of group)
+            for (const token of paragraph.tokens) {
+                const word = token.lower;
+                if (word.length > 4 && !OUTLINE_STOP_WORDS.has(word))
+                    words.add(stem(word));
+            }
+        const previous = merged[merged.length - 1];
+        if (previous && words.size && previous.words.size) {
+            let shared = 0;
+            for (const word of words)
+                if (previous.words.has(word))
+                    shared += 1;
+            const overlap = shared / Math.max(1, Math.min(words.size, previous.words.size));
+            if (overlap > 0.45) {
+                previous.paragraphs.push(...group);
+                for (const word of words)
+                    previous.words.add(word);
+                continue;
+            }
+        }
+        merged.push({ paragraphs: group, words });
+    }
+    const totalStems = new Set();
+    for (const group of merged)
+        for (const word of group.words)
+            totalStems.add(word);
+    const sections = [];
+    merged.forEach((group, index) => {
+        const start = group.paragraphs[0].start;
+        const end = group.paragraphs[group.paragraphs.length - 1].end;
+        const sentences = document.sentences.filter((sentence) => sentence.start >= start && sentence.end <= end);
+        const words = group.paragraphs.reduce((total, paragraph) => total + paragraph.tokens.length, 0);
+        const tokens = group.paragraphs.flatMap((paragraph) => paragraph.tokens.map((token) => token.lower));
+        let novelCount = 0;
+        const seen = new Set();
+        for (const token of tokens) {
+            const word = stem(token);
+            if (word.length < 4 || OUTLINE_STOP_WORDS.has(word))
+                continue;
+            if (!seen.has(word)) {
+                seen.add(word);
+                // Only credit a stem as new if it is new to the whole document, or
+                // first appears here rather than being common everywhere.
+                if (totalStems.has(word))
+                    novelCount += 1;
+            }
+        }
+        const novelty = seen.size ? Math.max(0, Math.min(1, novelCount / Math.max(6, seen.size))) : 0;
+        const dominant = sentences.reduce((longest, sentence) => (sentence.tokens.length > longest.tokens.length ? sentence : longest), sentences[0]);
+        sections.push({
+            id: `section-${index}`,
+            index,
+            start,
+            end,
+            opening: (sentences[0]?.text ?? group.paragraphs[0].text).trim().slice(0, 140),
+            topic: sectionTopic(tokens),
+            dominantSentence: (dominant?.text ?? "").trim().slice(0, 180),
+            words,
+            sentences: sentences.length,
+            novelty,
+            filler: false,
+            role: "development",
+        });
+    });
+    // A section sandwiched between substantial neighbours that adds little new
+    // vocabulary is doing little work. That is a real editorial observation and
+    // one the writer cannot see, because locally every sentence looks fine.
+    for (let index = 1; index < sections.length - 1; index += 1) {
+        const section = sections[index];
+        const before = sections[index - 1];
+        const after = sections[index + 1];
+        if (section.words >= 40 && section.novelty < 0.22 && before.novelty > section.novelty && after.novelty > section.novelty) {
+            section.filler = true;
+        }
+    }
+    if (stats.words > 0 && sections.length > 0) {
+        const average = stats.words / sections.length;
+        // A single section spanning most of the draft means no real structure yet.
+        if (sections.length === 1 && average > 260)
+            sections[0].filler = sections[0].filler && sections[0].novelty >= 0.2;
+    }
+    // Roles are assigned last: they depend on novelty and on the final section
+    // count, both of which the filler pass above can change.
+    for (const section of sections) {
+        section.role = section.filler ? "supporting-detail" : roleFor(section, sections.length);
+    }
+    return sections;
+}
+/**
+ * What a section is doing in the argument.
+ *
+ * Cheap, local, and useful: "your conclusion introduces a new term" only works
+ * if the writer can tell which paragraph is the conclusion. Positions alone are
+ * a weak signal, so the opening words and the section's novelty decide it.
+ */
+function roleFor(section, total) {
+    if (total === 1)
+        return "development";
+    const opening = section.opening.toLocaleLowerCase();
+    if (section.index === 0)
+        return "opening";
+    if (section.index === total - 1)
+        return "closing";
+    if (section.novelty >= 0.4 && TRANSITION_CUES.some((cue) => opening.includes(cue)))
+        return "turn";
+    if (section.novelty < 0.2)
+        return "supporting-detail";
+    return "development";
+}
+function firstWords(text, count) {
+    return text.trim().split(/\s+/u).slice(0, count).join(" ");
+}
+/**
+ * Build the whole-document reading: an outline, the draft's themes, where its
+ * weight sits, and a small set of editorial notes that scale with the draft.
+ */
+function buildDocumentOutline(text, stats, document = parseDocument(text), options = {}) {
+    const resolvedStats = stats;
+    const sections = buildSections(document, resolvedStats ?? { words: document.tokens.length, sentences: document.sentences.length, paragraphs: document.paragraphs.length, sentenceLengths: document.sentenceLengths, paragraphLengths: document.paragraphLengths, readingTime: 0, characters: text.length, readability: 0, longSentences: 0, fillerWords: 0, passiveVoice: 0, passiveVoicePercentage: 0, averageSentenceLength: 0, longestSentence: "", vocabularyDiversity: 0, repeatedWords: [], repeatedPhrases: [], fillerWordFrequency: [], commonWords: [] });
+    const notes = [];
+    const goals = options.goals;
+    const preferences = options.preferences;
+    // --- Themes -----------------------------------------------------------
+    const themeCounts = new Map();
+    let themeTotal = 0;
+    for (const token of document.tokens) {
+        const word = token.lower;
+        if (word.length <= 4 || OUTLINE_STOP_WORDS.has(word))
+            continue;
+        const key = stem(word);
+        if (key.length < 4)
+            continue;
+        themeCounts.set(key, (themeCounts.get(key) ?? 0) + 1);
+        themeTotal += 1;
+    }
+    const themes = [...themeCounts.entries()]
+        .filter(([, count]) => count >= 2)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 6)
+        .map(([term, count]) => ({ term, count, share: themeTotal ? count / themeTotal : 0 }));
+    // --- Shape ------------------------------------------------------------
+    const shape = sections.length === 0 ? "very-short"
+        : resolvedStats && resolvedStats.words > 0 && resolvedStats.words < 90 ? "very-short"
+            : sections.length === 1 ? (resolvedStats && resolvedStats.words > 400 ? "linear" : "single-idea")
+                : sections.length >= 5 ? "sectioned"
+                    : (resolvedStats && resolvedStats.paragraphs > sections.length * 3 ? "list-driven" : "linear");
+    // --- Weight -----------------------------------------------------------
+    const heaviest = sections.reduce((best, section) => (!best || section.words > best.words ? section : best), null);
+    const focus = heaviest
+        ? heaviest.topic
+            ? `The draft spends most of its weight on “${heaviest.topic}”.`
+            : `The heaviest part of the draft runs from ${firstWords(heaviest.opening, 6)}...`
+        : "The draft is still very short.";
+    // --- Editorial notes --------------------------------------------------
+    if (sections.length >= 2) {
+        // A hard structural turn: the writer changes their mind mid-draft without
+        // signalling it. Worth more as the draft gets longer.
+        const opener = firstWords(sections[0].opening, 12).toLocaleLowerCase();
+        const last = sections[sections.length - 1];
+        const closer = firstWords(last.opening, 12).toLocaleLowerCase();
+        const openingTurns = OPENING_CUES.some((cue) => opener.includes(cue));
+        const closingTurns = CLOSING_CUES.some((cue) => closer.includes(cue));
+        if (openingTurns) {
+            notes.push({
+                id: "note-opening-turn",
+                kind: "structure",
+                title: "The draft opens on a contrast",
+                detail: "The opening paragraph starts with a contrast (“however”, “but”, “although”) rather than stating the point directly. Readers meet the disagreement before they know what is being disagreed with.",
+                suggestion: "Consider naming the point first, then the contrast. Many readers will not carry an unnamed disagreement into the next paragraph.",
+                sectionIds: [sections[0].id],
+                start: sections[0].start,
+                end: sections[0].end,
+                confidence: 0.5,
+            });
+        }
+        if (closingTurns) {
+            notes.push({
+                id: "note-closing-summary",
+                kind: "structure",
+                title: "The ending summarises rather than lands",
+                detail: "The closing section begins by summarising (“overall”, “in conclusion”). A summary is useful once the reader already agrees; it is less useful as the last thing they read.",
+                suggestion: "Consider ending on the single most consequential point, or a concrete next step, and moving the summary one paragraph earlier.",
+                sectionIds: [last.id],
+                start: last.start,
+                end: last.end,
+                confidence: 0.5,
+            });
+        }
+    }
+    const fillerSections = sections.filter((section) => section.filler);
+    if (fillerSections.length) {
+        const worst = fillerSections[0];
+        notes.push({
+            id: "note-filler-section",
+            kind: "balance",
+            title: `${fillerSections.length === 1 ? "A section is" : `${fillerSections.length} sections are`} carrying little new ground`,
+            detail: fillerSections.length === 1
+                ? `The section beginning “${firstWords(worst.opening, 6)}”” mostly restates vocabulary from the sections around it. Nothing in it is wrong; it just does not add much that the neighbouring sections have not already said.`
+                : `${fillerSections.length} sections mostly restate vocabulary from the sections around them. They read as effort without adding much the neighbouring sections have not already said.`,
+            suggestion: "Consider cutting the shortest of them, or merging them into the section they restate. If they are there to reassure, keep one and let it be brief.",
+            sectionIds: fillerSections.map((section) => section.id),
+            start: worst.start,
+            end: worst.end,
+            confidence: 0.5,
+        });
+    }
+    if (sections.length >= 4) {
+        const longestSection = heaviest;
+        if (longestSection) {
+            const share = resolvedStats && resolvedStats.words > 0 ? longestSection.words / resolvedStats.words : 0;
+            const median = [...sections].sort((a, b) => a.words - b.words)[Math.floor(sections.length / 2)].words;
+            if (share > 0.45 && longestSection.words > median * 1.8) {
+                notes.push({
+                    id: "note-weight-imbalance",
+                    kind: "balance",
+                    title: "One section dominates the draft",
+                    detail: `The section beginning “${firstWords(longestSection.opening, 6)}”” is about ${Math.round(share * 100)}% of the draft. The other sections are comparatively brief, so the piece reads as one long argument with a short frame around it.`,
+                    suggestion: "Consider whether the surrounding sections should be expanded to match, or whether the dominant section should be split so its turns are visible.",
+                    sectionIds: [longestSection.id],
+                    start: longestSection.start,
+                    end: longestSection.end,
+                    confidence: 0.5,
+                });
+            }
+        }
+    }
+    // --- Goal-aware notes -------------------------------------------------
+    if (goals && resolvedStats) {
+        const required = (goals.requiredTerminology ?? []).map((term) => term.trim()).filter(Boolean);
+        if (required.length) {
+            const lower = text.toLocaleLowerCase();
+            const missing = required.filter((term) => !lower.includes(term.toLocaleLowerCase()));
+            if (missing.length && document.paragraphs.length) {
+                const anchor = sections[0] ?? { id: "document", start: document.paragraphs[0].start, end: document.paragraphs[0].end };
+                notes.push({
+                    id: "note-goal-missing-term",
+                    kind: "goal",
+                    title: `Your goals require ${missing.length === 1 ? "a term" : "terms"} the draft has not used`,
+                    detail: `You asked for ${missing.map((term) => `“${term}”`).join(", ")} to appear somewhere. ${missing.length === 1 ? "It does not appear" : "None of them appear"} anywhere in the draft.`,
+                    suggestion: "Either work the term into the relevant section, or remove it from your goals if it is no longer needed.",
+                    sectionIds: [anchor.id],
+                    start: anchor.start,
+                    end: anchor.end,
+                    confidence: 0.6,
+                });
+            }
+        }
+        const target = goals.targetLength;
+        if (typeof target === "number" && target > 0 && resolvedStats.words > 0) {
+            const ratio = resolvedStats.words / target;
+            if (ratio >= 1.5 || ratio <= 0.6) {
+                const direction = ratio > 1 ? "longer" : "shorter";
+                const first = sections[0];
+                notes.push({
+                    id: "note-goal-length",
+                    kind: "goal",
+                    title: `The draft is ${direction === "longer" ? "well over" : "well under"} your target length`,
+                    detail: `Your goal is about ${target.toLocaleString()} words; the draft is currently ${resolvedStats.words.toLocaleString()}. That is a note about shape, not a problem to fix on its own.`,
+                    suggestion: direction === "longer"
+                        ? "Consider whether the sections furthest from your core point are earning their length, or whether a point is being made twice in different words."
+                        : "Consider whether the argument needs one more supporting section, or whether the target itself is still right.",
+                    sectionIds: first ? [first.id] : [],
+                    start: first?.start ?? 0,
+                    end: first?.end ?? 0,
+                    confidence: 0.5,
+                });
+            }
+        }
+        if (goals.intent === "persuade" && resolvedStats.sentences > 4) {
+            const requestWords = /(?:\bshould\b|\bmust\b|\bneed(?:s|ed)? to\b|\brecommend\b|\bought-?in\b)/iu;
+            const asked = document.sentences.filter((sentence) => requestWords.test(sentence.text)).length;
+            if (asked === 0) {
+                const first = sections[0];
+                notes.push({
+                    id: "note-goal-no-request",
+                    kind: "goal",
+                    title: "The draft never makes a request",
+                    detail: `You set the intent to persuade, but no sentence asks the reader to do anything. A persuasive piece can be entirely reasonable and still leave the reader without a next step.`,
+                    suggestion: "Consider closing with what you want the reader to do, said plainly. It does not need to be a command.",
+                    sectionIds: first ? [first.id] : [],
+                    start: first?.start ?? 0,
+                    end: first?.end ?? 0,
+                    confidence: 0.45,
+                });
+            }
+        }
+    }
+    // --- Preference-aware note -------------------------------------------
+    if (preferences && sections.length >= 3) {
+        const contractions = document.tokens.filter((token) => /['”]/u.test(token.value)).length;
+        if (!preferences.allowContractions && contractions > 0 && goals?.tone !== "casual") {
+            const first = sections[0];
+            notes.push({
+                id: "note-pref-contractions",
+                kind: "goal",
+                title: "The register is looser than your style profile",
+                detail: `Your profile prefers formal wording, and the draft contains ${contractions} contraction${contractions === 1 ? "" : "s"}. Individually each is small; together they set a tone.`,
+                suggestion: "Decide deliberately: either loosen the profile, or tighten these where they do not carry voice.",
+                sectionIds: first ? [first.id] : [],
+                start: first?.start ?? 0,
+                end: first?.end ?? 0,
+                confidence: 0.45,
+            });
+        }
+    }
+    // --- Coverage note ----------------------------------------------------
+    // Does the draft state a claim anywhere the reader can point to?
+    if (resolvedStats && resolvedStats.sentences >= 6) {
+        const claimCue = /(?:\bthe (?:aim|goal|purpose|question|problem) (?:of|is)\b|\bwe (?:aim|argue|set out)\b|\bthis (?:draft|essay|piece|document) (?:argues|considers|examines|explores)\b|\bthe question\b|\bin this (?:essay|piece|draft)\b)/iu;
+        if (!claimCue.test(text)) {
+            const first = sections[0];
+            notes.push({
+                id: "note-coverage-no-claim",
+                kind: "coverage",
+                title: "The draft never says what it is trying to do",
+                detail: `Across ${resolvedStats.sentences} sentences, nothing states the aim, question, or claim the piece is working towards. Each section may be clear on its own, but the reader has to assemble the point themselves.`,
+                suggestion: "Consider one sentence near the top naming what this draft sets out to do. It makes every later section easier to follow.",
+                sectionIds: first ? [first.id] : [],
+                start: first?.start ?? 0,
+                end: first?.end ?? 0,
+                confidence: 0.5,
+            });
+        }
+    }
+    // Order notes by position so the UI reads top-to-bottom.
+    notes.sort((a, b) => a.start - b.start);
+    return { sections, notes, themes, shape, focus };
+}
+/**
+ * A one-line, honest description of how the draft is currently doing, derived
+ * from the same signals the outline uses. No score, no judgement: a status the
+ * writer can act on.
+ */
+function summariseDocument(outline, stats, goals) {
+    const parts = [];
+    const sectionCount = outline.sections.length;
+    parts.push(sectionCount <= 1 ? "One continuous section" : `${sectionCount} sections`);
+    if (outline.themes[0])
+        parts.push(`centred on “${outline.themes[0].term}”`);
+    if (outline.themes[1])
+        parts.push(`with “${outline.themes[1].term}” recurring`);
+    const filler = outline.sections.filter((section) => section.filler).length;
+    if (filler)
+        parts.push(`${filler} low-weight section${filler === 1 ? "" : "s"}`);
+    if (goals)
+        parts.push(`written for a ${goals.audience} audience to ${goals.intent}`);
+    if (stats.longSentences > 0)
+        parts.push(`${stats.longSentences} long sentence${stats.longSentences === 1 ? "" : "s"}`);
+    return `${parts.join(", ")}.`;
+}
+/**
+ * Goal-aware, contextual explanation.
+ *
+ * The rules produce correct but generic advice: "A more specific noun may help
+ * the reader understand exactly what you mean." That sentence is true of every
+ * vague word in every document, so it tells the writer nothing they can act on.
+ *
+ * The information needed to make it specific is already on the issue: which rule
+ * fired, how confident the rule was, how much it matters, and why it ranked
+ * where it did. This module turns that into language tied to *this* draft's
+ * audience, intent, tone and register.
+ *
+ * It is pure, local, and deterministic. No provider call, no network, no
+ * latency. This is the layer that keeps Draftwise useful with AI switched off.
+ */
+const AUDIENCE_NOUN = {
+    general: "a general reader",
+    academic: "an academic reader",
+    professional: "a professional reader",
+    technical: "a technical reader",
+    casual: "a casual reader",
+};
+const INTENT_PHRASE = {
+    inform: "inform the reader",
+    explain: "explain this",
+    persuade: "persuade the reader",
+    describe: "describe this accurately",
+    story: "carry the reader through the narrative",
+};
+const TONE_NOUN = {
+    neutral: "a neutral voice",
+    confident: "a confident voice",
+    friendly: "a friendly voice",
+    professional: "a professional voice",
+    formal: "a formal voice",
+    casual: "a casual voice",
+};
+/**
+ * Why this finding is ranked where it is, in one sentence.
+ *
+ * The ranking already made a defensible decision from transparent inputs. This
+ * surfaces that decision instead of leaving the writer to guess why an obvious
+ * typo sits below an optional style note.
+ */
+function explainRanking(issue, goals) {
+    const parts = [];
+    const tierReason = issue.tier === "fix-first"
+        ? "Treated as a likely mistake"
+        : issue.tier === "improve"
+            ? "Worth improving for this draft"
+            : "Optional — take it only if it matches your intent";
+    if (issue.confidence >= 0.9)
+        parts.push("Draftwise is highly confident in this detection");
+    else if (issue.confidence >= 0.75)
+        parts.push("Reasonably confident");
+    else
+        parts.push(`Lower confidence (${Math.round(issue.confidence * 100)}%) — safe to ignore if the text is deliberate`);
+    if (issue.reasonCodes.includes("register-dampened")) {
+        parts.push(goals
+            ? `Ranked lower because it matters less for ${AUDIENCE_NOUN[goals.audience]} in ${TONE_NOUN[goals.tone]}`
+            : "Ranked lower because it matters less for this register");
+    }
+    if (issue.groupedCount > 0) {
+        parts.push(`Same pattern appears ${issue.groupedCount} more time${issue.groupedCount === 1 ? "" : "s"} in the draft`);
+    }
+    return `${tierReason}. ${parts.join(". ")}.`;
+}
+/**
+ * The goal-aware "why this matters here" line.
+ *
+ * Written per rule family so it says something true about the register the
+ * writer actually chose, rather than restating the rule's own description.
+ */
+function explainRelevance(issue, goals) {
+    if (!goals)
+        return null;
+    const audience = AUDIENCE_NOUN[goals.audience];
+    const intent = INTENT_PHRASE[goals.intent];
+    const tone = TONE_NOUN[goals.tone];
+    const family = familyFor(issue.ruleId);
+    switch (family) {
+        case "spelling-lexicon":
+            return goals.audience === "technical"
+                ? `Technical drafts are read closely and corrected quickly. A wrong term here costs more than it would in a casual note.`
+                : `Spelling is checked everywhere, but it is the one error no reader forgives silently.`;
+        case "wordiness":
+            return goals.intent === "persuade"
+                ? `You are trying to ${intent}. Padding works against that: every hedge is a sentence the reader does not get back.`
+                : goals.audience === "academic"
+                    ? `Academic readers are tracking your argument. Thinner wording makes that argument easier to follow.`
+                    : `Thinner wording makes the point faster without changing what you meant.`;
+        case "clarity-vague-word":
+            return goals.audience === "academic"
+                ? `In academic writing the reader cannot evaluate a claim they cannot pin down. Naming the specific thing is usually the whole fix.`
+                : goals.intent === "explain"
+                    ? `You are trying to ${intent}. A vague noun leaves the reader guessing what you are describing.`
+                    : `A specific noun tells the reader exactly what you mean instead of leaving them to work it out.`;
+        case "style-passive-voice":
+            return goals.audience === "professional"
+                ? `In professional writing the actor usually matters: who decided, who owns it, who acts.`
+                : goals.tone === "formal"
+                    ? `Formal writing often keeps the passive for genuine reasons. Change it only where the actor matters.`
+                    : `Passive voice hides who acts. Keep it when the result is genuinely the point, and name the actor when it is not.`;
+        case "conciseness-filler":
+            return goals.tone === "confident"
+                ? `You set a ${tone}. Filler undercuts it — a confident sentence does not need “basically” to sound sure.`
+                : goals.audience === "casual"
+                    ? `In casual writing these words carry tone as much as padding. Leave them if they are doing that job.`
+                    : `Filler words weaken emphasis. Every one of them spends the reader's attention for nothing.`;
+        case "structure-long-sentence":
+            return goals.intent === "story"
+                ? `Narrative sentences can run long without losing the reader, but this one asks them to hold several ideas at once.`
+                : goals.audience === "academic"
+                    ? `Long sentences are the main thing that costs an academic reader your argument. Splitting this one is usually worth it.`
+                    : `Long sentences ask the reader to hold several ideas at once. Splitting one is often easier than rewriting it.`;
+        case "structure-fragment":
+            return goals.intent === "story"
+                ? `Fragments are normal in narrative prose. Keep this one if the rhythm is doing the work.`
+                : `A sentence without a verb can read as a thought rather than a claim. Keep it only if that is deliberate.`;
+        case "cliche":
+            return goals.tone === "formal"
+                ? `A familiar phrase can undercut a formal voice because the reader stops hearing your words.`
+                : `Clichés are less precise than the concrete thing they stand in for.`;
+        case "style-contractions":
+            return goals.tone === "formal"
+                ? `You set a ${tone}. Contractions read as informal in that register.`
+                : `Your style profile prefers avoiding contractions.`;
+        case "style-intensifier":
+            return goals.tone === "confident"
+                ? `An intensifier weakens a confident sentence. “Very good” is weaker than “good”.`
+                : `Intensifiers add emphasis without adding meaning, and readers notice the gap.`;
+        case "consistency-preferred-term":
+            return `Consistency is what makes terminology usable. Your style guide already says which form you want.`;
+        case "repetition-repeated-phrase":
+            return goals.audience === "casual"
+                ? `Repeating a short phrase is normal in casual writing. Keep it when it lands.`
+                : `A repeated phrase reads as an accident unless it is deliberate emphasis.`;
+        case "repetition-sentence-opening":
+            return `Several nearby sentences start the same way, which flattens the rhythm.`;
+        default:
+            return `Worth weighing against your goal to ${intent} for ${audience}.`;
+    }
+}
+/** Coarse grouping used to pick the right relevance sentence. */
+function familyFor(ruleId) {
+    if (ruleId.startsWith("wordiness-"))
+        return "wordiness";
+    if (ruleId.startsWith("style-cliche-"))
+        return "cliche";
+    if (ruleId.startsWith("spelling-"))
+        return "spelling-lexicon";
+    return ruleId;
+}
+/**
+ * Build the full explanation a writer sees on a suggestion card.
+ *
+ * Ordering matters: what to do first, then why it matters here, then how
+ * confident the ranking is. The base rule text is kept last because it is the
+ * least specific part.
+ */
+function buildExplanation(issue, goals, preferences) {
+    const relevance = explainRelevance(issue, goals);
+    return {
+        base: issue.explanation,
+        ranking: explainRanking(issue, goals),
+        relevance,
+        action: buildAction(issue, goals, preferences),
+    };
+}
+/**
+ * A concrete next step. Every suggestion gets one, because “consider revising”
+ * is not an action a writer can take between meetings.
+ */
+function buildAction(issue, goals, preferences) {
+    const family = familyFor(issue.ruleId);
+    if (family === "spelling-lexicon") {
+        const inDictionary = preferences?.personalDictionary?.some((word) => word.toLocaleLowerCase() === issue.original.trim().toLocaleLowerCase());
+        return inDictionary
+            ? "It is in your personal dictionary, so this may be a false alarm — check the case and the surrounding word."
+            : "Correct it, or add the word to your personal dictionary if the spelling is deliberate.";
+    }
+    if (family === "consistency-preferred-term") {
+        return `Replace every occurrence with “${issue.replacement.trim()}”, then check the rest of the draft for the same choice.`;
+    }
+    if (issue.replacement && issue.replacement.trim() && issue.replacement !== issue.original) {
+        return `Replace “${truncate(issue.original)}” with “${truncate(issue.replacement)}”.`;
+    }
+    if (family === "wordiness" || family === "conciseness-filler" || family === "clarity-vague-word") {
+        return goals?.intent === "persuade"
+            ? "Rewrite the sentence without it, then check the sentence still argues the same point."
+            : "Rewrite the sentence without it. If the sentence stops meaning the same thing, keep the word.";
+    }
+    if (family === "structure-long-sentence") {
+        return "Split it at the point where the sentence changes subject, and read the two halves on their own.";
+    }
+    if (family === "style-passive-voice") {
+        return "Name the actor before the verb — or keep it, if the result really is the point.";
+    }
+    if (issue.groupedCount > 0) {
+        return `Fix this one, then use “Replace all” on the group to catch the ${issue.groupedCount} other occurrence${issue.groupedCount === 1 ? "" : "s"}.`;
+    }
+    return "Read the sentence once more; keep it if the current wording is what you meant.";
+}
+function truncate(value, max = 48) {
+    const trimmed = value.trim();
+    return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
+}
 const OBJECTIVE_CATEGORIES = new Set(["spelling", "grammar", "punctuation", "capitalization"]);
 const STYLE_RULE_PREFIXES = ["style-", "punctuation-oxford-comma"];
+/**
+ * Base caps for a short draft. These are floors, not limits: the budget grows
+ * with the document (see `densityCapsFor`) so a long draft is never starved of
+ * its most important findings just because it is long.
+ */
 const SUGGESTION_DENSITY_CAPS = {
     "fix-first": 12,
     improve: 8,
     optional: 5,
 };
+/**
+ * Per 1,000 words each tier is allowed this many displayed suggestions.
+ *
+ * The original product shipped absolute caps (12/8/5) for every document. That
+ * made the assistant actively worse on long drafts: at a constant error rate a
+ * 1,700-word document showed the writer exactly one suggestion and hid the
+ * other 119 with no way to see them. Scaling the budget by length keeps the
+ * list focused on a note while never hiding more than roughly this share of a
+ * draft's findings.
+ */
+const SUGGESTION_DENSITY_PER_THOUSAND_WORDS = {
+    "fix-first": 14,
+    improve: 9,
+    optional: 5,
+};
+/**
+ * How many findings per rule family to show, scaled by document length. The
+ * base numbers suit a short note; a long draft needs more instances of a real
+ * problem to be actionable, otherwise the writer fixes one and hits three more.
+ */
 const PER_RULE_CAPS = {
     objective: 10,
     clarity: 5,
     style: 3,
 };
+/**
+ * Scale a per-draft cap by document length. Short documents keep the tuned base
+ * values; longer ones gain capacity roughly in step with their word count, with
+ * a ceiling so an enormous document still presents a reviewable list.
+ */
+function scaleCap(base, words, perThousand, maxMultiple = 8) {
+    if (!Number.isFinite(words) || words <= 0)
+        return base;
+    const multiple = Math.max(1, Math.min(maxMultiple, words / 250));
+    return Math.min(Math.round(base * multiple), Math.max(base, Math.round((perThousand * words) / 1000)));
+}
+/** The tier caps appropriate to a document of this length. */
+function densityCapsFor(words) {
+    return {
+        "fix-first": scaleCap(SUGGESTION_DENSITY_CAPS["fix-first"], words, SUGGESTION_DENSITY_PER_THOUSAND_WORDS["fix-first"]),
+        improve: scaleCap(SUGGESTION_DENSITY_CAPS.improve, words, SUGGESTION_DENSITY_PER_THOUSAND_WORDS.improve),
+        optional: scaleCap(SUGGESTION_DENSITY_CAPS.optional, words, SUGGESTION_DENSITY_PER_THOUSAND_WORDS.optional),
+    };
+}
+/**
+ * Per-rule caps appropriate to a document of this length. The base numbers suit
+ * a short note; a long draft needs more instances of a real problem to be
+ * actionable, otherwise the writer fixes one and hits three more. A high
+ * ceiling is safe here because the same pattern still groups into one card with
+ * a count, so the list stays compact while the writer learns the true scale.
+ */
+function perRuleCapsFor(words) {
+    return {
+        objective: scaleCap(PER_RULE_CAPS.objective, words, PER_RULE_CAPS.objective * 2.4, 10),
+        clarity: scaleCap(PER_RULE_CAPS.clarity, words, PER_RULE_CAPS.clarity * 2.6, 12),
+        style: scaleCap(PER_RULE_CAPS.style, words, PER_RULE_CAPS.style * 3.0, 14),
+    };
+}
 const LOW_CONFIDENCE_STYLE_THRESHOLD = 0.7;
 const REGISTER_MISMATCH_THRESHOLD = 0.35;
 const NEAR_DISMISSAL_CHARS = 240;
@@ -1642,9 +2366,34 @@ function registerRelevance(issue, kind, goals) {
         return audience === "casual" ? 0.35 : 0.6;
     return 0.65;
 }
+/**
+ * Find the sentence containing a span without scanning every sentence.
+ *
+ * Sentence spans are ordered and non-overlapping, so a binary search turns the
+ * old O(issues x sentences) scan into O(issues log sentences). On a long draft
+ * with hundreds of findings that difference is the whole analysis budget.
+ */
+function findSentence(sentences, start, end) {
+    if (sentences.length === 0)
+        return undefined;
+    let low = 0;
+    let high = sentences.length - 1;
+    while (low <= high) {
+        const mid = (low + high) >> 1;
+        const span = sentences[mid];
+        if (end <= span.start)
+            high = mid - 1;
+        else if (start >= span.end)
+            low = mid + 1;
+        else
+            return span;
+    }
+    // A span that straddles a boundary still belongs to the sentence it starts in.
+    return start >= sentences[high]?.start ? sentences[high] : sentences[low];
+}
 function contextRelevance(issue, kind, goals, document) {
     let relevance = registerRelevance(issue, kind, goals);
-    const sentence = document.sentences.find((span) => issue.start >= span.start && issue.end <= span.end);
+    const sentence = findSentence(document.sentences, issue.start, issue.end);
     if (sentence && sentence.tokens.length <= 4 && kind !== "objective")
         relevance *= 0.85;
     return Math.max(0, Math.min(1, relevance));
@@ -1654,7 +2403,7 @@ function issueImpact(issue, kind, document) {
     const categoryWeight = kind === "objective" ? 1 : kind === "clarity" ? 0.8 : 0.45;
     let impact = severity * categoryWeight;
     if (ruleFamily(issue.ruleId) === "structure-long-sentence") {
-        const sentence = document.sentences.find((span) => issue.start >= span.start && issue.end <= span.end);
+        const sentence = findSentence(document.sentences, issue.start, issue.end);
         if (sentence)
             impact = Math.min(0.9, 0.3 + Math.max(0, sentence.tokens.length - 32) * 0.02);
     }
@@ -1710,6 +2459,46 @@ function prioritiseSuggestions(issues, options = {}) {
     report.rawCount = issues.length;
     const ruleOff = new Set((preferences?.ignoredRuleIds ?? []).map((id) => ruleFamily(id)));
     const ruleReduced = new Set((preferences?.reducedRuleIds ?? []).map((id) => ruleFamily(id)));
+    /**
+     * Dismissals indexed by rule and by the normalised text they covered.
+     *
+     * The previous implementation compared every finding against every dismissal
+     * on every pass. Writers accumulate dismissals over a session, and analysis
+     * reruns on each edit, so this was quadratic in the two things that grow most
+     * during a long writing session. Two indexes make it linear.
+     */
+    const dismissalByRule = new Map();
+    const dismissalByText = new Map();
+    for (const entry of dismissed) {
+        const byRule = dismissalByRule.get(entry.ruleId);
+        if (byRule)
+            byRule.push(entry);
+        else
+            dismissalByRule.set(entry.ruleId, [entry]);
+        const textKey = entry.original.trim().toLocaleLowerCase();
+        const byText = dismissalByText.get(textKey);
+        if (byText)
+            byText.push(entry);
+        else
+            dismissalByText.set(textKey, [entry]);
+    }
+    const isDismissalNear = (issue) => {
+        const exact = dismissalByRule.get(issue.ruleId);
+        if (exact) {
+            for (const entry of exact) {
+                if (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original)
+                    return true;
+            }
+        }
+        const similar = dismissalByText.get(issue.original.trim().toLocaleLowerCase());
+        if (!similar)
+            return false;
+        for (const entry of similar) {
+            if (issue.start >= entry.start - NEAR_DISMISSAL_CHARS && issue.start <= entry.end + NEAR_DISMISSAL_CHARS)
+                return true;
+        }
+        return false;
+    };
     const candidates = [];
     for (const issue of issues) {
         const kind = classifyIssueKind(issue);
@@ -1718,10 +2507,7 @@ function prioritiseSuggestions(issues, options = {}) {
             suppressed.push({ issue, reason: "rule-off" });
             continue;
         }
-        const nearDismissal = dismissed.some((entry) => entry.ruleId === issue.ruleId
-            && (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original
-                || (entry.original.trim().toLocaleLowerCase() === issue.original.trim().toLocaleLowerCase()
-                    && issue.start >= entry.start - NEAR_DISMISSAL_CHARS && issue.start <= entry.end + NEAR_DISMISSAL_CHARS)));
+        const nearDismissal = isDismissalNear(issue);
         if (nearDismissal) {
             suppressed.push({ issue, reason: "near-dismissal" });
             continue;
@@ -1754,8 +2540,13 @@ function prioritiseSuggestions(issues, options = {}) {
             groupedCount: 0,
         });
     }
-    // Fold repeated patterns into one suggestion: the same rule on the same word
-    // or construction is advice the writer needs once, not once per occurrence.
+    // Fold repeated patterns into suggestions. The same rule on the same word is
+    // one piece of advice, not one piece per occurrence — but on a long draft a
+    // single card is not enough to work from, because the writer cannot find the
+    // other 47 occurrences without a list. So a repeated pattern keeps its single
+    // best instance *and* as many further instances as the draft has room for.
+    // Each remaining instance still carries its own location and text, so it is a
+    // real, jumpable suggestion rather than a number.
     const groups = new Map();
     for (const candidate of candidates) {
         const key = groupKey(candidate.issue);
@@ -1765,6 +2556,11 @@ function prioritiseSuggestions(issues, options = {}) {
         else
             groups.set(key, [candidate]);
     }
+    const wordCount = document.tokens.length;
+    // Each additional instance of a repeated pattern needs the same room in the
+    // list as any other suggestion, so a long draft shows more of them rather
+    // than hiding the pattern behind a single row.
+    const repeatAllowance = Math.max(0, Math.min(12, Math.floor(wordCount / 180) - 1));
     const grouped = [];
     for (const bucket of groups.values()) {
         const [first, ...rest] = bucket.sort((left, right) => right.rank - left.rank);
@@ -1774,11 +2570,21 @@ function prioritiseSuggestions(issues, options = {}) {
             grouped.push(...bucket.map((candidate) => ({ ...candidate })));
             continue;
         }
-        const merged = { ...first, groupedIds: rest.map((candidate) => candidate.issue.id), groupedCount: rest.length };
+        const kept = rest.slice(0, repeatAllowance);
+        const folded = rest.slice(repeatAllowance);
+        const merged = {
+            ...first,
+            groupedIds: [...kept, ...folded].map((candidate) => candidate.issue.id),
+            groupedCount: rest.length,
+        };
         grouped.push(merged);
-        for (const candidate of rest)
+        // Kept instances stay visible in their own right.
+        for (const candidate of kept) {
+            grouped.push({ ...candidate, groupedCount: rest.length, groupedIds: [first.issue.id] });
+        }
+        for (const candidate of folded)
             suppressed.push({ issue: candidate.issue, reason: "repeated-pattern" });
-        report.groupedCount += rest.length;
+        report.groupedCount += folded.length;
     }
     // A rule that keeps firing in one draft is offering the same advice again and
     // again. Show its strongest instances, then stop.
@@ -1786,19 +2592,34 @@ function prioritiseSuggestions(issues, options = {}) {
     const perRuleShown = new Map();
     const tierShown = { "fix-first": 0, improve: 0, optional: 0 };
     const displayed = [];
+    const densityCaps = densityCapsFor(wordCount);
+    const perRuleCaps = perRuleCapsFor(wordCount);
+    // Index the profile adjustments once rather than re-filtering per candidate.
+    const adjustmentsByFamily = new Map();
+    for (const adjustment of options.rankAdjustments ?? []) {
+        const bucket = adjustmentsByFamily.get(adjustment.family);
+        if (bucket)
+            bucket.push(adjustment);
+        else
+            adjustmentsByFamily.set(adjustment.family, [adjustment]);
+    }
+    const dampenedFamilies = new Set();
+    for (const [family, adjustments] of adjustmentsByFamily) {
+        if (adjustments.some((adjustment) => adjustment.rankDelta <= -0.8))
+            dampenedFamilies.add(family);
+    }
     for (const candidate of grouped) {
         const family = ruleFamily(candidate.issue.ruleId);
         // A family the writer repeatedly dismissed is dampened to one instance,
         // the same treatment as an explicit "Show fewer" — still visible, never nagging.
-        const dampened = ruleReduced.has(family)
-            || (options.rankAdjustments ?? []).some((adjustment) => adjustment.family === family && adjustment.rankDelta <= -0.8);
-        const perRuleCap = dampened ? 1 : PER_RULE_CAPS[candidate.kind];
+        const dampened = ruleReduced.has(family) || dampenedFamilies.has(family);
+        const perRuleCap = dampened ? 1 : perRuleCaps[candidate.kind];
         const shown = perRuleShown.get(family) ?? 0;
         if (shown >= perRuleCap) {
             suppressed.push({ issue: candidate.issue, reason: dampened ? "rule-reduced" : "density-cap" });
             continue;
         }
-        if (tierShown[candidate.tier] >= SUGGESTION_DENSITY_CAPS[candidate.tier]) {
+        if (tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
             suppressed.push({ issue: candidate.issue, reason: "density-cap" });
             continue;
         }
@@ -1838,6 +2659,40 @@ function prioritiseSuggestions(issues, options = {}) {
         .map(([ruleId, counts]) => ({ ruleId, ...counts }))
         .sort((left, right) => right.suppressed - left.suppressed || left.ruleId.localeCompare(right.ruleId));
     return { displayed, suppressed, report };
+}
+/**
+ * Why a finding was held back, in the writer's own terms.
+ *
+ * Draftwise deliberately hides some findings so the list stays reviewable. That
+ * trade is only honest if the writer can see what was hidden and why — a silent
+ * omission reads as "there is nothing else wrong", which on a long draft is the
+ * most misleading thing the product could say. These labels are returned with
+ * the suppression data and rendered as an inspectable list.
+ */
+const SUPPRESSION_REASONS = {
+    "rule-off": "You turned this check off",
+    "rule-reduced": "You asked to see less of this",
+    "density-cap": "More of this pattern than the list shows",
+    "repeated-pattern": "The same pattern elsewhere in the draft",
+    "register-mismatch": "Not relevant for your audience and tone",
+    "near-dismissal": "You dismissed this one already",
+    "low-confidence-style": "Low confidence for a style note",
+};
+/** A one-line summary of what was held back and the main reasons for it. */
+function describeSuppression(report) {
+    if (!report.suppressedCount)
+        return "Nothing was held back: every finding is in the list.";
+    const top = report.suppressedByRule
+        .filter((entry) => entry.suppressed > 0)
+        .slice(0, 3)
+        .map((entry) => `${entry.suppressed} × ${entry.ruleId.replace(/^[a-z]+-/, "")}`);
+    const grouped = report.groupedCount ? `${report.groupedCount} folded into a repeated pattern` : "";
+    const parts = [`${report.suppressedCount} finding${report.suppressedCount === 1 ? "" : "s"} held back`];
+    if (top.length)
+        parts.push(`most often ${top.join(", ")}`);
+    if (grouped)
+        parts.push(grouped);
+    return `${parts.join(" · ")}. Open “Hidden findings” to see each one.`;
 }
 function countSyllables(word) {
     const normalized = word.toLocaleLowerCase().replace(/(?:e|es|ed)$/u, "");
@@ -2119,8 +2974,15 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
     return { issues, tone: inferTone(nextText, document), stats, scores: scoreWriting(stats, issues, goals, nextText, document), ...(diagnostics ? { diagnostics } : {}) };
 }
 // Public surface preserved for the web app, the extension bundle, and the test suite.
+// Document-level reasoning: an outline, themes, and editorial notes that scale
+// with the draft. Entirely local - no provider, no network.
+// NOTE: every re-export here must stay on a single line. The extension bundler
+// strips re-exports with a line-anchored regex, so a multi-line `export type {`
+// survives partially and emits a dangling CommonJS `exports` reference into the
+// generated browser bundle.
+// Goal-aware, contextual explanation. Local and deterministic.
 
-return { WORD_PATTERN, analyzeDocument, analyzeLocally, analyzeLocallyIncremental, categoryColors, createAnalysisDiagnostics, detectChangedRange, getWritingStats, inferTone, mergeWritingIssues, parseDocument, prioritiseSuggestions, classifyIssueKind, ruleFamily, SUGGESTION_DENSITY_CAPS, scoreWriting, suggestSpelling };
+return { WORD_PATTERN, analyzeDocument, analyzeLocally, analyzeLocallyIncremental, categoryColors, createAnalysisDiagnostics, detectChangedRange, getWritingStats, inferTone, mergeWritingIssues, parseDocument, prioritiseSuggestions, classifyIssueKind, ruleFamily, SUGGESTION_DENSITY_CAPS, scoreWriting, suggestSpelling, buildDocumentOutline, summariseDocument, buildExplanation, explainRanking, explainRelevance, buildAction, SUPPRESSION_REASONS, describeSuppression };
 })();
 globalThis.DraftwiseGrammar = DraftwiseGrammarModule;
 })();

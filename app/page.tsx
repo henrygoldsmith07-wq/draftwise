@@ -286,8 +286,8 @@ export default function Home() {
     // alternatives; small fixes stay single-answer. The preview still decides.
     const action = rewriteActionsFor(selectedText, workspace.goals, workspace.style).find((candidate) => candidate.label === label);
     const finalInstruction = action?.significant ? significantRewriteInstruction(instruction) : instruction;
-    void requestRewrite({ label, instruction: finalInstruction, text: selectedText, selection, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled });
-  }, [requestRewrite, selectedText, selection, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
+    void requestRewrite({ label, instruction: finalInstruction, text: selectedText, selection, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled, draft: draftText });
+  }, [requestRewrite, selectedText, selection, draftText, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
 
   const applyRewrite = useCallback((insert: boolean) => {
     if (!rewritePreview || !canApplyRewritePreview(rewritePreview)) return;
@@ -306,8 +306,8 @@ export default function Home() {
 
   const retryRewrite = useCallback(() => {
     if (!rewritePreview) return;
-    void requestRewrite(createRewriteRetryArgs(rewritePreview, workspace.provider));
-  }, [requestRewrite, rewritePreview, workspace.provider]);
+    void requestRewrite({ ...createRewriteRetryArgs(rewritePreview, workspace.provider), draft: rewritePreview.draft ?? draftText });
+  }, [requestRewrite, rewritePreview, workspace.provider, draftText]);
 
   const copyRewrite = useCallback(() => {
     if (rewritePreview && canApplyRewritePreview(rewritePreview)) void navigator.clipboard?.writeText(rewritePreview.replacement);

@@ -150,6 +150,17 @@ export { categoryColors, scoreWriting } from "./scoring.ts";
 export { getWritingStats, inferTone } from "./statistics.ts";
 export { suggestSpelling } from "./spelling.ts";
 export { createAnalysisDiagnostics } from "./diagnostics.ts";
-export { SUGGESTION_DENSITY_CAPS, classifyIssueKind, prioritiseSuggestions, ruleFamily } from "./prioritise.ts";
+export { SUGGESTION_DENSITY_CAPS, SUGGESTION_DENSITY_PER_THOUSAND_WORDS, SUPPRESSION_REASONS, classifyIssueKind, densityCapsFor, describeSuppression, prioritiseSuggestions, ruleFamily } from "./prioritise.ts";
 export type { DismissedFinding, PrioritiseOptions, PrioritiseResult } from "./prioritise.ts";
 export type { GrammarOptions } from "./preferences.ts";
+// Document-level reasoning: an outline, themes, and editorial notes that scale
+// with the draft. Entirely local - no provider, no network.
+// NOTE: every re-export here must stay on a single line. The extension bundler
+// strips re-exports with a line-anchored regex, so a multi-line `export type {`
+// survives partially and emits a dangling CommonJS `exports` reference into the
+// generated browser bundle.
+export { buildDocumentOutline, summariseDocument } from "./outline.ts";
+export type { DocumentNote, DocumentOutline, DocumentOutlineOptions, DocumentSection, SectionRole } from "./outline.ts";
+// Goal-aware, contextual explanation. Local and deterministic.
+export { buildAction, buildExplanation, explainRanking, explainRelevance } from "./explain.ts";
+export type { ContextualExplanation } from "./explain.ts";

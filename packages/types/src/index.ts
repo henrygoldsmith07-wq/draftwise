@@ -294,6 +294,18 @@ export interface RewriteRequest {
   goals: WritingGoals;
   preferences?: StylePreferences;
   allowProtectedChanges?: boolean;
+  /**
+   * Text immediately before and after the selection.
+   *
+   * A rewrite sent as an isolated selection loses the sentence it came from:
+   * "it" and "the former" have no referent, a term introduced in the previous
+   * sentence looks like an error, and the writer's own phrasing is invisible so
+   * the model reaches for its own register. The rewrite is still validated and
+   * applied against `text` alone — this is context for the model, never a
+   * wider edit target.
+   */
+  contextBefore?: string;
+  contextAfter?: string;
 }
 
 export interface RewriteResult {

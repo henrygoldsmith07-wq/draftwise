@@ -1294,13 +1294,19 @@ function findRepeatedWordsAndPhrases(text, preferences, document = parseDocument
         pushIssue(issues, makeIssue("repetition-adjacent-word", previous.start, current.end, text.slice(previous.start, current.end), previous.value, "repetition", "medium", "Repeated word", "This word appears twice in a row. Removing the repeat keeps the sentence moving.", 0.99, preferences));
     }
     for (let index = 0; index + 3 < tokens.length; index += 1) {
-        const phrase = tokens.slice(index, index + 2);
-        const next = tokens.slice(index + 2, index + 4);
-        if (phrase[0].lower !== next[0].lower || phrase[1].lower !== next[1].lower)
+        // Compare the two bigrams by their tokens directly. Slicing four tokens
+        // per position allocated two short arrays for every word in the draft —
+        // on a long document that is hundreds of thousands of throwaway arrays
+        // before a single finding is reported.
+        const first = tokens[index];
+        const second = tokens[index + 1];
+        const third = tokens[index + 2];
+        const fourth = tokens[index + 3];
+        if (first.lower !== third.lower || second.lower !== fourth.lower)
             continue;
-        if (phrase[1].end > next[0].start + 1)
+        if (second.end > third.start + 1)
             continue;
-        pushIssue(issues, makeIssue("repetition-repeated-phrase", phrase[0].start, next[1].end, text.slice(phrase[0].start, next[1].end), text.slice(phrase[0].start, phrase[1].end), "repetition", "medium", "Repeated phrase", "This short phrase is repeated back-to-back. Keep it once unless the repetition is deliberate.", 0.98, preferences));
+        pushIssue(issues, makeIssue("repetition-repeated-phrase", first.start, fourth.end, text.slice(first.start, fourth.end), text.slice(first.start, second.end), "repetition", "medium", "Repeated phrase", "This short phrase is repeated back-to-back. Keep it once unless the repetition is deliberate.", 0.98, preferences));
     }
     const openings = new Map();
     for (const sentence of document.sentences) {
@@ -1418,7 +1424,15 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
  * objective rules, and the advice names what the paragraph is doing rather
  * than issuing generic instruction like "improve the introduction".
  */
-const MAX_STRUCTURAL_NOTES = 5;
+// Structural notes scale with the document rather than staying at a flat five.
+// A twenty-section draft has more places for its argument to go wrong than a
+// two-paragraph note, and a fixed cap could only ever describe one of them.
+const STRUCTURAL_NOTE_MIN = 8;
+const STRUCTURAL_NOTE_MAX = 24;
+const STRUCTURAL_NOTE_PER_CHECK_MIN = 3;
+// Most paragraphs any one word is allowed to link. Keeps the search per
+// paragraph bounded without discarding the word.
+const COMMON_WORD_PARAGRAPH_LIMIT = 40;
 const MIN_PARAGRAPH_WORDS = 15;
 const STOP_WORDS = new Set([
     "the", "a", "an", "and", "or", "but", "if", "then", "than", "that", "this", "these", "those", "there", "here",
@@ -1480,30 +1494,87 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
     const audience = goals?.audience ?? "general";
     const intent = goals?.intent ?? "inform";
     const formalRegister = audience === "academic" || audience === "professional" || intent === "persuade";
+    // How many structural notes this document is allowed to raise.
+    //
+    // A flat cap of five was wrong in both directions at once. A long draft with
+    // many repeated paragraphs filled all five slots in the very first check, so
+    // unsupported claims, stacked hedges, and abrupt transitions were never even
+    // looked for — the checks that would have been most useful on a long draft
+    // were the ones it silenced. And a short draft that genuinely had four
+    // different structural problems could only ever hear about three of them.
+    //
+    // The budget now grows with the document, and no single check may take more
+    // than half of it, so a long draft surfaces more problems *and* keeps a
+    // variety of them.
+    const budget = Math.min(STRUCTURAL_NOTE_MAX, Math.max(STRUCTURAL_NOTE_MIN, Math.ceil(paragraphs.length / 3)));
+    // Each of the four scanning checks gets its own quota rather than competing
+    // for a shared pool. A shared pool let repeated ideas and unsupported claims
+    // use it all, so stacked hedges and abrupt transitions were never reported
+    // even on drafts that were full of them.
+    //
+    // The floor matters: dividing a small budget four ways gave a single note per
+    // check, which meant a twelve-paragraph draft with eleven repeated paragraphs
+    // was told about one of them. Three per check is the point below which the
+    // advice stops being a set and starts being a sample.
+    const perCheck = Math.max(STRUCTURAL_NOTE_PER_CHECK_MIN, Math.floor(budget / 4));
+    let repeatedIdeas = 0;
+    let unsupportedClaims = 0;
+    let hedgedParagraphs = 0;
+    let abruptTransitions = 0;
     // 1. Repeated argument: a paragraph that substantially restates an earlier
     //    one without adding new material.
-    const seenParagraphs = [];
-    for (const paragraph of paragraphs) {
-        if (issues.length >= MAX_STRUCTURAL_NOTES)
+    //
+    //    Candidates are found through an inverted index on content words rather
+    //    than by comparing every paragraph with every earlier paragraph. The
+    //    direct comparison was quadratic, which a reader only notices as
+    //    "Draftwise got slow and then the tab stopped responding" once a draft
+    //    has a few hundred paragraphs.
+    //
+    //    Every content word indexes its paragraph, and each word's list is capped.
+    //    Indexing only each paragraph's rarest few words was tried first and missed
+    //    real repeats: two paragraphs can be near-identical and still share none of
+    //    a chosen handful, since "rarest" is a tie-break between equally common
+    //    words. Skipping words that appear in many paragraphs was tried next and
+    //    broke the opposite case, a draft that repeats itself throughout, where
+    //    every word is common and nothing was indexed at all. Capping each list
+    //    instead keeps the work per paragraph bounded while still finding repeats
+    //    wherever they are.
+    const wordSets = paragraphs.map((paragraph) => contentWords(paragraph));
+    const byWord = new Map();
+    for (const [index, paragraph] of paragraphs.entries()) {
+        if (repeatedIdeas >= perCheck)
             break;
         if (paragraph.tokens.length < MIN_PARAGRAPH_WORDS)
             continue;
-        const words = contentWords(paragraph);
-        for (const previous of seenParagraphs) {
+        const words = wordSets[index];
+        const candidates = new Set();
+        for (const word of words) {
+            for (const candidate of byWord.get(word) ?? [])
+                candidates.add(candidate);
+        }
+        for (const previous of candidates) {
             const overlap = jaccard(words, previous.words);
             if (overlap >= 0.55) {
                 const topic = sharedTopicWords(words, previous.words);
+                repeatedIdeas += 1;
                 pushIssue(issues, makeIssue("structure-note-repeated-idea", paragraph.start, Math.min(paragraph.end, paragraph.start + 90), text.slice(paragraph.start, Math.min(paragraph.end, paragraph.start + 90)), "", "fluency", "low", "Repeated idea", `What Draftwise noticed: this paragraph covers nearly the same ground as an earlier one${topic.length ? `, sharing ${topic.map((word) => `“${word}”`).join(" and ")}` : ""}. Why it may matter: readers who already read the earlier point lose momentum here. Consider either cutting this paragraph, or keeping only the sentence that adds new evidence or a new angle.`, 0.6, preferences));
                 break;
             }
         }
-        seenParagraphs.push({ paragraph, words });
+        const entry = { words };
+        for (const word of words) {
+            const bucket = byWord.get(word);
+            if (!bucket)
+                byWord.set(word, [entry]);
+            else if (bucket.length < COMMON_WORD_PARAGRAPH_LIMIT)
+                bucket.push(entry);
+        }
     }
     // 2. Unsupported claim: strong claim language in a paragraph with no
     //    supporting marker anywhere in it.
     if (formalRegister) {
         for (const paragraph of paragraphs) {
-            if (issues.length >= MAX_STRUCTURAL_NOTES)
+            if (unsupportedClaims >= perCheck)
                 break;
             const lower = paragraph.text.toLocaleLowerCase();
             const claim = paragraph.tokens.find((token) => CLAIM_MARKERS.has(token.lower));
@@ -1511,6 +1582,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
                 continue;
             if (SUPPORT_MARKERS.some((marker) => lower.includes(marker)))
                 continue;
+            unsupportedClaims += 1;
             pushIssue(issues, makeIssue("structure-note-unsupported-claim", claim.start, claim.end, claim.value, "", "clarity", "low", "Claim without support", `What Draftwise noticed: this passage asserts that “${claim.value}” holds without saying why. Why it may matter: an unsupported claim is where a sceptical reader stops trusting the argument. Consider adding one sentence of evidence or a worked example right after this claim.`, 0.55, preferences));
         }
     }
@@ -1518,11 +1590,12 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
     //    point instead of qualifying it.
     if (formalRegister) {
         for (const paragraph of paragraphs) {
-            if (issues.length >= MAX_STRUCTURAL_NOTES)
+            if (hedgedParagraphs >= perCheck)
                 break;
             const hedges = paragraph.tokens.filter((token) => HEDGE_WORDS.has(token.lower));
             if (hedges.length < 3)
                 continue;
+            hedgedParagraphs += 1;
             pushIssue(issues, makeIssue("structure-note-hedging", hedges[0].start, hedges[0].end, hedges[0].value, "", "tone", "low", "Stacked hedges", `What Draftwise noticed: this passage qualifies itself ${hedges.length} times (“${hedges.slice(0, 3).map((token) => token.value).join("”, “")}”). Why it may matter: stacked hedges read as doubt rather than care, and weaken a point the writer may actually hold confidently. Consider keeping the single strongest qualifier and removing the rest.`, 0.55, preferences));
         }
     }
@@ -1539,7 +1612,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
     }
     // 5. Weak transition: a paragraph opening on a bare connector or dangling
     //    "This…" after a paragraph about something else.
-    for (let index = 1; index < paragraphs.length && issues.length < MAX_STRUCTURAL_NOTES; index += 1) {
+    for (let index = 1; index < paragraphs.length && abruptTransitions < perCheck; index += 1) {
         const paragraph = paragraphs[index];
         const first = paragraph.tokens[0];
         if (!first)
@@ -1557,6 +1630,7 @@ function findDocumentStructure(text, preferences, goals, document = parseDocumen
         const bridging = previousWords.has(followWord) || jaccard(previousWords, currentWords) > 0.2;
         if (bridging)
             continue;
+        abruptTransitions += 1;
         pushIssue(issues, makeIssue("structure-note-weak-transition", first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end, text.slice(first.start, paragraph.tokens[Math.min(2, paragraph.tokens.length - 1)].end), "", "fluency", "low", "Abrupt transition", `What Draftwise noticed: “${opener.trim().split(/\s+/u).slice(0, 3).join(" ")}…” opens on a subject the previous paragraph never introduced. Why it may matter: the reader has to guess the connection instead of following it. Consider naming the link in the first few words — what this paragraph is reacting to, or how it relates to the one above.`, 0.5, preferences));
     }
     return issues;
@@ -2943,11 +3017,51 @@ function frequency(values, limit = 8) {
     const counts = new Map();
     for (const value of values)
         counts.set(value, (counts.get(value) ?? 0) + 1);
+    return rankByCount(counts, limit);
+}
+function rankByCount(counts, limit = 8) {
     return [...counts.entries()]
         .filter(([, count]) => count > 1)
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, limit)
         .map(([value, count]) => ({ value, count }));
+}
+/**
+ * Hard ceiling on how many distinct bigrams are tracked.
+ *
+ * Every entry is a string plus a Map slot, so on a very long draft this is the
+ * single largest allocation in the analysis. Past the ceiling, only bigrams
+ * already being tracked keep counting; new ones are dropped. This bounds the
+ * cost without changing results for documents of any realistic length, and a
+ * phrase first seen after the ceiling simply is not counted a second time.
+ */
+const MAX_TRACKED_BIGRAMS = 20_000;
+/**
+ * Word pairs that repeat, restricted to pairs carrying at least one content
+ * word.
+ *
+ * Counting every adjacent pair built a map of tens of thousands of entries on
+ * a long draft — "of the", "in a", "it is" — and none of those is a repeated
+ * phrase in any sense a writer would recognise. Requiring a content word keeps
+ * the same useful results for a fraction of the memory, and makes the reported
+ * phrases better advice.
+ */
+function repeatedPhraseCounts(sentences) {
+    const counts = new Map();
+    for (const sentence of sentences) {
+        const tokens = sentence.tokens;
+        for (let index = 0; index + 1 < tokens.length; index += 1) {
+            const first = tokens[index].lower;
+            const second = tokens[index + 1].lower;
+            if (COMMON_WORDS.has(first) && COMMON_WORDS.has(second))
+                continue;
+            const key = `${first} ${second}`;
+            if (!counts.has(key) && counts.size >= MAX_TRACKED_BIGRAMS)
+                continue;
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+    }
+    return counts;
 }
 function getWritingStats(text, document = parseDocument(text)) {
     const tokens = document.tokens;
@@ -2962,7 +3076,7 @@ function getWritingStats(text, document = parseDocument(text)) {
         : 0;
     const sentenceWordValues = sentences.flatMap((sentence) => sentence.tokens.map((token) => token.lower));
     const repeatedWords = frequency(sentenceWordValues.filter((word) => !COMMON_WORDS.has(word)));
-    const repeatedPhrases = frequency(sentences.flatMap((sentence) => sentence.tokens.slice(0, -1).map((token, index) => `${token.lower} ${sentence.tokens[index + 1].lower}`)));
+    const repeatedPhrases = rankByCount(repeatedPhraseCounts(sentences));
     const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
     const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
     const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] });
@@ -3010,22 +3124,77 @@ function inferTone(text, document = parseDocument(text)) {
 function scoreContribution(score, summary, signals) {
     return { score, summary, signals: signals.slice(0, 4) };
 }
-function weightedIssuePenalty(issues, categories, scale) {
+/**
+ * Severity-and-confidence weight of the findings in a set of categories.
+ *
+ * Separated from the penalty itself so the penalty can decide how much weight
+ * a finding carries at a given document length.
+ */
+function weightedIssueSum(issues, categories) {
     const categorySet = new Set(categories);
     return issues.reduce((total, issue) => {
         if (!categorySet.has(issue.category))
             return total;
         const severity = issue.severity === "high" ? 1.8 : issue.severity === "medium" ? 1.1 : 0.45;
         const confidence = Number.isFinite(issue.confidence) ? Math.max(0, Math.min(1, issue.confidence)) : 0.5;
-        return total + severity * confidence * scale;
+        return total + severity * confidence;
     }, 0);
+}
+/**
+ * How far a category's findings push its score down.
+ *
+ * The penalty is driven by the *rate* of findings, not their number. An earlier
+ * version summed an absolute penalty per finding, which meant a long draft paid
+ * for every word it contained: at a constant error rate, correctness fell from
+ * 93 on a 170-word draft to 0 on a 3,400-word one and stayed pinned at 0 after
+ * that, however much worse the writing became. Length-normalising makes a
+ * score mean the same thing at 200 words and at 20,000.
+ *
+ * Rate alone is not enough, because a long document can hide a lot of work: 80
+ * typos spread across 13,000 words is a modest *rate* and a great deal of
+ * *work*. So the absolute count is compared as well and the harsher of the two
+ * wins. A short draft with a handful of slips therefore still reads as nearly
+ * clean, and a long one carrying hundreds of them does not read as fine.
+ *
+ * `halfPoint` is the rate, in weighted findings per 1,000 words, at which this
+ * category has given up half of its `maxPenalty`.
+ */
+function issuePenalty(issues, categories, maxPenalty, words, halfPoint, absoluteHalfPoint = 250) {
+    const weighted = weightedIssueSum(issues, categories);
+    if (weighted <= 0 || words <= 0)
+        return 0;
+    const perThousand = weighted / (words / 1000);
+    const byRate = perThousand / (perThousand + halfPoint);
+    const byVolume = weighted / (weighted + absoluteHalfPoint);
+    return maxPenalty * Math.max(byRate, byVolume);
+}
+/** The rate behind a score, so a dimension can explain itself in words. */
+function findingsPerThousand(issues, categories, words) {
+    if (words <= 0)
+        return 0;
+    return weightedIssueSum(issues, categories) / (words / 1000);
 }
 function goalAlignmentEstimate(text, stats, goals, document = parseDocument(text)) {
     if (!goals || !stats.words)
         return goals ? 60 : 0;
-    const lower = text.toLocaleLowerCase();
     const words = document.tokens.map((token) => token.lower);
-    const markerScore = (markers) => markers.reduce((count, marker) => count + (lower.includes(marker) ? 1 : 0), 0);
+    // Markers are matched on word boundaries and scored as a *rate*.
+    //
+    // Two things were wrong before. Matching was plain substring, so the inform
+    // intent was satisfied by "is" sitting inside "this", "his" or "decision" —
+    // the dimension scored full marks on almost any English sentence. And scoring
+    // counted whether a marker appeared *anywhere*, so once a draft ran past a
+    // few hundred words every marker had appeared somewhere and the estimate
+    // stopped telling one long draft from another. A rate per 1,000 words holds
+    // its meaning at any length.
+    const markerRate = (markers) => {
+        let hits = 0;
+        for (const marker of markers) {
+            const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/gu, "\\s+");
+            hits += (text.match(new RegExp(`\\b${escaped}\\b`, "giu")) ?? []).length;
+        }
+        return hits / (stats.words / 1000);
+    };
     const audienceMarkers = {
         academic: ["research", "evidence", "study", "analysis", "method", "findings", "citation"],
         professional: ["project", "client", "team", "recommend", "next step", "deliver", "decision"],
@@ -3053,10 +3222,10 @@ function goalAlignmentEstimate(text, stats, goals, document = parseDocument(text
     const persuasionMarkers = ["should", "recommend", "benefit", "need", "best", "must", "support"];
     const narrativeMarkers = ["then", "suddenly", "before", "after", "felt", "said", "walked", "story"];
     const terminology = new Set(["api", "system", "data", "method", "model", "function", "configuration", "implementation", "test", "code", "evidence", "citation"]);
-    const audience = Math.min(24, markerScore(audienceMarkers[goals.audience]) * 4);
+    const audience = Math.min(24, markerRate(audienceMarkers[goals.audience]) * 1.2);
     const intentMarkersForGoal = goals.intent === "inform" ? intentMarkers.inform.concat(evidenceMarkers) : goals.intent === "explain" ? intentMarkers.explain.concat(explanationMarkers) : goals.intent === "persuade" ? intentMarkers.persuade.concat(persuasionMarkers) : goals.intent === "story" ? intentMarkers.story.concat(narrativeMarkers) : intentMarkers.describe;
-    const intent = Math.min(24, markerScore(intentMarkersForGoal) * 3.2);
-    const tone = Math.min(24, markerScore(toneMarkers[goals.tone]) * 4);
+    const intent = Math.min(24, markerRate(intentMarkersForGoal) * 1);
+    const tone = Math.min(24, markerRate(toneMarkers[goals.tone]) * 1.2);
     const sentenceMidpoint = { academic: 24, professional: 18, technical: 20, casual: 13, general: 17 };
     const sentenceFit = Math.max(0, 10 - Math.abs(stats.averageSentenceLength - sentenceMidpoint[goals.audience]) * 0.55);
     const terminologyDensity = words.filter((word) => terminology.has(word)).length / Math.max(1, words.length);
@@ -3083,20 +3252,22 @@ function engagementEstimate(text, stats, document = parseDocument(text)) {
 }
 function scoreWriting(stats, issues, goals, text = "", document) {
     const high = issues.filter((item) => item.severity === "high").length;
-    const medium = issues.filter((item) => item.severity === "medium").length;
     const hasText = stats.words > 0;
-    const correctness = hasText ? clamp(100 - weightedIssuePenalty(issues, ["spelling", "grammar", "punctuation", "capitalization"], 7.5)) : 0;
-    const clarity = hasText ? clamp(96 - weightedIssuePenalty(issues, ["clarity", "sentence structure", "passive voice"], 4.2) - Math.max(0, stats.averageSentenceLength - 24) * 1.3 - stats.passiveVoicePercentage * 0.12) : 0;
-    const conciseness = hasText ? clamp(98 - weightedIssuePenalty(issues, ["conciseness", "repetition", "word choice"], 3.2) - (stats.fillerWords / Math.max(1, stats.words)) * 180) : 0;
+    const objectiveCategories = ["spelling", "grammar", "punctuation", "capitalization"];
+    const objectiveRate = findingsPerThousand(issues, objectiveCategories, stats.words);
+    const correctness = hasText ? clamp(100 - issuePenalty(issues, objectiveCategories, 58, stats.words, 21)) : 0;
+    const clarity = hasText ? clamp(96 - issuePenalty(issues, ["clarity", "sentence structure", "passive voice"], 34, stats.words, 26) - Math.max(0, stats.averageSentenceLength - 24) * 1.3 - stats.passiveVoicePercentage * 0.12) : 0;
+    const conciseness = hasText ? clamp(98 - issuePenalty(issues, ["conciseness", "repetition", "word choice"], 30, stats.words, 30) - (stats.fillerWords / Math.max(1, stats.words)) * 180) : 0;
     const readabilityBase = Number.isFinite(stats.readability) ? stats.readability : (hasText ? 65 : 0);
     const readability = hasText ? clamp(readabilityBase) : 0;
     const analysedDocument = document ?? parseDocument(text);
     const engagement = engagementEstimate(text, stats, analysedDocument);
-    const consistency = hasText ? clamp(100 - weightedIssuePenalty(issues, ["consistency", "spelling", "capitalization"], 4.5) - Math.min(20, stats.repeatedWords.length * 1.4)) : 0;
+    const consistencyCategories = ["consistency", "spelling", "capitalization"];
+    const consistency = hasText ? clamp(100 - issuePenalty(issues, consistencyCategories, 40, stats.words, 24) - Math.min(20, stats.repeatedWords.length * 1.4)) : 0;
     const goalAlignment = goalAlignmentEstimate(text, stats, goals, analysedDocument);
     const directWords = analysedDocument.tokens.filter((token) => ["you", "your", "we", "our", "us"].includes(token.lower)).length;
     const breakdown = {
-        correctness: scoreContribution(correctness, "Based on confidence-weighted grammar, spelling, punctuation, and capitalization findings.", [`${high} high-confidence high-impact issue${high === 1 ? "" : "s"}`, `${medium} medium-severity issue${medium === 1 ? "" : "s"}`]),
+        correctness: scoreContribution(correctness, "Based on the rate of grammar, spelling, punctuation, and capitalization findings per 1,000 words, so a long draft is not penalised for being long.", [`${objectiveRate.toFixed(1)} objective findings per 1,000 words`, `${high} high-severity issue${high === 1 ? "" : "s"}`]),
         clarity: scoreContribution(clarity, "Reflects sentence structure, vague wording, passive voice, and sentence length.", [`${stats.longSentences} long sentence${stats.longSentences === 1 ? "" : "s"}`, `${stats.passiveVoicePercentage}% passive-voice estimate`]),
         conciseness: scoreContribution(conciseness, "Reflects filler words, wordiness, redundant phrases, and repetition; document length alone is not penalised.", [`${stats.fillerWords} filler-word finding${stats.fillerWords === 1 ? "" : "s"}`, `${stats.repeatedPhrases.length} repeated phrase pattern${stats.repeatedPhrases.length === 1 ? "" : "s"}`]),
         readability: scoreContribution(readability, "A transparent Flesch-style estimate, not an objective measure of quality.", [`Average sentence length: ${stats.averageSentenceLength || 0} words`, `Vocabulary diversity: ${Math.round(stats.vocabularyDiversity * 100)}%`]),

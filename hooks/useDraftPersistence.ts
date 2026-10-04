@@ -120,14 +120,13 @@ export function isClassifierSettings(value: unknown): value is ClassifierSetting
 export function isWorkspace(value: unknown): value is DraftwiseWorkspace {
   return isRecord(value)
     && value.version === 2
-    && typeof value.title === "string"
-    && typeof value.draft === "string"
     && isWritingGoals(value.goals)
     && isStylePreferences(value.style)
     && isProviderSettings(value.provider)
     && (value.classifier === undefined || isClassifierSettings(value.classifier))
     && typeof value.aiEnabled === "boolean"
-    && isOneOf(value.theme, ["light", "dark", "system"]);
+    && isOneOf(value.theme, ["light", "dark", "system"])
+    && (value.activeDocumentId === undefined || typeof value.activeDocumentId === "string");
 }
 
 function readSafely(storage: WorkspaceStorage, key: string) {
@@ -232,25 +231,24 @@ function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, un
   const fallbackClassifier = initial.classifier ?? DEFAULT_CLASSIFIER_SETTINGS;
   return {
     version: 2,
-    title: typeof value.title === "string" ? value.title : initial.title,
-    draft: typeof value.draft === "string" ? value.draft : initial.draft,
     goals: sanitiseGoals(value.goals, initial.goals ?? DEFAULT_GOALS),
     style: sanitiseStyle(value.style, initial.style ?? DEFAULT_STYLE_PREFERENCES),
     provider: sanitiseProvider(value.provider, initial.provider ?? DEFAULT_PROVIDER_SETTINGS),
     classifier: sanitiseClassifier(value.classifier, fallbackClassifier),
     aiEnabled: typeof value.aiEnabled === "boolean" ? value.aiEnabled : initial.aiEnabled,
     theme: isOneOf(value.theme, ["light", "dark", "system"]) ? value.theme : initial.theme,
+    // Legacy `title`/`draft` fields are deliberately ignored: document content
+    // lives in the document store. `activeDocumentId` is metadata only.
+    activeDocumentId: typeof value.activeDocumentId === "string" && value.activeDocumentId ? value.activeDocumentId : initial.activeDocumentId,
   };
 }
 
 export function readLegacyWorkspace(initial: DraftwiseWorkspace, storage: WorkspaceStorage): DraftwiseWorkspace {
-  const draft = readSafely(storage, "draftwise:draft");
   const goals = parseRecord(readSafely(storage, "draftwise:goals"));
   const provider = parseRecord(readSafely(storage, "draftwise:provider"));
   const theme = readSafely(storage, "draftwise:theme");
   const aiEnabled = readSafely(storage, "draftwise:ai-enabled");
   return sanitiseWorkspace(initial, {
-    draft: draft ?? initial.draft,
     goals: goals ?? initial.goals,
     provider: provider ?? initial.provider,
     theme: isOneOf(theme, ["light", "dark", "system"]) ? theme : initial.theme,

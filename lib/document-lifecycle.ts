@@ -93,7 +93,7 @@ export class DocumentLifecycle {
   }
 
   /** Load once: hydrate from storage, seeding a first document if the store is empty. */
-  load(seedOverride?: Partial<DocumentsSeed>): Promise<void> {
+  load(seedOverride?: Partial<DocumentsSeed>, preferredActiveId?: string): Promise<void> {
     if (this.loadPromise) return this.loadPromise;
     const seed: DocumentsSeed = { ...this.seed, ...seedOverride };
     this.loadPromise = (async () => {
@@ -114,9 +114,12 @@ export class DocumentLifecycle {
         return;
       }
       const ordered = [...stored].sort((left, right) => right.updatedAt - left.updatedAt);
+      // Restore the last-opened document when it still exists. "Most recently
+      // edited" is only a fallback: it is not synonymous with "last opened".
+      const preferred = preferredActiveId ? ordered.find((document) => document.id === preferredActiveId) : undefined;
       this.setState({
         documents: ordered,
-        activeId: ordered[0].id,
+        activeId: preferred?.id ?? ordered[0].id,
         hydrated: true,
       });
     })();
@@ -223,20 +226,63 @@ export class DocumentLifecycle {
     return copy;
   }
 
-  remove(id: string) {
+  /**
+   * Durable deletion. The document disappears from the in-memory list at once
+   * and a pending write for it is cancelled, but the storage deletion is
+   * tracked: on failure the id stays queued for retry and the state reports
+   * the error, so a "deleted" document can never silently reappear after
+   * reload without the writer knowing.
+   */
+  remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
     this.pending.delete(id);
     const next = this.state.documents.filter((document) => document.id !== id);
     const removedActive = id === this.state.activeId;
+    let statePatch: Partial<DocumentLifecycleState>;
     if (next.length === 0) {
-      // The editor must always have a real document behind it.
+      // The editor must always have a real document behind it. The fresh
+      // document is a new identity: the deleted one is not resurrected.
       const fresh = createDocument("Untitled draft", "");
-      this.setState({ documents: [fresh], activeId: fresh.id });
+      statePatch = { documents: [fresh], activeId: fresh.id };
+      this.setState(statePatch);
       this.queueWrite(fresh);
-      void this.backend.remove(id);
-      return;
+    } else {
+      statePatch = { documents: next, activeId: removedActive ? next[0].id : this.state.activeId };
+      this.setState(statePatch);
     }
-    this.setState({ documents: next, activeId: removedActive ? next[0].id : this.state.activeId });
-    void this.backend.remove(id);
+    return this.backend.remove(id).then(
+      () => {
+        this.pendingDeletions.delete(id);
+        return { ok: true as const };
+      },
+      (error: unknown) => {
+        // Keep the deletion queued: retrying is the writer's only path back to
+        // a truthful state, and the reload path honours the queue too.
+        this.pendingDeletions.add(id);
+        this.setState({ saveStatus: "error" });
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not delete the document from local storage." };
+      },
+    );
+  }
+
+  /** Ids whose storage deletion failed and is waiting to be retried. */
+  private pendingDeletions = new Set<string>();
+
+  hasPendingDeletions() {
+    return this.pendingDeletions.size > 0;
+  }
+
+  /** Retry every failed deletion, e.g. from the save pathway. */
+  async retryDeletions(): Promise<{ ok: true } | { ok: false; error: string }> {
+    let firstError: string | null = null;
+    for (const id of [...this.pendingDeletions]) {
+      try {
+        await this.backend.remove(id);
+        this.pendingDeletions.delete(id);
+      } catch (error) {
+        firstError ??= error instanceof Error ? error.message : "Could not delete the document from local storage.";
+      }
+    }
+    return firstError ? { ok: false as const, error: firstError } : { ok: true as const };
   }
 
   saveSnapshot(reason: DocumentSnapshot["reason"] = "manual"): boolean {

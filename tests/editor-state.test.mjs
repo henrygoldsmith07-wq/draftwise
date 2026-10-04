@@ -9,7 +9,9 @@ const settingsUrl = new URL("../components/draftwise/ProviderSettingsDialog.tsx"
 test("new drafts require confirmation and start their own history", async () => {
   const page = await readFile(pageUrl, "utf8");
   assert.match(page, /Start a new draft\?/u);
-  assert.match(page, /if \(!workspace\.draft\.trim\(\)\)/u);
+  // The draft guard reads the document store: document content is the store's
+  // exclusive domain, never workspace state.
+  assert.match(page, /if \(!\(documents\.active\?\.draft \?\? ""\)\.trim\(\)\)/u);
   const start = page.match(/const startNewDocument = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
   assert.ok(start);
   // The new document opens its own history from its blank text: the previous

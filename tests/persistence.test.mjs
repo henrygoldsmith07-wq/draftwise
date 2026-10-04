@@ -12,29 +12,34 @@ function storage(seed = {}) {
   };
 }
 
-test("versioned persistence hydrates the saved draft instead of the initial draft", () => {
-  const initial = DEFAULT_WORKSPACE("initial draft");
-  const saved = { ...initial, version: 2, title: "Saved", draft: "saved draft", aiEnabled: true };
+test("versioned persistence hydrates saved configuration and ignores legacy document content", () => {
+  const initial = DEFAULT_WORKSPACE();
+  const saved = { ...initial, version: 2, title: "Saved", draft: "saved draft", aiEnabled: true, activeDocumentId: "doc-42" };
   const loaded = readWorkspaceFromStorage(initial, storage({ "draftwise:workspace:v2": JSON.stringify(saved) }));
-  assert.equal(loaded.draft, "saved draft");
-  assert.equal(loaded.title, "Saved");
+  // Document content lives in the document store; workspace persistence holds
+  // global configuration plus the last-opened document id only.
   assert.equal(loaded.aiEnabled, true);
+  assert.equal(loaded.activeDocumentId, "doc-42");
+  assert.equal("draft" in loaded, false);
+  assert.equal("title" in loaded, false);
 });
 
 test("legacy split keys migrate without crashing on malformed optional values", () => {
-  const initial = DEFAULT_WORKSPACE("initial draft");
+  const initial = DEFAULT_WORKSPACE();
   const loaded = readWorkspaceFromStorage(initial, storage({
     "draftwise:draft": "legacy draft",
     "draftwise:goals": "{not-json",
     "draftwise:ai-enabled": "true",
   }));
-  assert.equal(loaded.draft, "legacy draft");
+  // The legacy draft key is document content and is no longer read into the
+  // workspace; configuration still migrates safely.
+  assert.equal("draft" in loaded, false);
   assert.equal(loaded.aiEnabled, true);
   assert.equal(loaded.goals.audience, initial.goals.audience);
 });
 
 test("partially corrupted versioned workspaces keep valid fields and default invalid fields", () => {
-  const initial = DEFAULT_WORKSPACE("initial draft");
+  const initial = DEFAULT_WORKSPACE();
   const loaded = readWorkspaceFromStorage(initial, storage({
     "draftwise:workspace:v2": JSON.stringify({
       version: "old",
@@ -48,8 +53,8 @@ test("partially corrupted versioned workspaces keep valid fields and default inv
       theme: "neon",
     }),
   }));
-  assert.equal(loaded.title, "Valid title");
-  assert.equal(loaded.draft, "Valid draft");
+  assert.equal("title" in loaded, false);
+  assert.equal("draft" in loaded, false);
   assert.equal(loaded.goals.audience, "academic");
   assert.equal(loaded.goals.intent, initial.goals.intent);
   assert.equal(loaded.style.dialect, initial.style.dialect);
@@ -62,7 +67,7 @@ test("partially corrupted versioned workspaces keep valid fields and default inv
 });
 
 test("invalid JSON, unexpected shapes, and incorrect arrays never escape the migration boundary", () => {
-  const initial = DEFAULT_WORKSPACE("initial draft");
+  const initial = DEFAULT_WORKSPACE();
   for (const value of ["{not-json", "[]", "null", JSON.stringify({ goals: [], style: {}, provider: [] })]) {
     const loaded = readWorkspaceFromStorage(initial, storage({ "draftwise:workspace:v2": value }));
     assert.ok(isWorkspace(loaded));
@@ -76,7 +81,7 @@ test("runtime validators reject malformed classifier settings", () => {
 });
 
 test("failed local writes return an error instead of a false saved state", () => {
-  const initial = DEFAULT_WORKSPACE("draft");
+  const initial = DEFAULT_WORKSPACE();
   const result = writeWorkspaceToStorage(initial, {
     ...storage(),
     setItem() {
@@ -123,21 +128,23 @@ test("clear attempts every Draftwise key even when one removal fails", () => {
 });
 
 
-test("corrupt versioned storage falls back to recoverable legacy data", () => {
-  const initial = DEFAULT_WORKSPACE("initial draft");
+test("corrupt versioned storage falls back to recoverable legacy configuration", () => {
+  const initial = DEFAULT_WORKSPACE();
   const loaded = readWorkspaceFromStorage(initial, storage({
     [WORKSPACE_STORAGE_KEY]: "{not-json",
     "draftwise:draft": "legacy recovery draft",
     "draftwise:ai-enabled": "true",
   }));
-  assert.equal(loaded.draft, "legacy recovery draft");
+  // Legacy document content stays in the document store; configuration still
+  // recovers from the legacy keys.
+  assert.equal("draft" in loaded, false);
   assert.equal(loaded.aiEnabled, true);
 });
 
 test("pre-hydration edits win over a late local-storage read", () => {
-  const initial = DEFAULT_WORKSPACE("initial");
-  const current = { ...initial, draft: "typed before hydration" };
-  const loaded = { ...initial, draft: "older saved draft" };
-  assert.equal(resolveHydratedWorkspace(current, loaded, true).draft, "typed before hydration");
-  assert.equal(resolveHydratedWorkspace(current, loaded, false).draft, "older saved draft");
+  const initial = DEFAULT_WORKSPACE();
+  const current = { ...initial, activeDocumentId: "typed-before-hydration" };
+  const loaded = { ...initial, activeDocumentId: "older-saved-id" };
+  assert.equal(resolveHydratedWorkspace(current, loaded, true).activeDocumentId, "typed-before-hydration");
+  assert.equal(resolveHydratedWorkspace(current, loaded, false).activeDocumentId, "older-saved-id");
 });

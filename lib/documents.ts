@@ -382,10 +382,32 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
   }
 
   async remove(id: string): Promise<void> {
+    // Deletion has the same honesty guarantee as writes: failure propagates so
+    // the caller can report it and retry. A swallowed failure here is exactly
+    // how a "deleted" document reappears after reload.
     try {
       await this.current.remove(id);
     } catch (error) {
       if (this.current === this.memory) throw error;
+      // Try the remaining tiers before reporting failure: the document may
+      // have been demoted at some point and exist in a lower tier.
+      if (this.storage) {
+        try {
+          const localTier = new LocalStorageDocumentBackend(this.storage, this.fallbackKey);
+          await localTier.remove(id);
+          this.current = localTier;
+          return;
+        } catch {
+          // fall through to memory attempt below
+        }
+      }
+      try {
+        await this.memory.remove(id);
+        if (this.current === this.memory) return;
+      } catch {
+        // nothing left to try
+      }
+      throw error;
     }
   }
 

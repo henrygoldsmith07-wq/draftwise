@@ -1,0 +1,11 @@
+import { chromium } from "@playwright/test";
+const browser = await chromium.launch();
+const page = await browser.newPage();
+page.on("pageerror", (e) => console.log("PAGEERROR:", e.stack ? e.stack.slice(0, 900) : String(e)));
+await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded", timeout: 60000 });
+await page.evaluate(() => { indexedDB.deleteDatabase("draftwise-documents"); localStorage.clear(); });
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForTimeout(9000);
+await page.getByLabel("Draft editor").fill("ALPHA-TYPED-TEXT");
+await page.waitForTimeout(1500);
+await browser.close();

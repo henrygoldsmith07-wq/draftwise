@@ -388,16 +388,21 @@ export interface TriageMetrics {
   classifierRetryDelayMs: number;
 }
 
+/**
+ * Workspace configuration: genuinely global preferences only. Document content
+ * (title, draft, timestamps, snapshots) lives exclusively in DocumentLifecycle's
+ * document store — never duplicated here. `activeDocumentId` is lightweight
+ * metadata so reopening Draftwise restores the last-opened document.
+ */
 export interface DraftwiseWorkspace {
   version: 2;
-  title: string;
-  draft: string;
   goals: WritingGoals;
   style: StylePreferences;
   provider: ProviderSettings;
   classifier?: ClassifierSettings;
   aiEnabled: boolean;
   theme: "light" | "dark" | "system";
+  activeDocumentId?: string;
 }
 
 export const DEFAULT_GOALS: WritingGoals = {
@@ -451,14 +456,13 @@ export const TRIAGE_CATEGORIES: TriageCategory[] = [
   "other",
 ];
 
-export const DEFAULT_WORKSPACE = (draft: string): DraftwiseWorkspace => ({
+export const DEFAULT_WORKSPACE = (): DraftwiseWorkspace => ({
   version: 2,
-  title: "Untitled draft",
-  draft,
   goals: DEFAULT_GOALS,
   style: DEFAULT_STYLE_PREFERENCES,
   provider: DEFAULT_PROVIDER_SETTINGS,
   classifier: DEFAULT_CLASSIFIER_SETTINGS,
   aiEnabled: false,
   theme: "system",
+  activeDocumentId: undefined,
 });

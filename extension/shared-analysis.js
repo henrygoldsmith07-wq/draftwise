@@ -2339,13 +2339,6 @@ function resolveInconsistency(families, minimumDominance = 2) {
         return null;
     return { keep, flag, keepCount: keepEntries.length, flagCount: flagEntries.length };
 }
-/**
- * Find terminology that drifts across a document.
- *
- * Only the minority form is ever flagged, and every finding names the form the
- * writer used more, so applying a fix moves the document toward its own
- * established voice rather than toward a style guide it never chose.
- */
 function findConsistencyIssues(text, preferences, document = parseDocument(text)) {
     const issues = [];
     const claimed = new Uint8Array(text.length);
@@ -2456,30 +2449,6 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
         void key;
     }
     return issues;
-}
-/** Summarise what the consistency pass checked, for display in the UI. */
-function summariseConsistency(issues) {
-    const byKind = new Map();
-    const described = new Set();
-    for (const issue of issues) {
-        const match = /This draft uses “([^”]+)” (\d+) times and “([^”]+)” \d+ times/u.exec(issue.explanation);
-        const percentage = /This draft mostly writes “([^”]+)” but also/u.exec(issue.explanation);
-        const synonyms = /This draft uses “([^”]+)” (\d+) times and/u.exec(issue.explanation);
-        if (!described.has(issue.ruleId)) {
-            described.add(issue.ruleId);
-            if (match)
-                byKind.set(issue.ruleId, { keep: match[1], flag: match[3], keepCount: Number(match[2]), flagCount: 0 });
-            else if (percentage)
-                byKind.set(issue.ruleId, { keep: percentage[1], flag: "", keepCount: 0, flagCount: 0 });
-            else if (synonyms)
-                byKind.set(issue.ruleId, { keep: synonyms[1], flag: synonyms[3], keepCount: Number(synonyms[2]), flagCount: 0 });
-        }
-    }
-    return {
-        families: byKind.size,
-        issues: issues.length,
-        findings: [...byKind.entries()].map(([ruleId, value]) => ({ kind: ruleId, ...value })),
-    };
 }
 const OBJECTIVE_CATEGORIES = new Set(["spelling", "grammar", "punctuation", "capitalization"]);
 const STYLE_RULE_PREFIXES = ["style-", "punctuation-oxford-comma"];

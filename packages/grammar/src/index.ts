@@ -172,5 +172,4 @@ export { buildAction, buildExplanation, explainRanking, explainRelevance } from 
 export type { ContextualExplanation } from "./explain.ts";
 // Document-wide consistency: only flags a form the writer used less often, and
 // only when the document actually mixes variants.
-export { findConsistencyIssues, summariseConsistency } from "./consistency.ts";
-export type { ConsistencyReport } from "./consistency.ts";
+export { findConsistencyIssues } from "./consistency.ts";

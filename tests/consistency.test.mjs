@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
-import { findConsistencyIssues, summariseConsistency } from "../packages/grammar/src/consistency.ts";
+import { findConsistencyIssues } from "../packages/grammar/src/consistency.ts";
 import { DEFAULT_GOALS, DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
 
 const style = DEFAULT_STYLE_PREFERENCES;
@@ -185,19 +185,6 @@ test("a clean, consistent draft produces no consistency noise at all", () => {
     "The chair will record any remaining disagreement in the minutes.",
   );
   assert.deepEqual(consistencyIssues(text), []);
-});
-
-test("the consistency summary reports what was checked", () => {
-  const text = paragraph(
-    "The organisation published guidance.",
-    "The organisation meets monthly.",
-    "The organisation has three teams.",
-    "The organization will publish next quarter.",
-  );
-  const report = summariseConsistency(findConsistencyIssues(text, style));
-  assert.ok(report.issues >= 1);
-  assert.ok(report.families >= 1);
-  assert.ok(report.findings.every((entry) => entry.kind.startsWith("consistency-")));
 });
 
 test("consistency checking stays local and deterministic", () => {

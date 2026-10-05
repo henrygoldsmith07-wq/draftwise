@@ -74,6 +74,26 @@ test("extension manifest keeps host access optional and includes generated share
   await readFile(file("extension/permissions.js"), "utf8");
 });
 
+test("generated bundles declare each top-level name once", () => {
+  // The bundler concatenates the grammar modules into a single scope and
+  // strips `export`. Two modules that pick the same top-level name therefore
+  // collide, and a duplicated `const` is a SyntaxError that makes the whole
+  // bundle fail to parse. `lexicon.ts` and `consistency.ts` both had a
+  // `COMMON_WORDS` once, which took the service worker down.
+  //
+  // The runtime test below catches this too, but only after every other test in
+  // the file has run, so this check names the offenders directly.
+  for (const bundle of ["shared-analysis.js", "shared-provider.js"]) {
+    const source = readFileSync(new URL(`../extension/${bundle}`, import.meta.url), "utf8");
+    const counts = new Map();
+    for (const match of source.matchAll(/^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gmu)) {
+      counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+    }
+    const collisions = [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+    assert.deepEqual(collisions, [], `${bundle} declares the same name more than once`);
+  }
+});
+
 test("generated bundles load at runtime and the service worker starts without reference errors", async () => {
   const runtime = browserLikeContext();
   assert.doesNotThrow(() => vm.runInNewContext(readFileSync(file("extension/shared-analysis.js"), "utf8"), runtime.context, { filename: "shared-analysis.js" }));

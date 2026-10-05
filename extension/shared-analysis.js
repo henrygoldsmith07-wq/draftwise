@@ -2564,7 +2564,7 @@ function resolveInconsistency(families, minimumDominance = 2) {
  * compared every occurrence rather than only the capitalised ones, that made
  * it report "the" -> "The" across ordinary prose.
  */
-const COMMON_WORDS = new Set([
+const NON_NAME_WORDS = new Set([
     "the", "and", "that", "have", "for", "not", "with", "you", "this", "but",
     "his", "from", "they", "say", "her", "she", "will", "one", "all", "would",
     "there", "their", "what", "out", "about", "who", "get", "which", "when",
@@ -2685,7 +2685,7 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
         // the comment above unreachable) also starts reporting "the" -> "The" in any
         // document that opens sentences with an article, so ordinary English words
         // are excluded outright.
-        if (COMMON_WORDS.has(key))
+        if (NON_NAME_WORDS.has(key))
             continue;
         // Group every occurrence, not just the capitalised ones. Building the map
         // from `capitalised` alone meant every key was already capitalised, so the

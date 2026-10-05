@@ -56,6 +56,19 @@ test("article agreement does not shout the replacement", () => {
   assert.deepEqual(shouty.map((issue) => issue.replacement), [], "a correct article is not reported");
 });
 
+test("repetition does not report correct English", () => {
+  const repeated = (text) => analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "repetition-adjacent-word").map((issue) => issue.original);
+  assert.deepEqual(repeated("She had had enough coffee."), [], "had had is the perfect construction");
+  assert.deepEqual(repeated("It is very very cold outside."), [], "a doubled intensifier is deliberate");
+  assert.deepEqual(repeated("No no, that is wrong."), [], "reduplicatives are ordinary English");
+  // "The the" is caught by the more specific duplicate-determiner rule, which
+  // claims the range first. It flags the second determiner for deletion.
+  const doubled = analyzeLocally("The the report arrived.", style).issues.filter((issue) => issue.ruleId === "grammar-duplicate-determiner");
+  assert.equal(doubled.length, 1, "a genuine doubled word is still reported");
+  assert.equal(doubled[0].original, "The");
+  assert.equal(doubled[0].replacement, "", "the repeated determiner is the one to delete");
+});
+
 test("metre/meter is left alone because the homograph cannot be resolved", () => {
   // "A parking meter" is "meter" in British English too. Rewriting it to
   // "metre" is not a dialect preference, it is wrong.

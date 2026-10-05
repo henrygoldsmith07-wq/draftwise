@@ -45,7 +45,7 @@ const SPELLING_VARIANTS: string[][] = [
  * which is how a consistency rule starts producing ungrammatical text.
  */
 const SYNONYM_FAMILIES: string[][] = [
-  ["utilise", "utilize", "use"], ["utilisation", "utilization"], ["utilises", "utilizes"],
+  ["utilise", "utilize"], ["utilisation", "utilization"], ["utilises", "utilizes"],
   ["whilst", "while"], ["purchase", "buy"], ["purchase", "procure"], ["assist", "help"], ["attempt", "try"],
   ["acknowledgement", "acknowledgment"], ["judgement", "judgment"], ["enrolment", "enrollment"],
   ["fulfilment", "fulfillment"], ["instalment", "installment"], ["skilful", "skillful"],
@@ -79,6 +79,9 @@ const WORDY_VARIANTS: Array<[string, string]> = [
   ["has the ability to", "can"], ["make a decision", "decide"],
   ["provide assistance", "help"], ["in close proximity", "near"],
   ["at this point in time", "now"],
+  // Both -ise spellings are the long way round "use"; they are still compared
+  // with each other above as a dialect pair.
+  ["utilise", "use"], ["utilize", "use"],
 ];
 
 /** British and American -ise/-ize endings, checked only when both appear. */
@@ -110,6 +113,8 @@ interface Occurrence {
   start: number;
   end: number;
   value: string;
+  /** True when the token opens a sentence, where a capital is expected anyway. */
+  sentenceInitial?: boolean;
 }
 
 function countForms(text: string, forms: string[]): Map<string, Occurrence[]> {
@@ -144,6 +149,26 @@ function resolveInconsistency(
   if (keepEntries.length <= flagEntries.length) return null;
   return { keep, flag, keepCount: keepEntries.length, flagCount: flagEntries.length };
 }
+
+/**
+ * The most frequent English words, which can never be a mis-capitalised name.
+ *
+ * "The" opens most sentences in most documents. Once the capitalisation check
+ * compared every occurrence rather than only the capitalised ones, that made
+ * it report "the" -> "The" across ordinary prose.
+ */
+const COMMON_WORDS = new Set([
+  "the", "and", "that", "have", "for", "not", "with", "you", "this", "but",
+  "his", "from", "they", "say", "her", "she", "will", "one", "all", "would",
+  "there", "their", "what", "out", "about", "who", "get", "which", "when",
+  "make", "can", "like", "time", "just", "him", "know", "take", "people",
+  "into", "year", "your", "good", "some", "could", "them", "see", "other",
+  "than", "then", "now", "look", "only", "come", "its", "over", "think",
+  "also", "back", "after", "use", "two", "how", "our", "work", "first",
+  "well", "way", "even", "new", "want", "because", "any", "these", "give",
+  "day", "most", "was", "were", "been", "has", "had", "are", "was", "did",
+  "does", "but", "its", "it's", "being", "from", "where", "while", "should",
+]);
 
 export function findConsistencyIssues(
   text: string,
@@ -282,11 +307,12 @@ export function findConsistencyIssues(
   //    used as a name first: if the same letters appear mostly in lower case it
   //    is an ordinary word ("may", "us", "will"), and flagging its capitalisation
   //    would be wrong rather than helpful.
+  const sentenceStarts = new Set(document.sentences.map((sentence) => sentence.start));
   const byWord = new Map<string, Occurrence[]>();
   for (const token of document.tokens) {
     if (!/^[A-Za-z][A-Za-z'-]{2,}$/u.test(token.value)) continue;
     const list = byWord.get(token.lower) ?? [];
-    list.push({ start: token.start, end: token.end, value: token.value });
+    list.push({ start: token.start, end: token.end, value: token.value, sentenceInitial: sentenceStarts.has(token.start) });
     byWord.set(token.lower, list);
   }
   for (const [key, occurrences] of byWord) {
@@ -294,8 +320,18 @@ export function findConsistencyIssues(
     const capitalised = occurrences.filter((occurrence) => /^[A-Z]/u.test(occurrence.value));
     // Only a word the writer consistently capitalises can have its shape checked.
     if (capitalised.length < occurrences.length * 0.6) continue;
+    // ...and it has to be a word that can be a name. Grouping every occurrence
+    // (rather than only the capitalised ones, which made the lowercase case in
+    // the comment above unreachable) also starts reporting "the" -> "The" in any
+    // document that opens sentences with an article, so ordinary English words
+    // are excluded outright.
+    if (COMMON_WORDS.has(key)) continue;
+    // Group every occurrence, not just the capitalised ones. Building the map
+    // from `capitalised` alone meant every key was already capitalised, so the
+    // lowercase case in the comment above — "Acme", then "ACME", then "acme" —
+    // was unreachable and a name could never be corrected for drifting down.
     const shapes = new Map<string, Occurrence[]>();
-    for (const occurrence of capitalised) {
+    for (const occurrence of occurrences) {
       const list = shapes.get(occurrence.value) ?? [];
       list.push(occurrence);
       shapes.set(occurrence.value, list);
@@ -310,7 +346,6 @@ export function findConsistencyIssues(
       claim(occurrence.start, occurrence.end);
       pushIssue(issues, makeIssue("consistency-capitalisation", occurrence.start, occurrence.end, occurrence.value, keepShape, "consistency", "low", "Capitalisation drifts on the same name", `This name appears as “${keepShape}” ${keepEntries.length} times and as “${flagShape}” ${flagEntries.length === 1 ? "once" : `${flagEntries.length} times`} in this draft. The capitalisation is noticed before the name itself.`, 0.72, preferences));
     }
-    void key;
   }
 
   return issues;

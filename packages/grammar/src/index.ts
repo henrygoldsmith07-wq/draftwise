@@ -52,7 +52,10 @@ import {
 } from "./util.ts";
 
 export function mergeWritingIssues(issues: WritingIssue[]): WritingIssue[] {
-  return mergeAnalysisIssues(issues);
+  // Callers merge retained history with recalculated findings, and a document
+  // with no previous analysis legitimately produces an empty or absent list.
+  // Returning [] keeps a missing input from throwing inside the merge.
+  return Array.isArray(issues) ? mergeAnalysisIssues(issues) : [];
 }
 
 export function analyzeLocally(text: string, options: GrammarOptions = {}, goals?: WritingGoals) {
@@ -94,12 +97,31 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
 function expandLocalContext(text: string, start: number, end: number, contextWindow = 320) {
   const roughStart = Math.max(0, start - contextWindow);
   const roughEnd = Math.min(text.length, end + contextWindow);
+  // Find the sentence break that opens the re-analysed region.
+  //
+  // When the window holds no break, the old fallback was `start - 320`, which
+  // lands mid-word. A region that begins mid-sentence makes every `^`-anchored
+  // rule fire on the slice boundary: a one-sentence draft produced a spurious
+  // "n" -> "N" on the "n" inside "and", at an offset that pointed nowhere.
+  //
+  // So widen the search rather than trusting the window. A region that starts
+  // at a real sentence boundary is the only start where `^` means anything.
+  const prefix = text.slice(0, Math.max(roughStart, start));
   const leftMatches = [...text.slice(0, roughStart).matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
   const left = leftMatches[leftMatches.length - 1];
-  const safeStart = left && left.index !== undefined ? left.index + left[0].length : roughStart;
+  const safeStart = left && left.index !== undefined
+    ? left.index + left[0].length
+    : lastSentenceBreak(prefix);
   const right = text.slice(roughEnd).match(/[.!?…](?:\s|$)|\n\s*/u);
   const safeEnd = right?.index !== undefined ? roughEnd + right.index + right[0].length : roughEnd;
   return { start: Math.min(safeStart, start), end: Math.max(Math.min(text.length, safeEnd), end) };
+}
+
+/** Offset just past the last sentence break in `prefix`, or 0 when there is none. */
+function lastSentenceBreak(prefix: string) {
+  const matches = [...prefix.matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
+  const last = matches[matches.length - 1];
+  return last && last.index !== undefined ? last.index + last[0].length : 0;
 }
 
 export function detectChangedRange(previousText: string, nextText: string) {
@@ -128,15 +150,6 @@ export function analyzeLocallyIncremental(
   const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
   const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
   const delta = nextText.length - previousText.length;
-  const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
-    if (issue.start < previousRegion.end && issue.end > previousRegion.start) return [];
-    const shift = issue.start >= previousRegion.end ? delta : 0;
-    const start = issue.start + shift;
-    const end = issue.end + shift;
-    return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original
-      ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
-      : [];
-  });
   const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
   const recalculated = region.issues.map((issue) => ({
     ...issue,
@@ -144,6 +157,22 @@ export function analyzeLocallyIncremental(
     start: issue.start + nextRegion.start,
     end: issue.end + nextRegion.start,
   }));
+  // Anything the region re-derived is already accounted for.
+  const rederived = new Set(recalculated.map((issue) => `${issue.ruleId}\u0000${issue.original.toLowerCase()}`));
+  const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
+    // An issue overlapping the region was assumed to be re-derived there. It is
+    // not always: a long sentence that starts well before the region cannot be
+    // seen from a slice that begins later, so dropping it lost a real finding.
+    // Keep the candidate and let the set above decide.
+    const overlapsRegion = issue.start < previousRegion.end && issue.end > previousRegion.start;
+    if (overlapsRegion && rederived.has(`${issue.ruleId}\u0000${issue.original.toLowerCase()}`)) return [];
+    const shift = issue.start >= previousRegion.end ? delta : 0;
+    const start = issue.start + shift;
+    const end = issue.end + shift;
+    return start >= 0 && end <= nextText.length && nextText.slice(start, end) === issue.original
+      ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
+      : [];
+  });
   const issues = mergeWritingIssues([...retained, ...recalculated]);
   const document = analyzeDocument(nextText);
   const stats = getWritingStats(nextText, document);

@@ -286,7 +286,7 @@ get("grantAccess").addEventListener("click", () => { void grantSiteAccess(); });
 get("forgetKey").addEventListener("click", async () => {
   const state = await readState();
   await backgroundMessage({ type: "clear-ai-cache" });
-  await storageSet({ provider: { ...state.provider, apiKey: "" }, classifier: { ...state.classifier, apiKey: "" }, aiEnabled: false });
+  await storageSet({ provider: { ...state.provider, apiKey: "" }, classifier: { ...state.classifier, apiKey: "" }, aiEnabled: false, dismissedKeys: [] });
   get("apiKey").value = "";
   if (get("classifierKey")) get("classifierKey").value = "";
   setToggle("aiEnabled", false);

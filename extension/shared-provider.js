@@ -1368,6 +1368,18 @@ function findCapitalization(text, preferences) {
     }
     return issues;
 }
+/**
+ * Words whose immediate repetition is correct English.
+ *
+ * - "had" forms the perfect construction: she *had had* enough.
+ * - Intensifiers are routinely doubled for emphasis.
+ * - Reduplicatives are ordinary spoken English.
+ */
+const IDIOMATIC_DOUBLED_WORDS = new Set([
+    "had", "very", "really", "quite", "just", "so", "much", "such", "well",
+    "far", "long", "many", "no", "yes", "bye", "boo", "hush", "tut", "hullo",
+    "goody", "night", "gee", "ahem",
+]);
 function findRepeatedWordsAndPhrases(text, preferences, document = parseDocument(text)) {
     const issues = [];
     const tokens = document.tokens;
@@ -1375,6 +1387,12 @@ function findRepeatedWordsAndPhrases(text, preferences, document = parseDocument
         const previous = tokens[index - 1];
         const current = tokens[index];
         if (previous.lower !== current.lower || previous.end > current.start + 1)
+            continue;
+        // Some doubled words are correct English. "She had had enough" is the
+        // perfect construction, "very very cold" is deliberate emphasis, and "bye
+        // bye" is a reduplicative. Reporting them costs the writer's trust in the
+        // rule that catches a genuine "the the".
+        if (IDIOMATIC_DOUBLED_WORDS.has(previous.lower))
             continue;
         pushIssue(issues, makeIssue("repetition-adjacent-word", previous.start, current.end, text.slice(previous.start, current.end), previous.value, "repetition", "medium", "Repeated word", "This word appears twice in a row. Removing the repeat keeps the sentence moving.", 0.99, preferences));
     }
@@ -2448,7 +2466,7 @@ const SPELLING_VARIANTS = [
  * which is how a consistency rule starts producing ungrammatical text.
  */
 const SYNONYM_FAMILIES = [
-    ["utilise", "utilize", "use"], ["utilisation", "utilization"], ["utilises", "utilizes"],
+    ["utilise", "utilize"], ["utilisation", "utilization"], ["utilises", "utilizes"],
     ["whilst", "while"], ["purchase", "buy"], ["purchase", "procure"], ["assist", "help"], ["attempt", "try"],
     ["acknowledgement", "acknowledgment"], ["judgement", "judgment"], ["enrolment", "enrollment"],
     ["fulfilment", "fulfillment"], ["instalment", "installment"], ["skilful", "skillful"],
@@ -2481,6 +2499,9 @@ const WORDY_VARIANTS = [
     ["has the ability to", "can"], ["make a decision", "decide"],
     ["provide assistance", "help"], ["in close proximity", "near"],
     ["at this point in time", "now"],
+    // Both -ise spellings are the long way round "use"; they are still compared
+    // with each other above as a dialect pair.
+    ["utilise", "use"], ["utilize", "use"],
 ];
 /** British and American -ise/-ize endings, checked only when both appear. */
 const SUFFIX_VARIANTS = [
@@ -2536,6 +2557,25 @@ function resolveInconsistency(families, minimumDominance = 2) {
         return null;
     return { keep, flag, keepCount: keepEntries.length, flagCount: flagEntries.length };
 }
+/**
+ * The most frequent English words, which can never be a mis-capitalised name.
+ *
+ * "The" opens most sentences in most documents. Once the capitalisation check
+ * compared every occurrence rather than only the capitalised ones, that made
+ * it report "the" -> "The" across ordinary prose.
+ */
+const COMMON_WORDS = new Set([
+    "the", "and", "that", "have", "for", "not", "with", "you", "this", "but",
+    "his", "from", "they", "say", "her", "she", "will", "one", "all", "would",
+    "there", "their", "what", "out", "about", "who", "get", "which", "when",
+    "make", "can", "like", "time", "just", "him", "know", "take", "people",
+    "into", "year", "your", "good", "some", "could", "them", "see", "other",
+    "than", "then", "now", "look", "only", "come", "its", "over", "think",
+    "also", "back", "after", "use", "two", "how", "our", "work", "first",
+    "well", "way", "even", "new", "want", "because", "any", "these", "give",
+    "day", "most", "was", "were", "been", "has", "had", "are", "was", "did",
+    "does", "but", "its", "it's", "being", "from", "where", "while", "should",
+]);
 function findConsistencyIssues(text, preferences, document = parseDocument(text)) {
     const issues = [];
     const claimed = new Uint8Array(text.length);
@@ -2624,12 +2664,13 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
     //    used as a name first: if the same letters appear mostly in lower case it
     //    is an ordinary word ("may", "us", "will"), and flagging its capitalisation
     //    would be wrong rather than helpful.
+    const sentenceStarts = new Set(document.sentences.map((sentence) => sentence.start));
     const byWord = new Map();
     for (const token of document.tokens) {
         if (!/^[A-Za-z][A-Za-z'-]{2,}$/u.test(token.value))
             continue;
         const list = byWord.get(token.lower) ?? [];
-        list.push({ start: token.start, end: token.end, value: token.value });
+        list.push({ start: token.start, end: token.end, value: token.value, sentenceInitial: sentenceStarts.has(token.start) });
         byWord.set(token.lower, list);
     }
     for (const [key, occurrences] of byWord) {
@@ -2639,8 +2680,19 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
         // Only a word the writer consistently capitalises can have its shape checked.
         if (capitalised.length < occurrences.length * 0.6)
             continue;
+        // ...and it has to be a word that can be a name. Grouping every occurrence
+        // (rather than only the capitalised ones, which made the lowercase case in
+        // the comment above unreachable) also starts reporting "the" -> "The" in any
+        // document that opens sentences with an article, so ordinary English words
+        // are excluded outright.
+        if (COMMON_WORDS.has(key))
+            continue;
+        // Group every occurrence, not just the capitalised ones. Building the map
+        // from `capitalised` alone meant every key was already capitalised, so the
+        // lowercase case in the comment above — "Acme", then "ACME", then "acme" —
+        // was unreachable and a name could never be corrected for drifting down.
         const shapes = new Map();
-        for (const occurrence of capitalised) {
+        for (const occurrence of occurrences) {
             const list = shapes.get(occurrence.value) ?? [];
             list.push(occurrence);
             shapes.set(occurrence.value, list);
@@ -2658,7 +2710,6 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
             claim(occurrence.start, occurrence.end);
             pushIssue(issues, makeIssue("consistency-capitalisation", occurrence.start, occurrence.end, occurrence.value, keepShape, "consistency", "low", "Capitalisation drifts on the same name", `This name appears as “${keepShape}” ${keepEntries.length} times and as “${flagShape}” ${flagEntries.length === 1 ? "once" : `${flagEntries.length} times`} in this draft. The capitalisation is noticed before the name itself.`, 0.72, preferences));
         }
-        void key;
     }
     return issues;
 }
@@ -3456,7 +3507,10 @@ const categoryColors = {
     capitalization: "#bf7a42",
 };
 function mergeWritingIssues(issues) {
-    return mergeAnalysisIssues(issues);
+    // Callers merge retained history with recalculated findings, and a document
+    // with no previous analysis legitimately produces an empty or absent list.
+    // Returning [] keeps a missing input from throwing inside the merge.
+    return Array.isArray(issues) ? mergeAnalysisIssues(issues) : [];
 }
 function analyzeLocally(text, options = {}, goals) {
     const startedAt = analysisNow();
@@ -3497,12 +3551,30 @@ function analyzeLocally(text, options = {}, goals) {
 function expandLocalContext(text, start, end, contextWindow = 320) {
     const roughStart = Math.max(0, start - contextWindow);
     const roughEnd = Math.min(text.length, end + contextWindow);
+    // Find the sentence break that opens the re-analysed region.
+    //
+    // When the window holds no break, the old fallback was `start - 320`, which
+    // lands mid-word. A region that begins mid-sentence makes every `^`-anchored
+    // rule fire on the slice boundary: a one-sentence draft produced a spurious
+    // "n" -> "N" on the "n" inside "and", at an offset that pointed nowhere.
+    //
+    // So widen the search rather than trusting the window. A region that starts
+    // at a real sentence boundary is the only start where `^` means anything.
+    const prefix = text.slice(0, Math.max(roughStart, start));
     const leftMatches = [...text.slice(0, roughStart).matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
     const left = leftMatches[leftMatches.length - 1];
-    const safeStart = left && left.index !== undefined ? left.index + left[0].length : roughStart;
+    const safeStart = left && left.index !== undefined
+        ? left.index + left[0].length
+        : lastSentenceBreak(prefix);
     const right = text.slice(roughEnd).match(/[.!?…](?:\s|$)|\n\s*/u);
     const safeEnd = right?.index !== undefined ? roughEnd + right.index + right[0].length : roughEnd;
     return { start: Math.min(safeStart, start), end: Math.max(Math.min(text.length, safeEnd), end) };
+}
+/** Offset just past the last sentence break in `prefix`, or 0 when there is none. */
+function lastSentenceBreak(prefix) {
+    const matches = [...prefix.matchAll(/(?:[.!?…]\s+|\n\s*)/gu)];
+    const last = matches[matches.length - 1];
+    return last && last.index !== undefined ? last.index + last[0].length : 0;
 }
 function detectChangedRange(previousText, nextText) {
     if (previousText === nextText)
@@ -3525,8 +3597,22 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
     const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
     const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
     const delta = nextText.length - previousText.length;
+    const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
+    const recalculated = region.issues.map((issue) => ({
+        ...issue,
+        id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
+        start: issue.start + nextRegion.start,
+        end: issue.end + nextRegion.start,
+    }));
+    // Anything the region re-derived is already accounted for.
+    const rederived = new Set(recalculated.map((issue) => `${issue.ruleId}\u0000${issue.original.toLowerCase()}`));
     const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
-        if (issue.start < previousRegion.end && issue.end > previousRegion.start)
+        // An issue overlapping the region was assumed to be re-derived there. It is
+        // not always: a long sentence that starts well before the region cannot be
+        // seen from a slice that begins later, so dropping it lost a real finding.
+        // Keep the candidate and let the set above decide.
+        const overlapsRegion = issue.start < previousRegion.end && issue.end > previousRegion.start;
+        if (overlapsRegion && rederived.has(`${issue.ruleId}\u0000${issue.original.toLowerCase()}`))
             return [];
         const shift = issue.start >= previousRegion.end ? delta : 0;
         const start = issue.start + shift;
@@ -3535,13 +3621,6 @@ function analyzeLocallyIncremental(previousText, nextText, previousIssues, chang
             ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
             : [];
     });
-    const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
-    const recalculated = region.issues.map((issue) => ({
-        ...issue,
-        id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
-        start: issue.start + nextRegion.start,
-        end: issue.end + nextRegion.start,
-    }));
     const issues = mergeWritingIssues([...retained, ...recalculated]);
     const document = analyzeDocument(nextText);
     const stats = getWritingStats(nextText, document);

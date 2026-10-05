@@ -57,11 +57,20 @@
   let outline = null;
 
   function dismissalKey(issue) {
-    const original = String(issue.original || "").trim().toLowerCase();
-    return `${issue.ruleId}|${issue.category}|${original}`;
+    // A fingerprint, not the text. These keys are persisted to extension
+    // storage, and up to 200 of them held raw fragments of whatever the writer
+    // had typed into the page — indefinitely, and not cleared by "Forget keys".
+    // The fingerprint matches exactly the same way, so dismissing still works.
+    return `${issue.ruleId}|${issue.category}|${fingerprintText(String(issue.original || "").trim().toLowerCase())}`;
   }
 
   const host = () => location.hostname.replace(/^www\./u, "");
+  /** Put the caret back where the writer was before the panel took it. */
+  const focusActiveField = () => {
+    if (activeField && activeField.isConnected && isEditable(activeField)) {
+      try { activeField.focus(); } catch { /* the field went away */ }
+    }
+  };
   const siteHasAccess = () => Array.isArray(settings.siteAccess) && settings.siteAccess.includes(host());
   const siteIsDisabled = () => !siteHasAccess()
     || (Array.isArray(settings.excludedSites) && settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)))
@@ -197,7 +206,9 @@
     const header = document.createElement("div"); header.className = "dw-head";
     header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", aiStateLabel(), "dw-source"), textNode("span", String(visible.length) + " suggestion" + (visible.length === 1 ? "" : "s"), "dw-count"));
     if (aiPending) header.append(textNode("span", "Checking AI…", "dw-pending"));
-    const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); close.addEventListener("click", () => { panel.hidden = true; }); header.append(close); panel.append(header);
+    const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); // Restore focus to the field the writer was in. Without this the caret fell to
+    // <body> and they lost their place in the sentence they were typing.
+    close.addEventListener("click", () => { panel.hidden = true; focusActiveField(); }); header.append(close); panel.append(header);
     if (!seenOnboarding) {
       // First run only: a short orientation, then it never appears again.
       const welcome = document.createElement("div"); welcome.className = "dw-onboarding";

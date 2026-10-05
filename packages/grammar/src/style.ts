@@ -32,11 +32,17 @@ export function findRepeatedWordsAndPhrases(text: string, preferences: StylePref
     pushIssue(issues, makeIssue("repetition-adjacent-word", previous.start, current.end, text.slice(previous.start, current.end), previous.value, "repetition", "medium", "Repeated word", "This word appears twice in a row. Removing the repeat keeps the sentence moving.", 0.99, preferences));
   }
   for (let index = 0; index + 3 < tokens.length; index += 1) {
-    const phrase = tokens.slice(index, index + 2);
-    const next = tokens.slice(index + 2, index + 4);
-    if (phrase[0].lower !== next[0].lower || phrase[1].lower !== next[1].lower) continue;
-    if (phrase[1].end > next[0].start + 1) continue;
-    pushIssue(issues, makeIssue("repetition-repeated-phrase", phrase[0].start, next[1].end, text.slice(phrase[0].start, next[1].end), text.slice(phrase[0].start, phrase[1].end), "repetition", "medium", "Repeated phrase", "This short phrase is repeated back-to-back. Keep it once unless the repetition is deliberate.", 0.98, preferences));
+    // Compare the two bigrams by their tokens directly. Slicing four tokens
+    // per position allocated two short arrays for every word in the draft —
+    // on a long document that is hundreds of thousands of throwaway arrays
+    // before a single finding is reported.
+    const first = tokens[index];
+    const second = tokens[index + 1];
+    const third = tokens[index + 2];
+    const fourth = tokens[index + 3];
+    if (first.lower !== third.lower || second.lower !== fourth.lower) continue;
+    if (second.end > third.start + 1) continue;
+    pushIssue(issues, makeIssue("repetition-repeated-phrase", first.start, fourth.end, text.slice(first.start, fourth.end), text.slice(first.start, second.end), "repetition", "medium", "Repeated phrase", "This short phrase is repeated back-to-back. Keep it once unless the repetition is deliberate.", 0.98, preferences));
   }
   const openings = new Map<string, SentenceSpan>();
   for (const sentence of document.sentences) {

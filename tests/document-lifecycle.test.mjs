@@ -271,3 +271,49 @@ test("after clear all, reloading does not restore old documents", async () => {
   assert.equal(fresh.getActive().draft, "");
   assert.notEqual(fresh.getActive().draft, "Should disappear.");
 });
+
+test("recording a review stores it without marking the document edited", async () => {
+  // The document list shows this signal. It must not move updatedAt: opening a
+  // draft and letting it be analysed is not working on it, and the list would
+  // otherwise claim every draft had just been edited.
+  const lifecycle = new DocumentLifecycle(new MemoryDocumentBackend(), null);
+  await lifecycle.load();
+  const id = lifecycle.getActive().id;
+  const before = lifecycle.getActive().updatedAt;
+
+  assert.equal(lifecycle.recordReview({ worthMaking: 4, fixFirst: 2, analysedAt: 1234 }), true);
+  assert.deepEqual(lifecycle.getActive().review, { worthMaking: 4, fixFirst: 2, analysedAt: 1234 });
+  assert.equal(lifecycle.getActive().updatedAt, before, "recording a review is not an edit");
+
+  await lifecycle.flush();
+  assert.deepEqual((await lifecycle.backend.get(id)).review, { worthMaking: 4, fixFirst: 2, analysedAt: 1234 });
+});
+
+test("a stored review survives a reload and malformed stored data is dropped", async () => {
+  const scratch = storage();
+  const backend = new LocalStorageDocumentBackend(scratch, DOCUMENTS_LOCAL_STORAGE_KEY);
+  const first = new DocumentLifecycle(backend, null);
+  await first.load();
+  first.recordReview({ worthMaking: 3, fixFirst: 1, analysedAt: 99 });
+  await first.flush();
+
+  const reloaded = new DocumentLifecycle(new LocalStorageDocumentBackend(scratch, DOCUMENTS_LOCAL_STORAGE_KEY), null);
+  await reloaded.load();
+  assert.deepEqual(reloaded.getActive().review, { worthMaking: 3, fixFirst: 1, analysedAt: 99 });
+  assert.equal(reloaded.summaries()[0].review?.fixFirst, 1, "the list view reads the stored signal");
+
+  // Stored data is untrusted: a malformed review must not reach the UI.
+  scratch.setItem(DOCUMENTS_LOCAL_STORAGE_KEY, JSON.stringify([{
+    id: "doc-bad",
+    title: "Bad",
+    draft: "text",
+    createdAt: 1,
+    updatedAt: 2,
+    wordCount: 1,
+    snapshots: [],
+    review: { worthMaking: "many", fixFirst: null, analysedAt: "today" },
+  }]));
+  const corrupted = new DocumentLifecycle(new LocalStorageDocumentBackend(scratch, DOCUMENTS_LOCAL_STORAGE_KEY), null);
+  await corrupted.load();
+  assert.equal(corrupted.summaries()[0].review, undefined);
+});

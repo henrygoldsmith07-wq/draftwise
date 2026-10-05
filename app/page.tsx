@@ -13,7 +13,7 @@ import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
 import { canApplyRewritePreview } from "@/lib/rewrite-retry";
-import { buildSuggestionState, filterByTier, ruleFamily, type TierFilter } from "@/lib/suggestions";
+import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
 import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
@@ -129,6 +129,7 @@ export default function Home() {
   const registerHighlight = useCallback((element: HTMLDivElement | null) => { highlightRef.current = element; }, []);
   const [view, setView] = useState<WorkspaceView>("write");
   const [filter, setFilter] = useState<TierFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
   const [reviewedCount, setReviewedCount] = useState(0);
@@ -142,7 +143,7 @@ export default function Home() {
   const [importError, setImportError] = useState<string | null>(null);
   const [systemDark, setSystemDark] = useState(false);
   const { selection, selectedText, updateFromElement, setSelection } = useSelection(draftText);
-  const { preview: rewritePreview, run: requestRewrite, cancel: cancelRewrite, selectAlternative } = useRewrite();
+  const { preview: rewritePreview, run: requestRewrite, cancel: cancelRewrite, selectAlternative, editReplacement, resetReplacement } = useRewrite();
   const analysisState = useAnalysis({ text: draftText, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled, classifier: workspace.classifier ?? null });
   const analysis = analysisState.analysis;
   const issues = analysis.issues;
@@ -191,17 +192,34 @@ export default function Home() {
   }, [cancelRewrite, updateWorkspace]);
 
   const openIssues = useMemo(
-    () => getOpenIssues(issues, dismissedIssueKeys),
-    [issues, dismissedIssueKeys],
+    () => getOpenIssues(issues, dismissedIssueKeys, draftText),
+    [issues, dismissedIssueKeys, draftText],
   );
   const suggestions = useMemo(
     () => buildSuggestionState({ issues: openIssues, goals: workspace.goals, style: workspace.style, dismissedKeys: dismissedIssueKeys, text: draftText }),
     [dismissedIssueKeys, openIssues, draftText, workspace.goals, workspace.style],
   );
   const visibleIssues = useMemo(
-    () => filterByTier(suggestions.displayed, filter),
-    [filter, suggestions.displayed],
+    () => sortForReview(filterByTier(filterByCategory(suggestions.displayed, categoryFilter), filter)),
+    [categoryFilter, filter, suggestions.displayed],
   );
+
+  // Keep the document list's review signal current with what we just found.
+  // Only stored, never re-derived by the list view, so opening the dashboard
+  // does not mean re-analysing every draft the writer has.
+  //
+  // Guarded by the values themselves rather than by effect dependencies: the
+  // hook returns a fresh object every render, so depending on it re-ran this
+  // effect on every render, and writing on every render is an update loop.
+  const recordedReviewRef = useRef<string | null>(null);
+  useEffect(() => {
+    const fixFirst = suggestions.report.byTier["fix-first"];
+    const worthMaking = suggestions.changesWorthMaking;
+    const key = `${activeId}:${draftText.length}:${worthMaking}:${fixFirst}`;
+    if (recordedReviewRef.current === key) return;
+    recordedReviewRef.current = key;
+    documents.recordReview({ worthMaking, fixFirst, analysedAt: Date.now() });
+  }, [activeId, documents, draftText, suggestions.changesWorthMaking, suggestions.report.byTier]);
 
   // Insights progress: the baseline is captured when the document becomes
   // active, so the writer sees what their editing actually changed.
@@ -248,11 +266,11 @@ export default function Home() {
   }, [advanceFocus, updateDraft, visibleIssues, draftText]);
 
   const dismissIssue = useCallback((issue: WritingIssue) => {
-    setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue, draftText)])]);
     // The Writing Profile learns from repeated dismissals of the same type.
     updateWorkspace((current) => ({ ...current, style: recordDismissal(current.style, issue) }));
     advanceFocus(visibleIssues, issue);
-  }, [advanceFocus, updateWorkspace, visibleIssues]);
+  }, [advanceFocus, draftText, updateWorkspace, visibleIssues]);
 
   const acceptAll = useCallback(() => {
     const next = applyIssueReplacements(draftText, visibleIssues);
@@ -286,8 +304,8 @@ export default function Home() {
     // alternatives; small fixes stay single-answer. The preview still decides.
     const action = rewriteActionsFor(selectedText, workspace.goals, workspace.style).find((candidate) => candidate.label === label);
     const finalInstruction = action?.significant ? significantRewriteInstruction(instruction) : instruction;
-    void requestRewrite({ label, instruction: finalInstruction, text: selectedText, selection, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled });
-  }, [requestRewrite, selectedText, selection, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
+    void requestRewrite({ label, instruction: finalInstruction, text: selectedText, selection, goals: workspace.goals, style: workspace.style, settings: workspace.provider, aiEnabled: workspace.aiEnabled, draft: draftText });
+  }, [requestRewrite, selectedText, selection, draftText, workspace.goals, workspace.provider, workspace.style, workspace.aiEnabled]);
 
   const applyRewrite = useCallback((insert: boolean) => {
     if (!rewritePreview || !canApplyRewritePreview(rewritePreview)) return;
@@ -306,8 +324,8 @@ export default function Home() {
 
   const retryRewrite = useCallback(() => {
     if (!rewritePreview) return;
-    void requestRewrite(createRewriteRetryArgs(rewritePreview, workspace.provider));
-  }, [requestRewrite, rewritePreview, workspace.provider]);
+    void requestRewrite({ ...createRewriteRetryArgs(rewritePreview, workspace.provider), draft: rewritePreview.draft ?? draftText });
+  }, [requestRewrite, rewritePreview, workspace.provider, draftText]);
 
   const copyRewrite = useCallback(() => {
     if (rewritePreview && canApplyRewritePreview(rewritePreview)) void navigator.clipboard?.writeText(rewritePreview.replacement);
@@ -443,8 +461,8 @@ export default function Home() {
     const value = word.trim();
     if (!value) return;
     updateWorkspace((current) => ({ ...current, style: { ...current.style, personalDictionary: [...new Set([...current.style.personalDictionary, value])] } }));
-    setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map(getIssueDismissalKey)])]);
-  }, [issues, updateWorkspace]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...issues.filter((issue) => issue.original === word).map((entry) => getIssueDismissalKey(entry, draftText))])]);
+  }, [draftText, issues, updateWorkspace]);
 
   const ruleControl = useCallback((ruleId: string, action: "reduce" | "off") => {
     updateWorkspace((current) => {
@@ -465,15 +483,15 @@ export default function Home() {
     if (next === draftText) return;
     documents.saveSnapshot("manual");
     updateDraft(next);
-    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map(getIssueDismissalKey)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setReviewedCount((count) => count + 1);
     setActiveIssueId(null);
   }, [documents, updateDraft, draftText]);
 
   const dismissGroup = useCallback((groupIssues: WritingIssue[]) => {
-    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map(getIssueDismissalKey)])]);
+    setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setActiveIssueId(null);
-  }, []);
+  }, [draftText]);
 
   const scrollEditor = useCallback(() => {
     if (textareaRef.current && highlightRef.current) {
@@ -486,6 +504,18 @@ export default function Home() {
     setActiveIssueId(issue.id);
     window.setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(issue.start, issue.end); }, 0);
   }, []);
+
+  // Jump from a document-level note or outline section to the passage it is
+  // about, so whole-draft feedback is navigable rather than abstract.
+  const onSelectRange = useCallback((start: number, end: number) => {
+    setActiveIssueId(null);
+    setSelection({ start, end });
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(start, end);
+      textareaRef.current?.scrollIntoView?.({ block: "center" });
+    }, 0);
+  }, [setSelection]);
 
   const clearLocalData = useCallback(() => {
     cancelRewrite();
@@ -589,7 +619,7 @@ export default function Home() {
 
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} /> : null}
+          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}

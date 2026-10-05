@@ -153,6 +153,20 @@ export function createAnalysisChunks(text: string, options: ChunkOptions = {}): 
   return chunks;
 }
 
+/**
+ * Map a range the provider returned inside a chunk back to document offsets.
+ *
+ * A chunk's `text` deliberately includes a context window on both sides of the
+ * span it owns, so the model can see enough to judge a sentence in place. But
+ * only `contentStartOffset..contentEndOffset` belongs to this chunk: the
+ * neighbouring context is already owned by the adjacent chunk, and accepting a
+ * finding reported there analyses the same words twice.
+ *
+ * Clamping to the owned span (rather than the wider sent span) is what makes
+ * chunked analysis on a long document agree with a single-pass analysis. A
+ * range that falls in the overlap is rejected and that chunk contributes
+ * nothing for it, which is correct: the chunk that owns those words reports it.
+ */
 export function mapRelativeRange(
   range: Pick<WritingIssue, "start" | "end" | "original">,
   chunk: AnalysisChunk,
@@ -160,7 +174,9 @@ export function mapRelativeRange(
 ) {
   const start = chunk.startOffset + Math.floor(range.start);
   const end = chunk.startOffset + Math.floor(range.end);
-  if (start < chunk.startOffset || end > chunk.endOffset || end <= start) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  if (start < chunk.contentStartOffset || end > chunk.contentEndOffset) return null;
+  if (start < chunk.startOffset || end > chunk.endOffset) return null;
   const original = sourceText.slice(start, end);
   if (!original || original !== range.original) return null;
   return { start, end, original };

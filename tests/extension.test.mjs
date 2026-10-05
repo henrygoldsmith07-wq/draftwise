@@ -119,9 +119,18 @@ test("the bundled grammar surface is callable, not merely present", async () => 
   const prelude = provider.match(/const \{ ([^}]*) \} = DraftwiseGrammarModule;/u);
   assert.ok(prelude, "provider bundle must declare a grammar prelude");
   const destructured = prelude[1].split(",").map((name) => name.trim()).filter(Boolean);
-  assert.deepEqual(destructured, ["analyzeLocally", "getWritingStats", "inferTone", "scoreWriting"]);
+  // The prelude is derived from the grammar bundle's export list, so the invariant
+  // is coverage rather than a fixed set: anything the provider module references
+  // from the grammar module must be destructured, and anything destructured must
+  // actually be returned.
   for (const name of destructured) {
     assert.ok(returned.includes(name), "provider prelude destructures " + name + " but the grammar bundle does not return it");
+  }
+  assert.deepEqual([...destructured].sort(), [...returned].sort(),
+    "the provider prelude must destructure every name the grammar bundle returns, so a newly exported helper cannot be left undefined inside the provider wrapper");
+  // Every name the provider source actually calls must resolve.
+  for (const required of ["analyzeLocally", "getWritingStats", "inferTone", "scoreWriting", "buildDocumentOutline"]) {
+    assert.ok(destructured.includes(required), "provider prelude must destructure " + required);
   }
   const providerRuntime = browserLikeContext();
   assert.doesNotThrow(() => vm.runInNewContext(provider, providerRuntime.context, { filename: "shared-provider.js" }));

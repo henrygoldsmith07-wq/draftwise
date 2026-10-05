@@ -26,7 +26,15 @@ import {
  * than issuing generic instruction like "improve the introduction".
  */
 
-const MAX_STRUCTURAL_NOTES = 5;
+// Structural notes scale with the document rather than staying at a flat five.
+// A twenty-section draft has more places for its argument to go wrong than a
+// two-paragraph note, and a fixed cap could only ever describe one of them.
+const STRUCTURAL_NOTE_MIN = 8;
+const STRUCTURAL_NOTE_MAX = 24;
+const STRUCTURAL_NOTE_PER_CHECK_MIN = 3;
+// Most paragraphs any one word is allowed to link. Keeps the search per
+// paragraph bounded without discarding the word.
+const COMMON_WORD_PARAGRAPH_LIMIT = 40;
 const MIN_PARAGRAPH_WORDS = 15;
 
 const STOP_WORDS = new Set([
@@ -126,17 +134,67 @@ export function findDocumentStructure(
   const intent = goals?.intent ?? "inform";
   const formalRegister = audience === "academic" || audience === "professional" || intent === "persuade";
 
+  // How many structural notes this document is allowed to raise.
+  //
+  // A flat cap of five was wrong in both directions at once. A long draft with
+  // many repeated paragraphs filled all five slots in the very first check, so
+  // unsupported claims, stacked hedges, and abrupt transitions were never even
+  // looked for — the checks that would have been most useful on a long draft
+  // were the ones it silenced. And a short draft that genuinely had four
+  // different structural problems could only ever hear about three of them.
+  //
+  // The budget now grows with the document, and no single check may take more
+  // than half of it, so a long draft surfaces more problems *and* keeps a
+  // variety of them.
+  const budget = Math.min(STRUCTURAL_NOTE_MAX, Math.max(STRUCTURAL_NOTE_MIN, Math.ceil(paragraphs.length / 3)));
+  // Each of the four scanning checks gets its own quota rather than competing
+  // for a shared pool. A shared pool let repeated ideas and unsupported claims
+  // use it all, so stacked hedges and abrupt transitions were never reported
+  // even on drafts that were full of them.
+  //
+  // The floor matters: dividing a small budget four ways gave a single note per
+  // check, which meant a twelve-paragraph draft with eleven repeated paragraphs
+  // was told about one of them. Three per check is the point below which the
+  // advice stops being a set and starts being a sample.
+  const perCheck = Math.max(STRUCTURAL_NOTE_PER_CHECK_MIN, Math.floor(budget / 4));
+  let repeatedIdeas = 0;
+  let unsupportedClaims = 0;
+  let hedgedParagraphs = 0;
+  let abruptTransitions = 0;
+
   // 1. Repeated argument: a paragraph that substantially restates an earlier
   //    one without adding new material.
-  const seenParagraphs: Array<{ paragraph: ParsedDocument["paragraphs"][number]; words: Set<string> }> = [];
-  for (const paragraph of paragraphs) {
-    if (issues.length >= MAX_STRUCTURAL_NOTES) break;
+  //
+  //    Candidates are found through an inverted index on content words rather
+  //    than by comparing every paragraph with every earlier paragraph. The
+  //    direct comparison was quadratic, which a reader only notices as
+  //    "Draftwise got slow and then the tab stopped responding" once a draft
+  //    has a few hundred paragraphs.
+  //
+  //    Every content word indexes its paragraph, and each word's list is capped.
+//    Indexing only each paragraph's rarest few words was tried first and missed
+//    real repeats: two paragraphs can be near-identical and still share none of
+//    a chosen handful, since "rarest" is a tie-break between equally common
+//    words. Skipping words that appear in many paragraphs was tried next and
+//    broke the opposite case, a draft that repeats itself throughout, where
+//    every word is common and nothing was indexed at all. Capping each list
+//    instead keeps the work per paragraph bounded while still finding repeats
+  //    wherever they are.
+  const wordSets = paragraphs.map((paragraph) => contentWords(paragraph));
+  const byWord = new Map<string, Array<{ words: Set<string> }>>();
+  for (const [index, paragraph] of paragraphs.entries()) {
+    if (repeatedIdeas >= perCheck) break;
     if (paragraph.tokens.length < MIN_PARAGRAPH_WORDS) continue;
-    const words = contentWords(paragraph);
-    for (const previous of seenParagraphs) {
+    const words = wordSets[index];
+    const candidates = new Set<{ words: Set<string> }>();
+    for (const word of words) {
+      for (const candidate of byWord.get(word) ?? []) candidates.add(candidate);
+    }
+    for (const previous of candidates) {
       const overlap = jaccard(words, previous.words);
       if (overlap >= 0.55) {
         const topic = sharedTopicWords(words, previous.words);
+        repeatedIdeas += 1;
         pushIssue(issues, makeIssue(
           "structure-note-repeated-idea",
           paragraph.start,
@@ -153,18 +211,24 @@ export function findDocumentStructure(
         break;
       }
     }
-    seenParagraphs.push({ paragraph, words });
+    const entry = { words };
+    for (const word of words) {
+      const bucket = byWord.get(word);
+      if (!bucket) byWord.set(word, [entry]);
+      else if (bucket.length < COMMON_WORD_PARAGRAPH_LIMIT) bucket.push(entry);
+    }
   }
 
   // 2. Unsupported claim: strong claim language in a paragraph with no
   //    supporting marker anywhere in it.
   if (formalRegister) {
     for (const paragraph of paragraphs) {
-      if (issues.length >= MAX_STRUCTURAL_NOTES) break;
+      if (unsupportedClaims >= perCheck) break;
       const lower = paragraph.text.toLocaleLowerCase();
       const claim = paragraph.tokens.find((token) => CLAIM_MARKERS.has(token.lower));
       if (!claim) continue;
       if (SUPPORT_MARKERS.some((marker) => lower.includes(marker))) continue;
+      unsupportedClaims += 1;
       pushIssue(issues, makeIssue(
         "structure-note-unsupported-claim",
         claim.start,
@@ -185,9 +249,10 @@ export function findDocumentStructure(
   //    point instead of qualifying it.
   if (formalRegister) {
     for (const paragraph of paragraphs) {
-      if (issues.length >= MAX_STRUCTURAL_NOTES) break;
+      if (hedgedParagraphs >= perCheck) break;
       const hedges = paragraph.tokens.filter((token) => HEDGE_WORDS.has(token.lower));
       if (hedges.length < 3) continue;
+      hedgedParagraphs += 1;
       pushIssue(issues, makeIssue(
         "structure-note-hedging",
         hedges[0].start,
@@ -230,7 +295,7 @@ export function findDocumentStructure(
 
   // 5. Weak transition: a paragraph opening on a bare connector or dangling
   //    "This…" after a paragraph about something else.
-  for (let index = 1; index < paragraphs.length && issues.length < MAX_STRUCTURAL_NOTES; index += 1) {
+  for (let index = 1; index < paragraphs.length && abruptTransitions < perCheck; index += 1) {
     const paragraph = paragraphs[index];
     const first = paragraph.tokens[0];
     if (!first) continue;
@@ -245,6 +310,7 @@ export function findDocumentStructure(
     const followWord = paragraph.tokens[1]?.lower ?? "";
     const bridging = previousWords.has(followWord) || jaccard(previousWords, currentWords) > 0.2;
     if (bridging) continue;
+    abruptTransitions += 1;
     pushIssue(issues, makeIssue(
       "structure-note-weak-transition",
       first.start,

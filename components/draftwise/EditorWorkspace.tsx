@@ -23,10 +23,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, type SuggestionCardControls } from "@/components/draftwise/EditorPrimitives";
+import { DocumentOverview, SuppressedFindings } from "@/components/draftwise/DocumentOverview";
 import { RewritePreview } from "@/components/draftwise/RewritePreview";
 import { hasActionableReplacement } from "@/lib/issue-actions";
 import { rewriteActionsFor } from "@/lib/rewrite-actions";
-import { type SuggestionState, type TierFilter } from "@/lib/suggestions";
+import { type CategoryFilter, type SuggestionState, TIER_DESCRIPTIONS, TIER_LABELS, type TierFilter } from "@/lib/suggestions";
 import type { AnalysisResult, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
 
@@ -40,6 +41,9 @@ interface EditorWorkspaceProps {
   suggestions: SuggestionState;
   activeIssueId: string | null;
   filter: TierFilter;
+  categoryFilter: CategoryFilter;
+  categoryOptions: Array<{ value: CategoryFilter; label: string; count: number }>;
+  onCategoryFilterChange: (filter: CategoryFilter) => void;
   analyzing: boolean;
   analysisStatusLabel: string;
   analysisError?: string | null;
@@ -78,6 +82,8 @@ interface EditorWorkspaceProps {
   onRetryRewrite: () => void;
   onCancelRewrite: () => void;
   onSelectRewriteAlternative: (index: number) => void;
+  onEditRewriteReplacement: (value: string) => void;
+  onResetRewriteReplacement: () => void;
   onToggleSuggestions: () => void;
   onToggleFocusMode: () => void;
   onNewDocument: () => void;
@@ -85,6 +91,7 @@ interface EditorWorkspaceProps {
   onRestoreSample: () => void;
   onOpenShortcuts: () => void;
   onOpenSettings: () => void;
+  onSelectRange?: (start: number, end: number) => void;
 }
 
 const audienceOptions = [
@@ -169,7 +176,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         ) : null}
 
         {props.rewritePreview ? (
-          <RewritePreview preview={props.rewritePreview} onReplace={() => props.onReplaceRewrite(false)} onInsert={() => props.onReplaceRewrite(true)} onCopy={props.onCopyRewrite} onRetry={props.onRetryRewrite} onCancel={props.onCancelRewrite} onSelectAlternative={props.onSelectRewriteAlternative} />
+          <RewritePreview preview={props.rewritePreview} onReplace={() => props.onReplaceRewrite(false)} onInsert={() => props.onReplaceRewrite(true)} onCopy={props.onCopyRewrite} onRetry={props.onRetryRewrite} onCancel={props.onCancelRewrite} onSelectAlternative={props.onSelectRewriteAlternative} onEditReplacement={props.onEditRewriteReplacement} onResetReplacement={props.onResetRewriteReplacement} />
         ) : null}
 
         <div className="editor-card">
@@ -222,6 +229,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               ) : null}
             </div>
           ) : null}
+          <DocumentOverview text={props.draft} stats={props.analysis.stats} goals={props.goals} style={props.style} onJumpToRange={props.onSelectRange} />
           <div className="score-card">
             <div>
               <p className="score-kicker">Overall writing guide</p>
@@ -232,15 +240,34 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             <ScoreRing score={props.analysis.scores.overall} />
           </div>
           <div className="issue-tabs">
-            <Tabs value={props.filter} onValueChange={(value) => props.onFilterChange(value as TierFilter)}>
+            <Tabs value={props.filter} onValueChange={(value) => { props.onFilterChange(value as TierFilter); }}>
               <TabsList variant="line">
-                <TabsTrigger value="fix-first">Fix first <span>{props.suggestions.report.byTier["fix-first"]}</span></TabsTrigger>
-                <TabsTrigger value="improve">Improve <span>{props.suggestions.report.byTier.improve}</span></TabsTrigger>
-                <TabsTrigger value="optional">Optional <span>{props.suggestions.report.byTier.optional}</span></TabsTrigger>
+                <TabsTrigger value="fix-first">{TIER_LABELS["fix-first"]} <span>{props.suggestions.report.byTier["fix-first"]}</span></TabsTrigger>
+                <TabsTrigger value="improve">{TIER_LABELS.improve} <span>{props.suggestions.report.byTier.improve}</span></TabsTrigger>
+                <TabsTrigger value="optional">{TIER_LABELS.optional} <span>{props.suggestions.report.byTier.optional}</span></TabsTrigger>
                 <TabsTrigger value="all">All <span>{props.suggestions.report.displayedCount}</span></TabsTrigger>
               </TabsList>
             </Tabs>
+            <p className="issue-tabs-help">{TIER_DESCRIPTIONS[props.filter === "all" ? "improve" : props.filter]}</p>
           </div>
+          {props.categoryOptions.length > 0 && (
+            <div className="category-filters" role="group" aria-label="Filter suggestions by kind of problem">
+              <button type="button" className={props.categoryFilter === "all" ? "category-filter is-active" : "category-filter"} onClick={() => props.onCategoryFilterChange("all")}>
+                Every kind
+              </button>
+              {props.categoryOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={props.categoryFilter === option.value}
+                  className={props.categoryFilter === option.value ? "category-filter is-active" : "category-filter"}
+                  onClick={() => props.onCategoryFilterChange(option.value)}
+                >
+                  {option.label} <span>{option.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="suggestions-list">
             {props.visibleIssues.length ? props.visibleIssues.map((issue) => {
               const controls: SuggestionCardControls = {
@@ -255,9 +282,10 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
                 onApplyAll: () => props.onApplyGroup(group.members),
                 onDismissAll: () => props.onDismissGroup(group.members),
               } : undefined;
-              return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} groupActions={groupActions} />;
+              return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} groupActions={groupActions} goals={props.goals} style={props.style} />;
             }) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
           </div>
+          <SuppressedFindings suppressed={props.suggestions.suppressed} report={props.suggestions.report} />
           {props.reviewedCount > 0 ? <div className="review-completion" role="status">{props.reviewedCount} important change{props.reviewedCount === 1 ? "" : "s"} reviewed.</div> : null}
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>

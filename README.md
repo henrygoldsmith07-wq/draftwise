@@ -40,11 +40,34 @@ npm run lint
 npm run extension:build
 git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
 npm run build
+npm run build:vercel
+npm run test:e2e:production
 npm run benchmark
 npm run evaluate
 ```
 
 `npm run build` also regenerates `extension/shared-analysis.js` and `extension/shared-provider.js` from the shared TypeScript packages.
+
+## Deploy to Vercel
+
+The app is a standard Next.js app, so it deploys to Vercel as one:
+
+```bash
+npx vercel          # preview
+npx vercel --prod   # production
+```
+
+`vercel.json` sets `framework: nextjs` and points the build at `npm run build:vercel`, which regenerates the extension bundles and then runs `next build`. There is nothing else to configure: no environment variables, no database, no server code. Analysis runs in the browser and drafts are stored locally, so the deployment serves the interface and nothing else.
+
+The web app is fully client-side, which is why the only output is two static pages. The Cloudflare Workers build (`npm run build` via vinext) is unaffected and remains the default for local preview.
+
+To check a deployment before trusting it, run the browser suite against the same production build a deployment serves:
+
+```bash
+npm run test:e2e:production
+```
+
+`npm run test:e2e` runs the same 13 tests against the vinext dev server. The production config exists because passing against the dev server does not tell you the deployed artifact works; this one does.
 
 ## Install the extension
 

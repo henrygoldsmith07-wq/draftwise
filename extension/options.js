@@ -5,6 +5,10 @@ const defaults = {
   aiEnabled: false,
   provider: { provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "", temperature: 0.2, maxTokens: 900, customHeaders: "" },
   classifier: { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider", timeoutMs: 8000, maxExcerptChars: 500 },
+  // Goals were already sent to the analysis pipeline but had no controls, so
+  // every site silently used these defaults. They now round-trip like any other
+  // setting, which is what makes goal-aware feedback reachable in the extension.
+  goals: { audience: "general", intent: "inform", tone: "professional" },
   style: { dialect: "en-GB", names: [], allowContractions: true, passiveVoiceSensitivity: "normal" },
   excludedSites: [],
   disabledSites: [],
@@ -163,6 +167,12 @@ async function saveSettings() {
     aiEnabled: toggleValue("aiEnabled"),
     provider: { ...state.provider, provider: "openai-compatible", baseUrl, model, apiKey: get("apiKey").value.trim(), temperature: 0.2, maxTokens: 900, customHeaders: "" },
     classifier: { ...state.classifier, baseUrl: nextClassifierBaseUrl, apiKey: classifierKey, uncertainPolicy },
+    goals: {
+      ...state.goals,
+      audience: get("goalAudience").value,
+      intent: get("goalIntent").value,
+      tone: get("goalTone").value,
+    },
     style: { ...state.style, dialect: get("dialect").value, allowContractions: toggleValue("allowContractions"), passiveVoiceSensitivity: get("passiveSensitivity").value },
     excludedSites: [...new Set(excludedSites)],
   });
@@ -249,6 +259,10 @@ async function load() {
   if (get("classifierKey")) get("classifierKey").value = classifier.apiKey || "";
   if (get("uncertainPolicy")) get("uncertainPolicy").value = classifier.uncertainPolicy === "local" ? "local" : "provider";
   get("dialect").value = style.dialect; get("passiveSensitivity").value = style.passiveVoiceSensitivity; get("excludedSites").value = state.excludedSites.join("\n");
+  const goals = state.goals || defaults.goals;
+  if (get("goalAudience")) get("goalAudience").value = goals.audience || defaults.goals.audience;
+  if (get("goalIntent")) get("goalIntent").value = goals.intent || defaults.goals.intent;
+  if (get("goalTone")) get("goalTone").value = goals.tone || defaults.goals.tone;
   await renderProviderPermission(); await renderClassifierPermission(); await renderSitePermissions();
 }
 

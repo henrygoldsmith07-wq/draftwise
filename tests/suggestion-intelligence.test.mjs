@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { classifyIssueKind, prioritiseSuggestions, ruleFamily } from "../packages/grammar/src/prioritise.ts";
-import { buildSuggestionState, filterByTier } from "../lib/suggestions.ts";
+import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories } from "../lib/suggestions.ts";
 import { DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
 
 const issue = (patch = {}) => ({
@@ -162,4 +162,78 @@ test("the suggestion state exposes review ordering, focus and suppression accoun
   assert.equal(filterByTier(state.displayed, "fix-first").length, 1);
   assert.equal(filterByTier(state.displayed, "optional").length, 1);
   assert.equal(state.report.suppressedCount, state.suppressed.length);
+});
+
+test("tier and category filters compose", () => {
+  const findings = [
+    issue({ id: "typo", ruleId: "spelling/test", category: "spelling", severity: "high", start: 0, end: 3 }),
+    issue({ id: "comma", ruleId: "punctuation/test", category: "punctuation", severity: "medium", start: 8, end: 9 }),
+    issue({ id: "wording", ruleId: "clarity/test", category: "clarity", severity: "low", start: 16, end: 19 }),
+  ];
+  const state = buildSuggestionState({
+    issues: findings,
+    goals: { audience: "general", intent: "inform", tone: "neutral" },
+    style: DEFAULT_STYLE_PREFERENCES,
+    dismissedKeys: [],
+  });
+
+  const spelling = filterByCategory(state.displayed, "spelling");
+  assert.deepEqual(spelling.map((item) => item.id), ["typo"]);
+  assert.equal(filterByCategory(state.displayed, "grammar").length, 2, "grammar covers the mechanical categories");
+  assert.equal(filterByCategory(state.displayed, "style").length, 1, "style excludes the mechanical categories");
+  assert.equal(filterByCategory(state.displayed, "all").length, state.displayed.length);
+
+  // Narrowing by category must not override the tier filter, and vice versa.
+  const ids = (items) => items.map((item) => item.id).sort();
+  assert.deepEqual(ids(filterByTier(filterByCategory(state.displayed, "grammar"), "optional")), [], "a category must not reintroduce other tiers");
+  assert.deepEqual(ids(filterByTier(filterByCategory(state.displayed, "all"), "optional")), ["wording"]);
+  assert.deepEqual(ids(filterByTier(filterByCategory(state.displayed, "spelling"), "fix-first")), ["typo"]);
+});
+
+test("only categories with findings are offered as filters", () => {
+  const state = buildSuggestionState({
+    issues: [
+      issue({ id: "a", ruleId: "clarity/test", category: "clarity", severity: "high", start: 0, end: 3 }),
+      issue({ id: "b", ruleId: "clarity/test", category: "clarity", severity: "high", start: 8, end: 11 }),
+    ],
+    goals: { audience: "general", intent: "inform", tone: "neutral" },
+    style: DEFAULT_STYLE_PREFERENCES,
+    dismissedKeys: [],
+  });
+  const options = filterableCategories(state.report);
+  assert.ok(options.length > 0);
+  assert.ok(options.every((option) => option.count > 0), "empty categories must not be offered");
+  assert.ok(options.every((option) => option.value !== "all"), "the all option is rendered separately");
+  for (let index = 1; index < options.length; index += 1) {
+    assert.ok(options[index - 1].count >= options[index].count, "options are ordered by size");
+  }
+});
+
+test("passage context is cut on sentence boundaries", () => {
+  const text = "The quarterly review found a persistent delay in the northern region. The team reigon lead confirmed the slip. Reporting resumes next week.";
+  const state = buildSuggestionState({
+    issues: [issue({ id: "typo", ruleId: "spelling/test", category: "spelling", severity: "high", start: text.indexOf("reigon"), end: text.indexOf("reigon") + 6, original: "reigon" })],
+    goals: { audience: "general", intent: "inform", tone: "neutral" },
+    style: DEFAULT_STYLE_PREFERENCES,
+    dismissedKeys: [],
+    text,
+  });
+  const context = state.displayed[0].context;
+  // A fixed character window cut mid-clause often enough to be unreadable.
+  assert.ok(context.startsWith("The quarterly review"), `context should start at a sentence boundary, got ${JSON.stringify(context)}`);
+  assert.ok(context.endsWith("next week."), `context should end at a sentence boundary, got ${JSON.stringify(context)}`);
+  assert.ok(!context.includes("…"), `whole sentences need no truncation marker, got ${JSON.stringify(context)}`);
+});
+
+test("passage context is marked when no sentence boundary is reachable", () => {
+  const text = `${"x".repeat(400)} reigon ${"y".repeat(400)}`;
+  const state = buildSuggestionState({
+    issues: [issue({ id: "typo", ruleId: "spelling/test", category: "spelling", severity: "high", start: 401, end: 407, original: "reigon" })],
+    goals: { audience: "general", intent: "inform", tone: "neutral" },
+    style: DEFAULT_STYLE_PREFERENCES,
+    dismissedKeys: [],
+    text,
+  });
+  const context = state.displayed[0].context;
+  assert.ok(context.startsWith("…") && context.endsWith("…"), `truncated context must say so, got ${JSON.stringify(context.slice(0, 12))}`);
 });

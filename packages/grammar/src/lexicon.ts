@@ -284,7 +284,11 @@ export const DIALECT_VARIANTS : Record<string, { "en-GB": string; "en-US": strin
   favourite: { "en-GB": "favourite", "en-US": "favorite" },
   fulfil: { "en-GB": "fulfil", "en-US": "fulfill" },
   labelled: { "en-GB": "labelled", "en-US": "labeled" },
-  metre: { "en-GB": "metre", "en-US": "meter" },
+  // No metre/meter entry. The unit is "metre" in British English but the
+  // device is "meter" in both variants, so "A parking meter took coins" was
+  // rewritten to "metre" — not a dialect preference, just wrong. Telling the
+  // two apart needs context the word alone does not carry, and suggesting
+  // incorrect English costs the writer more trust than a missing suggestion.
   practise: { "en-GB": "practise", "en-US": "practice" },
   programme: { "en-GB": "programme", "en-US": "program" },
   theatre: { "en-GB": "theatre", "en-US": "theater" },

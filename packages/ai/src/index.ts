@@ -1111,7 +1111,9 @@ export const TRIAGE_TAXONOMY: TriageCategory[] = [
 ];
 
 export const DEFAULT_CLASSIFIER_SETTINGS_VALUE: ClassifierSettings = {
-  baseUrl: "https://classifier.dev",
+  // Off unless the user configures an endpoint. See DEFAULT_CLASSIFIER_SETTINGS
+  // in packages/types for why this must not ship as a live third-party URL.
+  baseUrl: "",
   uncertainPolicy: "provider",
   timeoutMs: 8_000,
   maxExcerptChars: 500,

@@ -449,7 +449,20 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
 };
 
 export const DEFAULT_CLASSIFIER_SETTINGS: ClassifierSettings = {
-  baseUrl: "https://classifier.dev",
+  // Empty means classifier triage is switched off.
+  //
+  // This used to ship as "https://classifier.dev", which meant a fresh install
+  // already had a third-party endpoint configured and enabling AI — a single
+  // deliberate act, with nothing else configured — started sending redacted
+  // draft excerpts to that endpoint. The claim on the tin is that drafts never
+  // leave the device, and a feature being described in a settings dialog the
+  // reader may never open is not the same as the user having turned it on.
+  //
+  // Off by default is also the honest failure mode: with no classifier the
+  // unresolved chunks simply go to the provider the user *did* configure.
+  // classifier.dev remains one keystroke away in Settings, where it was always
+  // shown as an example.
+  baseUrl: "",
   uncertainPolicy: "provider",
   timeoutMs: 8_000,
   maxExcerptChars: 500,

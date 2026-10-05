@@ -46,15 +46,7 @@ const SPELLING_VARIANTS: string[][] = [
  */
 const SYNONYM_FAMILIES: string[][] = [
   ["utilise", "utilize", "use"], ["utilisation", "utilization"], ["utilises", "utilizes"],
-  ["whilst", "while"], ["terminate", "end"], ["commence", "start"], ["purchase", "buy"],
-  ["purchase", "procure"], ["assist", "help"], ["attempt", "try"], ["additional", "extra"],
-  ["numerous", "many"], ["approximately", "about"], ["demonstrate", "show"], ["sufficient", "enough"],
-  ["prior to", "before"], ["subsequent to", "after"], ["in the event that", "if"],
-  ["at the present time", "now"], ["in spite of the fact that", "although"],
-  ["due to the fact that", "because"], ["for the purpose of", "for"], ["in order to", "to"],
-  ["with regard to", "about"], ["a large number of", "many"], ["the majority of", "most"],
-  ["is able to", "can"], ["has the ability to", "can"], ["make a decision", "decide"],
-  ["provide assistance", "help"], ["in close proximity", "near"], ["at this point in time", "now"],
+  ["whilst", "while"], ["purchase", "buy"], ["purchase", "procure"], ["assist", "help"], ["attempt", "try"],
   ["acknowledgement", "acknowledgment"], ["judgement", "judgment"], ["enrolment", "enrollment"],
   ["fulfilment", "fulfillment"], ["instalment", "installment"], ["skilful", "skillful"],
   ["programme", "program"], ["programmes", "programs"], ["specialised", "specialized"],
@@ -63,6 +55,30 @@ const SYNONYM_FAMILIES: string[][] = [
   ["authorised", "authorized"], ["prioritised", "prioritized"], ["minimised", "minimized"],
   ["maximised", "maximized"], ["standardised", "standardized"], ["emphasised", "emphasized"],
   ["criticised", "criticized"], ["customised", "customized"], ["centralise", "centralize"],
+];
+
+/**
+ * Pairs where one form is simply the long way of saying the other.
+ *
+ * These used to live in SYNONYM_FAMILIES, which made them symmetric: the
+ * dominant form won, so a draft that said "before" more often than "prior to"
+ * was told to replace "before" with "prior to". That inverted the engine's own
+ * conciseness rules and made it recommend exactly the padding a writer was
+ * avoiding. A wordy form is now only ever the thing being flagged.
+ *
+ * Order matters: [wordy, plain].
+ */
+const WORDY_VARIANTS: Array<[string, string]> = [
+  ["terminate", "end"], ["commence", "start"], ["additional", "extra"],
+  ["numerous", "many"], ["approximately", "about"], ["demonstrate", "show"],
+  ["sufficient", "enough"], ["prior to", "before"], ["subsequent to", "after"],
+  ["in the event that", "if"], ["at the present time", "now"],
+  ["in spite of the fact that", "although"], ["due to the fact that", "because"],
+  ["for the purpose of", "for"], ["in order to", "to"], ["with regard to", "about"],
+  ["a large number of", "many"], ["the majority of", "most"], ["is able to", "can"],
+  ["has the ability to", "can"], ["make a decision", "decide"],
+  ["provide assistance", "help"], ["in close proximity", "near"],
+  ["at this point in time", "now"],
 ];
 
 /** British and American -ise/-ize endings, checked only when both appear. */
@@ -75,7 +91,20 @@ const SUFFIX_VARIANTS: Array<[string, string]> = [
 ];
 
 /** Number words that should not drift between digits and words. */
-const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "twelve"];
+const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+
+/**
+ * The digit form of each number word.
+ *
+ * This rule replaces a number word with its digit, never with a different
+ * number word. It previously reused resolveInconsistency's winning word, which
+ * meant a draft could be told "three" should be "five" — a suggestion that
+ * silently rewrites the facts of the sentence.
+ */
+const NUMBER_WORD_DIGITS: Record<string, string> = {
+  one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7",
+  eight: "8", nine: "9", ten: "10", eleven: "11", twelve: "12",
+};
 
 interface Occurrence {
   start: number;
@@ -197,6 +226,25 @@ export function findConsistencyIssues(
     );
   }
 
+  // 3b. Wordy vs plain: only ever flag the long form, and only when the
+  //     shorter form is also in use, so this stays a consistency rule rather
+  //     than a second conciseness rule.
+  for (const [wordy, plain] of WORDY_VARIANTS) {
+    const wordyOccurrences = countForms(text, [wordy]).get(wordy);
+    if (!wordyOccurrences?.length) continue;
+    const plainOccurrences = countForms(text, [plain]).get(plain);
+    if (!plainOccurrences?.length) continue;
+    flagOccurrences(
+      wordyOccurrences,
+      plain,
+      "consistency-synonym-drift",
+      "The long way round",
+      (value) => `This draft also writes “${plain}”, but uses “${value}” here. The shorter form reads better without changing the meaning.`,
+      "low",
+      0.78,
+    );
+  }
+
   // 4. Numbers written as words in some places and digits in others.
   const digitNumbers = countForms(text, ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
   const wordNumbers = new Map<string, Occurrence[]>();
@@ -215,15 +263,18 @@ export function findConsistencyIssues(
   }
   const numberDecision = resolveInconsistency(wordNumbers, 3);
   if (numberDecision && digitNumbers.size >= 2) {
-    flagOccurrences(
-      wordNumbers.get(numberDecision.flag) ?? [],
-      numberDecision.keep,
-      "consistency-number-format",
-      "Numbers switch between words and digits",
-      (value) => `This draft writes small numbers as digits elsewhere but as “${value}” here. One format is easier to scan.`,
-      "low",
-      0.7,
-    );
+    const replacement = NUMBER_WORD_DIGITS[numberDecision.flag];
+    if (replacement) {
+      flagOccurrences(
+        wordNumbers.get(numberDecision.flag) ?? [],
+        replacement,
+        "consistency-number-format",
+        "Numbers switch between words and digits",
+        (value) => `This draft writes small numbers as digits elsewhere but as “${value}” here. One format is easier to scan.`,
+        "low",
+        0.7,
+      );
+    }
   }
 
   // 5. Capitalisation drift on a name. "Acme" then "ACME" then "acme" is a

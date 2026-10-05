@@ -18,6 +18,54 @@ test("passive voice no longer matches non-participles like 'often' and 'even'", 
   assert.deepEqual(passive.map((issue) => issue.original), [], "adverbs ending in -en are not participles");
 });
 
+test("passive voice does not report stative adjectives ending in -ed", () => {
+  // The pattern matched any \p{L}+ed after a form of "be", so ordinary prose
+  // like "the walls are red" was reported as a passive construction.
+  for (const text of ["The walls are red.", "He was tired.", "The path was narrow.", "They were pleased."]) {
+    const passive = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "style-passive-voice");
+    assert.deepEqual(passive.map((issue) => issue.original), [], `"${text}" is not passive voice`);
+  }
+  const real = analyzeLocally("The report was reviewed last week.", style).issues.filter((issue) => issue.ruleId === "style-passive-voice");
+  assert.ok(real.length > 0, "a genuine passive construction must still be reported");
+});
+
+test("capitalization does not fire after an abbreviation", () => {
+  for (const text of ["Mr. smith wrote it.", "Dr. jones will call.", "St. mary parish.", "etc. the rest is fine.", "vs. the other option.", "i.e. this is the plan."]) {
+    const found = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "capitalization-sentence-start");
+    assert.deepEqual(found.map((issue) => issue.original), [], `"${text}" is correct as written`);
+  }
+  const real = analyzeLocally("He left. then nobody spoke.", style).issues.filter((issue) => issue.ruleId === "capitalization-sentence-start");
+  assert.deepEqual(real.map((issue) => issue.original), ["t"], "a real lowercase sentence start must still be reported");
+});
+
+test("indented markdown lines are not reported as extra spaces", () => {
+  const list = analyzeLocally("Intro line here.\n\n  - first item\n  - second item", style).issues.filter((issue) => issue.ruleId === "punctuation-extra-space");
+  assert.deepEqual(list, [], "list indentation is written that way on purpose");
+  const nested = analyzeLocally("Intro line here.\n\n- outer\n    - inner", style).issues.filter((issue) => issue.ruleId === "punctuation-extra-space");
+  assert.deepEqual(nested, [], "nested list indentation is not a stray double space");
+  const real = analyzeLocally("The start of a sentence here.  The rest follows.", style).issues.filter((issue) => issue.ruleId === "punctuation-extra-space");
+  assert.equal(real.length, 1, "a genuine double space mid-line must still be reported");
+});
+
+test("article agreement does not shout the replacement", () => {
+  // preserveCase treated a single capital letter as all-caps, so "A hour"
+  // became "AN hour".
+  const found = analyzeLocally("A hour of work with the team.", style).issues.filter((issue) => issue.ruleId === "grammar-article-agreement");
+  assert.deepEqual(found.map((issue) => issue.replacement), ["An"]);
+  const shouty = analyzeLocally("we plan an hour of work.", style).issues.filter((issue) => issue.ruleId === "grammar-article-agreement");
+  assert.deepEqual(shouty.map((issue) => issue.replacement), [], "a correct article is not reported");
+});
+
+test("metre/meter is left alone because the homograph cannot be resolved", () => {
+  // "A parking meter" is "meter" in British English too. Rewriting it to
+  // "metre" is not a dialect preference, it is wrong.
+  for (const dialect of ["en-GB", "en-US"]) {
+    const found = analyzeLocally("The meter in the driveway shows 45000 kWh. A parking meter took coins.", { ...style, dialect }).issues
+      .filter((issue) => issue.ruleId === "dialect-spelling" && issue.original.toLowerCase() === "meter");
+    assert.deepEqual(found, [], `"meter" must not be rewritten under ${dialect}`);
+  }
+});
+
 test("idiomatic reporting passives in reports are not nagged", () => {
   const text = "Q3 revenue grew 12%. The support backlog was cleared by the end of September and the follow-up items are assigned to owners.";
   const goalSet = goals("professional", "inform", "professional");

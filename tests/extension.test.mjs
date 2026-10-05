@@ -62,7 +62,10 @@ function browserLikeContext() {
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
   const manifest = JSON.parse(await readFile(file("extension/manifest.json"), "utf8"));
   assert.ok(!JSON.stringify(manifest).includes("<all_urls>"));
-  assert.deepEqual(manifest.permissions, ["storage", "activeTab", "scripting"]);
+  // activeTab was declared but never used: the toolbar button only opens the
+  // options page, and injection goes through chrome.scripting against origins
+  // the user has explicitly granted. Asking for less is the whole point.
+  assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*", "http://*/*"]);
   assert.equal(manifest.content_scripts, undefined);
   await readFile(file("extension/shared-analysis.js"), "utf8");
@@ -264,7 +267,14 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.doesNotMatch(background, /\n\s{8}goals:\s*message\.goals,\s*\n\s{8}style:\s*message\.style,/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");
-  assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);
+  // Classifier triage is off until an endpoint is configured. This used to
+  // ship as "https://classifier.dev", and because initialise() copies the
+  // defaults into storage on install, a fresh extension was pointed at that
+  // vendor host whether or not the user had ever chosen it.
+  assert.match(options, /classifier:\s*\{\s*baseUrl:\s*""/iu);
+  assert.match(background, /classifier:\s*\{[^}]*baseUrl:\s*""/iu);
+  assert.doesNotMatch(background, /baseUrl:\s*"https:\/\/classifier\.dev"/iu);
+  assert.doesNotMatch(options, /baseUrl:\s*"https:\/\/classifier\.dev"/iu);
   assert.match(options, /classifier:\s*\{\s*\.\.\.state\.classifier,\s*apiKey:\s*""/iu);
   assert.match(options, /clear-ai-cache/iu);
   assert.match(options, /previousCloudPatterns/iu);

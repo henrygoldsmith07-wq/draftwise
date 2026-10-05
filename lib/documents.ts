@@ -62,6 +62,11 @@ export interface DocumentStoreBackend {
   put(document: StoredDocument): Promise<void>;
   remove(id: string): Promise<void>;
   clear(): Promise<void>;
+  /**
+   * Releases any open database handle so the whole database can be deleted.
+   * Optional: the localStorage and memory tiers hold nothing open.
+   */
+  close?(): Promise<void>;
 }
 
 export type DocumentBackendMode = "indexeddb" | "localstorage" | "memory";
@@ -301,6 +306,17 @@ export class IndexedDbDocumentBackend implements DocumentStoreBackend {
     });
   }
 
+  /**
+   * Closes the memoised connection. Without this the database cannot be
+   * deleted: deleteDatabase() blocks on our own open handle, so "Clear all
+   * local data" would sit on a blocked request it was treating as success.
+   */
+  async close(): Promise<void> {
+    const database = await this.database;
+    this.database = Promise.resolve(null);
+    database?.close();
+  }
+
   async list() {
     const result = await this.transaction("readonly", (store) => store.getAll() as IDBRequest<unknown[]>);
     return (result ?? []).flatMap((item) => {
@@ -440,12 +456,36 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
     }
   }
 
+  async close(): Promise<void> {
+    await this.current.close?.();
+  }
+
+  /**
+   * Clearing has the same honesty guarantee as removal: every tier is attempted
+   * so a tier change cannot strand documents, but a failure to clear is
+   * reported rather than swallowed. "Clear all local data" is a privacy
+   * guarantee, and telling the writer it succeeded while their drafts are still
+   * on disk is the worst possible failure for this method to have.
+   */
   async clear(): Promise<void> {
-    try {
-      await this.current.clear();
-    } catch {
-      // Clearing is best-effort across tiers; each tier is attempted.
+    const failures: unknown[] = [];
+    for (const tier of this.tiers()) {
+      try {
+        await tier.clear();
+      } catch (error) {
+        failures.push(error);
+      }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) {
+      throw new Error(`Failed to clear ${failures.length} document storage tiers.`);
+    }
+  }
+
+  private tiers(): DocumentStoreBackend[] {
+    const tiers: DocumentStoreBackend[] = [this.current];
+    if (this.memory && this.memory !== this.current) tiers.push(this.memory);
+    return tiers;
   }
 }
 

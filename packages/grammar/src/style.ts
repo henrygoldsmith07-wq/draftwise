@@ -59,6 +59,7 @@ export function findRepeatedWordsAndPhrases(text: string, preferences: StylePref
   return issues;
 }
 
+
 export function findStyleIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
   for (const [phrase, replacement] of WORDINESS) {
@@ -99,6 +100,13 @@ export function findStyleIssues(text: string, preferences: StylePreferences, doc
 }
 
 export function findStructureIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
+  // Stative adjectives that end in -ed.
+  //
+  // The `-ed` alternative in the passive pattern below matched "are red",
+  // "was tired", "naked", "sacred", "beloved" and "wicked" — ordinary prose,
+  // reported as passive constructions. The pattern's -en guard covers "are
+  // often"; this covers the same mistake in its -ed form.
+  const staticEdAdjectives = " red tired naked sacred beloved aged wicked learned crooked jagged ragged blessed cursed diseased supposed used pleased prepared concerned involved married unmarried talented gifted limited unlimited reserved content confident silent violent ";
   const issues: WritingIssue[] = [];
   const sentences = document.sentences;
   const sentenceLimit = preferences.preferredSentenceLength === "short" ? 22 : preferences.preferredSentenceLength === "long" ? 45 : 32;
@@ -129,6 +137,9 @@ export function findStructureIssues(text: string, preferences: StylePreferences,
     const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))\b/giu;
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
+      // "The walls are red" and "He was tired" are not passive constructions.
+      const participle = /(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))/iu.exec(match[0].replace(/^\S+\s+/u, ""));
+      if (participle && staticEdAdjectives.includes(` ${participle[0].toLowerCase()} `)) continue;
       // Only offer the change where an actor is plausibly missing. Reporting
       // what happened ("the backlog was cleared") is correct, deliberate prose.
       const sentence = document.sentences.find((span) => start >= span.start && start < span.end);

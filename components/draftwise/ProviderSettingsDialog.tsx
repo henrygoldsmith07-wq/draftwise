@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import type { ClassifierSettings, ProviderSettings, StylePreferences } from "@/packages/types/src";
+import { DEFAULT_CLASSIFIER_SETTINGS } from "@/packages/types/src";
 
 const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: string; baseUrl: string; modelPlaceholder: string }> = [
   { value: "openai-compatible", label: "OpenAI", baseUrl: "https://api.openai.com/v1", modelPlaceholder: "gpt-4o-mini" },
@@ -45,7 +46,7 @@ export function ProviderSettingsDialog({
 }: ProviderSettingsDialogProps) {
   const patchSettings = (patch: Partial<ProviderSettings>) => onSettingsChange({ ...settings, ...patch });
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
-  const classifierValue: ClassifierSettings = classifier ?? { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider" };
+  const classifierValue: ClassifierSettings = classifier ?? DEFAULT_CLASSIFIER_SETTINGS;
   const patchClassifier = (patch: Partial<ClassifierSettings>) => onClassifierChange?.({ ...classifierValue, ...patch });
   const save = () => {
     const result = onSave?.();
@@ -65,8 +66,8 @@ export function ProviderSettingsDialog({
         <DialogHeader>
           <DialogTitle>Provider & privacy</DialogTitle>
           <DialogDescription>
-            Local checks run on this device. If AI is enabled, redacted candidate excerpts may go to classifier.dev for triage,
-            and selected chunks go directly to your configured provider. Draftwise does not proxy or store those requests.
+            Local checks run on this device. If AI is enabled, selected chunks go directly to your configured provider.
+            Classifier triage is off unless you fill in an endpoint below. Draftwise does not proxy or store those requests.
           </DialogDescription>
         </DialogHeader>
 
@@ -107,8 +108,8 @@ export function ProviderSettingsDialog({
           <div className="settings-callout">
             <ShieldCheck size={18} />
             <div>
-              <strong>Three explicit paths</strong>
-              <span>Local-only checks stay on-device; classifier.dev receives excerpts for routing; your provider receives only chunks selected for AI review.</span>
+              <strong>Explicit paths, and nothing sends by default</strong>
+              <span>Local checks stay on-device. A classifier receives excerpts for routing only if you configure one; your provider receives only chunks selected for AI review.</span>
             </div>
           </div>
 
@@ -136,8 +137,8 @@ export function ProviderSettingsDialog({
           <div className="settings-callout">
             <ShieldCheck size={18} />
             <div>
-              <strong>Optional classifier triage</strong>
-              <span>Local rules run first. Only unresolved, redacted excerpts go to classifier.dev; it returns a label and confidence, never a rewrite. Selected ai-needed chunks then reach your provider.</span>
+              <strong>Optional classifier triage <em>off by default</em></strong>
+              <span>Local rules run first. If you fill in an endpoint below, only unresolved, redacted excerpts go there; it returns a label and confidence, never a rewrite. Selected ai-needed chunks then reach your provider. Leave this empty and nothing is sent to any classifier.</span>
             </div>
           </div>
 

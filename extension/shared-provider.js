@@ -320,7 +320,9 @@ const clamp = (value) => Math.max(0, Math.min(100, Math.round(value)));
 function preserveCase(original, replacement) {
     if (!replacement)
         return replacement;
-    if (original === original.toUpperCase())
+    // A single character is trivially equal to its own uppercase form, so
+    // "A" -> "an" used to take the shouting branch and produce "AN" mid-sentence.
+    if (original.length > 1 && original === original.toUpperCase())
         return replacement.toUpperCase();
     if (original[0] === original[0]?.toUpperCase())
         return replacement[0].toUpperCase() + replacement.slice(1);
@@ -660,7 +662,11 @@ const DIALECT_VARIANTS = {
     favourite: { "en-GB": "favourite", "en-US": "favorite" },
     fulfil: { "en-GB": "fulfil", "en-US": "fulfill" },
     labelled: { "en-GB": "labelled", "en-US": "labeled" },
-    metre: { "en-GB": "metre", "en-US": "meter" },
+    // No metre/meter entry. The unit is "metre" in British English but the
+    // device is "meter" in both variants, so "A parking meter took coins" was
+    // rewritten to "metre" — not a dialect preference, just wrong. Telling the
+    // two apart needs context the word alone does not carry, and suggesting
+    // incorrect English costs the writer more trust than a missing suggestion.
     practise: { "en-GB": "practise", "en-US": "practice" },
     programme: { "en-GB": "programme", "en-US": "program" },
     theatre: { "en-GB": "theatre", "en-US": "theater" },
@@ -723,17 +729,22 @@ function sentenceSpans(text, allTokens) {
     const spans = [];
     const tokens = allTokens ?? tokensIn(text);
     let tokenIndex = 0;
-    const pattern = /[^.!?…\n]+(?:[.!?…]+(?=\s|$)|$)/gu;
-    for (const match of text.matchAll(pattern)) {
-        const raw = match[0];
-        const leading = raw.search(/\S/u);
-        if (leading < 0)
-            continue;
-        const start = (match.index ?? 0) + leading;
-        const value = raw.slice(leading).trim();
-        if (!value)
-            continue;
-        const end = start + value.length;
+    // A sentence is a run of text ending in .!?…, and the terminator must be
+    // followed by whitespace or the end of the document.
+    //
+    // The lazy body matters, and so does requiring a non-space start. The
+    // previous pattern paired a greedy negated class with an alternation it
+    // could not satisfy, so a long run of spaces was consumed and then
+    // un-consumed one character at a time, at every start position in the run.
+    // One 16 KB whitespace paragraph cost ~1s here and ~2s in analyzeLocally, on
+    // the keystroke path. With `(?=\S)` a start inside a whitespace run is
+    // rejected immediately instead of rescanning the run, and the body only
+    // expands while it is finding a terminator.
+    const pattern = /(?=\S)[^.!?…\n]*?[.!?…]+(?=\s|$)/gu;
+    const addSpan = (start, end) => {
+        const value = text.slice(start, end);
+        if (!value.trim())
+            return;
         while (tokenIndex < tokens.length && tokens[tokenIndex].end <= start)
             tokenIndex += 1;
         const sentenceTokens = [];
@@ -742,6 +753,25 @@ function sentenceSpans(text, allTokens) {
             tokenIndex += 1;
         }
         spans.push({ text: value, start, end, tokens: sentenceTokens });
+    };
+    let consumedTo = 0;
+    for (const match of text.matchAll(pattern)) {
+        const raw = match[0];
+        const leading = raw.search(/\S/u);
+        if (leading < 0)
+            continue;
+        const start = (match.index ?? 0) + leading;
+        const end = (match.index ?? 0) + raw.trimEnd().length;
+        if (!text.slice(start, end).trim())
+            continue;
+        addSpan(start, end);
+        consumedTo = (match.index ?? 0) + raw.length;
+    }
+    // Whatever follows the last terminator is a sentence in its own right.
+    const tailStart = text.slice(consumedTo).search(/\S/u);
+    if (tailStart >= 0) {
+        const start = consumedTo + tailStart;
+        addSpan(start, text.length);
     }
     return spans;
 }
@@ -1133,13 +1163,28 @@ function suggestSpelling(word, preferences = {}) {
         SPELLING_CACHE.delete(SPELLING_CACHE.keys().next().value);
     return result;
 }
+/**
+ * Lowercased lookup for DIALECT_VARIANTS, keyed by either spelling.
+ *
+ * The lookup this replaces ran per token: 26 Object.entries allocations and up
+ * to 52 toLocaleLowerCase calls, for every word in the document. On a 180k-word
+ * draft that was ~1.4s of a 2.6s spelling pass.
+ */
+const DIALECT_LOOKUP = new Map();
+for (const [base, variants] of Object.entries(DIALECT_VARIANTS)) {
+    for (const spelling of [variants["en-GB"], variants["en-US"]]) {
+        const key = spelling.toLocaleLowerCase();
+        if (!DIALECT_LOOKUP.has(key))
+            DIALECT_LOOKUP.set(key, [base, variants]);
+    }
+}
 function findSpelling(text, preferences, document = parseDocument(text)) {
     const issues = [];
     for (const [tokenIndex, token] of document.tokens.entries()) {
         const typo = TYPO_FIXES[token.lower];
         const contextualReplacement = contextualDialectReplacement(document.tokens, tokenIndex, preferences);
         const dialect = !CONTEXTUAL_DIALECT_WORDS.has(token.lower)
-            ? Object.entries(DIALECT_VARIANTS).find(([, variants]) => token.lower === variants[preferences.dialect].toLocaleLowerCase() || token.lower === variants[preferences.dialect === "en-GB" ? "en-US" : "en-GB"].toLocaleLowerCase())
+            ? DIALECT_LOOKUP.get(token.lower)
             : undefined;
         const dialectReplacement = contextualReplacement ?? (dialect && token.lower !== dialect[1][preferences.dialect].toLocaleLowerCase()
             ? dialect[1][preferences.dialect]
@@ -1251,9 +1296,19 @@ function findPunctuation(text, preferences) {
     const issues = [];
     for (const match of text.matchAll(/ {2,}/g)) {
         const start = match.index ?? 0;
+        // Leading spaces on a line are indentation, not a stray double space:
+        // nested list items and indented code are both written that way on purpose.
+        const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+        if (!text.slice(lineStart, start).trim())
+            continue;
         pushIssue(issues, makeIssue("punctuation-extra-space", start, start + match[0].length, match[0], " ", "punctuation", "low", "Extra space", "A single space keeps the document’s rhythm consistent.", 0.99, preferences));
     }
-    for (const match of text.matchAll(/\s+([,.;!?])/g)) {
+    // Anchored to a preceding non-space. Unanchored, `\s+` consumed a whole run of
+    // whitespace and then gave it back one character at a time looking for a
+    // punctuation mark that was not there, at every start position in the run —
+    // roughly 1.5s on a 16 KB run of newlines, on the keystroke path. The
+    // lookbehind makes the run only start where a word has just ended.
+    for (const match of text.matchAll(/(?<=\S)\s+([,.;!?])/g)) {
         const start = match.index ?? 0;
         pushIssue(issues, makeIssue("punctuation-space-before", start, start + match[0].length, match[0], match[1] ?? "", "punctuation", "medium", "Space before punctuation", "Punctuation sits directly after the word before it.", 0.99, preferences));
     }
@@ -1270,10 +1325,40 @@ function findPunctuation(text, preferences) {
     }
     return issues;
 }
+/**
+ * Words whose full stop does not end a sentence.
+ *
+ * Without this, "Mr. smith", "Dr. jones", "St. mary parish", "etc. the rest"
+ * and "vs. the other option" were all reported as lowercase sentence starts,
+ * at 0.99 confidence, counting against correctness.
+ */
+const SENTENCE_ABBREVIATIONS = new Set([
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "eg", "ie",
+    "approx", "est", "dept", "univ", "vol", "ch", "pp", "fig", "no", "al",
+    "inc", "ltd", "co", "corp", "ave", "blvd", "min", "max",
+]);
+function endsWithAbbreviation(text, stopIndex) {
+    let start = stopIndex;
+    while (start > 0 && /[\p{L}.]/u.test(text[start - 1]))
+        start -= 1;
+    return isAbbreviationWord(text.slice(start, stopIndex));
+}
+function isAbbreviationWord(word) {
+    const normalised = word.toLowerCase().replace(/\./gu, "");
+    return normalised.length > 0 && SENTENCE_ABBREVIATIONS.has(normalised);
+}
 function findCapitalization(text, preferences) {
     const issues = [];
     for (const match of text.matchAll(/(^|[.!?]\s+)([a-z])/g)) {
-        const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+        const prefix = match[1] ?? "";
+        const start = (match.index ?? 0) + prefix.length;
+        // "Mr. smith" and "etc. the rest" are correct as written. A full stop that
+        // closes a known abbreviation is not a sentence boundary, and neither is
+        // the very start of a draft that opens with one.
+        const precededByAbbreviation = prefix && (match.index ?? 0) > 0 && endsWithAbbreviation(text, (match.index ?? 0) + prefix.length - 2);
+        const opensWithAbbreviation = isAbbreviationWord(/^[\p{L}.]+/u.exec(text.slice(start))?.[0] ?? "");
+        if (precededByAbbreviation || opensWithAbbreviation)
+            continue;
         const original = match[2] ?? "";
         pushIssue(issues, makeIssue("capitalization-sentence-start", start, start + 1, original, original.toUpperCase(), "capitalization", "medium", "Start with a capital letter", "A new sentence usually begins with a capital letter, which makes the structure easier to scan.", 0.99, preferences));
     }
@@ -1368,6 +1453,13 @@ function findStyleIssues(text, preferences, document = parseDocument(text)) {
     return issues;
 }
 function findStructureIssues(text, preferences, document = parseDocument(text)) {
+    // Stative adjectives that end in -ed.
+    //
+    // The `-ed` alternative in the passive pattern below matched "are red",
+    // "was tired", "naked", "sacred", "beloved" and "wicked" — ordinary prose,
+    // reported as passive constructions. The pattern's -en guard covers "are
+    // often"; this covers the same mistake in its -ed form.
+    const staticEdAdjectives = " red tired naked sacred beloved aged wicked learned crooked jagged ragged blessed cursed diseased supposed used pleased prepared concerned involved married unmarried talented gifted limited unlimited reserved content confident silent violent ";
     const issues = [];
     const sentences = document.sentences;
     const sentenceLimit = preferences.preferredSentenceLength === "short" ? 22 : preferences.preferredSentenceLength === "long" ? 45 : 32;
@@ -1399,6 +1491,10 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
         const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))\b/giu;
         for (const match of text.matchAll(pattern)) {
             const start = match.index ?? 0;
+            // "The walls are red" and "He was tired" are not passive constructions.
+            const participle = /(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))/iu.exec(match[0].replace(/^\S+\s+/u, ""));
+            if (participle && staticEdAdjectives.includes(` ${participle[0].toLowerCase()} `))
+                continue;
             // Only offer the change where an actor is plausibly missing. Reporting
             // what happened ("the backlog was cleared") is correct, deliberate prose.
             const sentence = document.sentences.find((span) => start >= span.start && start < span.end);
@@ -2353,15 +2449,7 @@ const SPELLING_VARIANTS = [
  */
 const SYNONYM_FAMILIES = [
     ["utilise", "utilize", "use"], ["utilisation", "utilization"], ["utilises", "utilizes"],
-    ["whilst", "while"], ["terminate", "end"], ["commence", "start"], ["purchase", "buy"],
-    ["purchase", "procure"], ["assist", "help"], ["attempt", "try"], ["additional", "extra"],
-    ["numerous", "many"], ["approximately", "about"], ["demonstrate", "show"], ["sufficient", "enough"],
-    ["prior to", "before"], ["subsequent to", "after"], ["in the event that", "if"],
-    ["at the present time", "now"], ["in spite of the fact that", "although"],
-    ["due to the fact that", "because"], ["for the purpose of", "for"], ["in order to", "to"],
-    ["with regard to", "about"], ["a large number of", "many"], ["the majority of", "most"],
-    ["is able to", "can"], ["has the ability to", "can"], ["make a decision", "decide"],
-    ["provide assistance", "help"], ["in close proximity", "near"], ["at this point in time", "now"],
+    ["whilst", "while"], ["purchase", "buy"], ["purchase", "procure"], ["assist", "help"], ["attempt", "try"],
     ["acknowledgement", "acknowledgment"], ["judgement", "judgment"], ["enrolment", "enrollment"],
     ["fulfilment", "fulfillment"], ["instalment", "installment"], ["skilful", "skillful"],
     ["programme", "program"], ["programmes", "programs"], ["specialised", "specialized"],
@@ -2370,6 +2458,29 @@ const SYNONYM_FAMILIES = [
     ["authorised", "authorized"], ["prioritised", "prioritized"], ["minimised", "minimized"],
     ["maximised", "maximized"], ["standardised", "standardized"], ["emphasised", "emphasized"],
     ["criticised", "criticized"], ["customised", "customized"], ["centralise", "centralize"],
+];
+/**
+ * Pairs where one form is simply the long way of saying the other.
+ *
+ * These used to live in SYNONYM_FAMILIES, which made them symmetric: the
+ * dominant form won, so a draft that said "before" more often than "prior to"
+ * was told to replace "before" with "prior to". That inverted the engine's own
+ * conciseness rules and made it recommend exactly the padding a writer was
+ * avoiding. A wordy form is now only ever the thing being flagged.
+ *
+ * Order matters: [wordy, plain].
+ */
+const WORDY_VARIANTS = [
+    ["terminate", "end"], ["commence", "start"], ["additional", "extra"],
+    ["numerous", "many"], ["approximately", "about"], ["demonstrate", "show"],
+    ["sufficient", "enough"], ["prior to", "before"], ["subsequent to", "after"],
+    ["in the event that", "if"], ["at the present time", "now"],
+    ["in spite of the fact that", "although"], ["due to the fact that", "because"],
+    ["for the purpose of", "for"], ["in order to", "to"], ["with regard to", "about"],
+    ["a large number of", "many"], ["the majority of", "most"], ["is able to", "can"],
+    ["has the ability to", "can"], ["make a decision", "decide"],
+    ["provide assistance", "help"], ["in close proximity", "near"],
+    ["at this point in time", "now"],
 ];
 /** British and American -ise/-ize endings, checked only when both appear. */
 const SUFFIX_VARIANTS = [
@@ -2380,7 +2491,19 @@ const SUFFIX_VARIANTS = [
     ["specialise", "specialize"], ["visualise", "visualize"], ["utilise", "utilize"],
 ];
 /** Number words that should not drift between digits and words. */
-const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "twelve"];
+const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+/**
+ * The digit form of each number word.
+ *
+ * This rule replaces a number word with its digit, never with a different
+ * number word. It previously reused resolveInconsistency's winning word, which
+ * meant a draft could be told "three" should be "five" — a suggestion that
+ * silently rewrites the facts of the sentence.
+ */
+const NUMBER_WORD_DIGITS = {
+    one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7",
+    eight: "8", nine: "9", ten: "10", eleven: "11", twelve: "12",
+};
 function countForms(text, forms) {
     const found = new Map();
     for (const form of forms) {
@@ -2459,6 +2582,18 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
             continue;
         flagOccurrences(forms.get(decision.flag) ?? [], decision.keep, "consistency-synonym-drift", "Two words for the same thing", (value) => `This draft uses “${decision.keep}” ${decision.keepCount} times and “${value}” ${decision.flagCount === 1 ? "once" : `${decision.flagCount} times`}. Switching between them is a common sign of text written in separate sittings.`, "low", 0.78);
     }
+    // 3b. Wordy vs plain: only ever flag the long form, and only when the
+    //     shorter form is also in use, so this stays a consistency rule rather
+    //     than a second conciseness rule.
+    for (const [wordy, plain] of WORDY_VARIANTS) {
+        const wordyOccurrences = countForms(text, [wordy]).get(wordy);
+        if (!wordyOccurrences?.length)
+            continue;
+        const plainOccurrences = countForms(text, [plain]).get(plain);
+        if (!plainOccurrences?.length)
+            continue;
+        flagOccurrences(wordyOccurrences, plain, "consistency-synonym-drift", "The long way round", (value) => `This draft also writes “${plain}”, but uses “${value}” here. The shorter form reads better without changing the meaning.`, "low", 0.78);
+    }
     // 4. Numbers written as words in some places and digits in others.
     const digitNumbers = countForms(text, ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
     const wordNumbers = new Map();
@@ -2479,7 +2614,10 @@ function findConsistencyIssues(text, preferences, document = parseDocument(text)
     }
     const numberDecision = resolveInconsistency(wordNumbers, 3);
     if (numberDecision && digitNumbers.size >= 2) {
-        flagOccurrences(wordNumbers.get(numberDecision.flag) ?? [], numberDecision.keep, "consistency-number-format", "Numbers switch between words and digits", (value) => `This draft writes small numbers as digits elsewhere but as “${value}” here. One format is easier to scan.`, "low", 0.7);
+        const replacement = NUMBER_WORD_DIGITS[numberDecision.flag];
+        if (replacement) {
+            flagOccurrences(wordNumbers.get(numberDecision.flag) ?? [], replacement, "consistency-number-format", "Numbers switch between words and digits", (value) => `This draft writes small numbers as digits elsewhere but as “${value}” here. One format is easier to scan.`, "low", 0.7);
+        }
     }
     // 5. Capitalisation drift on a name. "Acme" then "ACME" then "acme" is a
     //    consistency problem no sentence-level rule can see. The word has to be
@@ -4395,7 +4533,9 @@ const TRIAGE_TAXONOMY = [
     "other",
 ];
 const DEFAULT_CLASSIFIER_SETTINGS_VALUE = {
-    baseUrl: "https://classifier.dev",
+    // Off unless the user configures an endpoint. See DEFAULT_CLASSIFIER_SETTINGS
+    // in packages/types for why this must not ship as a live third-party URL.
+    baseUrl: "",
     uncertainPolicy: "provider",
     timeoutMs: 8_000,
     maxExcerptChars: 500,

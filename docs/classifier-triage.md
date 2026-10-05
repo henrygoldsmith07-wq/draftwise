@@ -1,18 +1,19 @@
-# Classifier triage (classifier.dev)
+# Classifier triage (optional, off by default)
 
-Draftwise runs local rules first. Only unresolved candidates are considered for semantic triage. The classifier returns a routing decision and never rewrites text.
+Draftwise runs local rules first. Only unresolved candidates are considered for semantic triage. The classifier returns a routing decision and never rewrites text. With no classifier endpoint configured — the shipped state — unresolved candidates go directly to the configured provider instead, and nothing is sent anywhere when AI is off.
 
 edit
  └─ changed range → safe context → local rules
       ├─ locally sufficient → keep local; no cloud request
-      └─ unresolved candidate → redacted excerpt → classifier.dev
+      └─ unresolved candidate → redacted excerpt → configured classifier (when one is set)
            ├─ local label + high confidence → keep local
            ├─ AI label + high confidence → configured provider for that chunk
            └─ low confidence, unknown label, omission, or outage → internal uncertain state
 
 ## Contract
 
-- Endpoint: POST https://classifier.dev/v1/classify by default. A configured base URL ending in /v1 or /classify is also accepted. HTTPS is required except for localhost development.
+- **Disabled by default.** The classifier base URL ships empty, so no classifier request is made until the user enters an endpoint in Settings. Draftwise does not pick a destination on the writer's behalf: with triage off, unresolved candidates go straight to the provider the user configured, and if AI is off too, nothing leaves the device at all.
+- Endpoint: POST {baseUrl}/v1/classify. A configured base URL ending in /v1 or /classify is also accepted. HTTPS is required except for localhost development. `https://classifier.dev` remains a valid value and is shown as an example in Settings, but it is a suggestion rather than a default.
 - Authentication is optional. Draftwise sends an Authorization bearer header only when an optional classifier workspace key is configured.
 - Request body follows the classifier.dev contract: { inputs: string[], labels: string[], instructions?: string }. Inputs are ordered redacted excerpts, never Draftwise objects with chunk IDs, local signals, categories, goals, or provider settings.
 - The selected semantic-v2 labels are:

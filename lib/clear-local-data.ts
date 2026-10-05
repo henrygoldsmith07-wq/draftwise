@@ -55,6 +55,13 @@ export async function clearAllLocalData(options: ClearLocalDataOptions = {}) {
   }
 
   // 4. The whole IndexedDB database: documents and snapshots included.
+  //    The live backend holds an open connection, so close it first —
+  //    deleteDatabase() blocks on that handle and would otherwise never fire.
+  try {
+    if (options.documentBackend) await options.documentBackend.close?.();
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Failed to close the document database");
+  }
   try {
     if (options.deleteIndexedDb) await options.deleteIndexedDb();
     else if (typeof indexedDB !== "undefined") await deleteDocumentsDatabase();
@@ -65,15 +72,23 @@ export async function clearAllLocalData(options: ClearLocalDataOptions = {}) {
   return errors.length === 0 ? { ok: true as const } : { ok: false as const, errors };
 }
 
+/**
+ * Rejects unless the database was genuinely deleted.
+ *
+ * This used to resolve on every outcome, including `onerror` and `onblocked`,
+ * so "Clear all local data" reported success while the drafts were still on
+ * disk. A blocked delete means some other connection is still open; telling the
+ * writer their data is gone is exactly the failure this product cannot afford.
+ */
 export function deleteDocumentsDatabase(): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     try {
       const request = indexedDB.deleteDatabase(DOCUMENTS_DB_NAME);
       request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-      request.onblocked = () => resolve();
-    } catch {
-      resolve();
+      request.onerror = () => reject(new Error("The local database could not be deleted."));
+      request.onblocked = () => reject(new Error("The local database is still open. Close other Draftwise tabs and try again."));
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error("The local database could not be deleted."));
     }
   });
 }

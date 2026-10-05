@@ -2,8 +2,10 @@
 export const clamp  = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
 export function preserveCase(original: string, replacement: string) {
-  if (!replacement) return replacement;
-  if (original === original.toUpperCase()) return replacement.toUpperCase();
+if (!replacement) return replacement;
+  // A single character is trivially equal to its own uppercase form, so
+  // "A" -> "an" used to take the shouting branch and produce "AN" mid-sentence.
+  if (original.length > 1 && original === original.toUpperCase()) return replacement.toUpperCase();
   if (original[0] === original[0]?.toUpperCase()) return replacement[0].toUpperCase() + replacement.slice(1);
   return replacement;
 }

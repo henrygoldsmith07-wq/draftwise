@@ -11,6 +11,45 @@ const consistencyIssues = (text) =>
 
 const paragraph = (...lines) => lines.join("\n\n");
 
+test("consistency never recommends the longer, wordier form of a phrase", () => {
+  // These families used to be symmetric: whichever form was more common won,
+  // so a draft that said "before" more often than "prior to" was told to
+  // replace "before" with "prior to" — against the engine's own conciseness
+  // rules. The wordy form is now the only thing that can ever be flagged.
+  const cases = [
+    ["Prior to the launch we tested. Prior to the launch we logged. Prior to the launch we shipped. We arrived before noon and slept before dawn.", "Prior to", "Before"],
+    ["We can ship this. We can test it. Now the team moves. At the present time the build ran.", "At the present time", "Now"],
+    ["About the plan: it works. Approximately the same cost. With regard to scope we agree. About scope again.", "Approximately", "About"],
+    ["The build ran now. It failed now. At the present time we retried.", "At the present time", "Now"],
+  ];
+  for (const [text, wordy, plain] of cases) {
+    const drift = consistencyIssues(text).filter((item) => item.ruleId === "consistency-synonym-drift");
+    const flagged = drift.filter((item) => item.original.toLowerCase() === plain.toLowerCase());
+    assert.deepEqual(flagged, [], `plain "${plain}" must never be flagged in "${text}"`);
+    assert.ok(drift.some((item) => item.original.toLowerCase() === wordy.toLowerCase()), `wordy "${wordy}" should be flagged once the plain form is also used`);
+    assert.ok(drift.every((item) => !item.replacement.toLowerCase().includes(wordy.toLowerCase())), "no replacement may introduce the longer form");
+  }
+});
+
+test("number format replaces a number word with its digit, never another number", () => {
+  // It previously reused the dominant number *word*, which changed the facts:
+  // "three" was rewritten to "five".
+  const text = paragraph(
+    "Release one had five features.",
+    "Release two had five fixes.",
+    "Release three had five tests.",
+    "Rollout reached 2/3 clusters.",
+    "Then 4/6 clusters followed.",
+    "Only three incidents were recorded that week.",
+  );
+  const found = consistencyIssues(text).filter((item) => item.ruleId === "consistency-number-format");
+  assert.ok(found.length > 0, "mixed number formats should be reported");
+  const digits = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
+  for (const issue of found) {
+    assert.equal(issue.replacement, digits[issue.original.toLowerCase()], `"${issue.original}" must become the same value written as a digit`);
+  }
+});
+
 test("a draft that mixes spellings is told which form it mostly uses", () => {
   const text = paragraph(
     "The colour of the report was noted.",
@@ -131,6 +170,43 @@ test("no consistency fix is suggested across a part of speech", () => {
   );
   const found = consistencyIssues(verb);
   assert.ok(found.every((item) => item.original.toLowerCase() !== "utilise" || item.replacement.toLowerCase() === "use"));
+});
+
+test("capitalisation drift is caught when a name is written in lower case", () => {
+  // The rule grouped only capitalised occurrences, so every key was already
+  // capitalised and the lowercase case its own comment described was
+  // unreachable — a name could drift down but never be corrected.
+  const text = paragraph(
+    "The Acme deal closed on Friday.",
+    "Acme reported growth again.",
+    "Acme hired two teams in total.",
+    "We spoke to acme about it.",
+  );
+  const found = consistencyIssues(text).filter((item) => item.ruleId === "consistency-capitalisation");
+  assert.equal(found.length, 1, "the lowercase occurrence should be reported");
+  assert.equal(found[0].original, "acme");
+  assert.equal(found[0].replacement, "Acme");
+});
+
+test("capitalisation drift does not fire on ordinary English words", () => {
+  // Once every occurrence was compared, a document that opened sentences with
+  // an article reported "the" -> "The". Common words are never a mis-capitalised
+  // name, so they are excluded outright.
+  const articles = paragraph(
+    "The first report landed late.",
+    "The second report landed late.",
+    "The third report landed late.",
+    "We kept a copy of the report.",
+  );
+  assert.deepEqual(consistencyIssues(articles).filter((item) => item.ruleId === "consistency-capitalisation"), []);
+});
+
+test("a -ise spelling is reported against the plainer word", () => {
+  const text = paragraph("We utilise the tool daily.", "They utilise it weekly.", "Staff utilise it often.", "We use it constantly.");
+  const found = consistencyIssues(text).filter((item) => item.ruleId === "consistency-synonym-drift");
+  assert.ok(found.length > 0, "the long spelling should be reported");
+  assert.ok(found.every((item) => item.replacement.toLowerCase() === "use"), "the replacement is the plainer word");
+  assert.ok(found.every((item) => item.original.toLowerCase() === "utilise"), "the plainer word is never the one flagged");
 });
 
 test("every consistency finding names the draft's own dominant form", () => {

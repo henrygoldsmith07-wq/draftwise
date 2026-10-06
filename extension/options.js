@@ -4,7 +4,9 @@ const permissionsApi = globalThis.DraftwisePermissions;
 const defaults = {
   aiEnabled: false,
   provider: { provider: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "", temperature: 0.2, maxTokens: 900, customHeaders: "" },
-  classifier: { baseUrl: "https://classifier.dev", apiKey: "", uncertainPolicy: "provider", timeoutMs: 8000, maxExcerptChars: 500 },
+  // Must match DEFAULT_CLASSIFIER_SETTINGS in packages/types: classifier
+  // triage is off until an endpoint is configured here.
+  classifier: { baseUrl: "", apiKey: "", uncertainPolicy: "provider", timeoutMs: 8000, maxExcerptChars: 500 },
   // Goals were already sent to the analysis pipeline but had no controls, so
   // every site silently used these defaults. They now round-trip like any other
   // setting, which is what makes goal-aware feedback reachable in the extension.
@@ -152,13 +154,18 @@ async function saveSettings() {
   const model = get("model").value.trim();
   if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) { setStatus("Enter a valid model ID.", true); return; }
   const state = await readState();
-  const nextClassifierBaseUrl = classifierBaseUrl || state.classifier.baseUrl;
-  classifierPatternValue ??= permissionsApi.providerPattern(nextClassifierBaseUrl);
+  // The field is the source of truth. An empty classifier URL means classifier
+  // triage is switched off, and the user must be able to reach that state by
+  // clearing the box — so this does not fall back to the stored value. It also
+  // must not ask for a host permission for "", which throws and would take the
+  // whole save down with it, leaving "Save settings" silently doing nothing.
+  const nextClassifierBaseUrl = classifierBaseUrl;
   const previousCloudPatterns = new Set();
   for (const value of [state.provider.baseUrl, state.classifier.baseUrl]) {
     try { previousCloudPatterns.add(permissionsApi.providerPattern(value)); } catch { /* stale invalid configuration */ }
   }
-  const desiredCloudPatterns = new Set([providerPatternValue, classifierPatternValue]);
+  const desiredCloudPatterns = new Set([providerPatternValue]);
+  if (classifierPatternValue) desiredCloudPatterns.add(classifierPatternValue);
   for (const site of state.siteAccess) {
     for (const pattern of permissionsApi.sitePatterns(site)) desiredCloudPatterns.add(pattern);
   }
@@ -279,7 +286,7 @@ get("grantAccess").addEventListener("click", () => { void grantSiteAccess(); });
 get("forgetKey").addEventListener("click", async () => {
   const state = await readState();
   await backgroundMessage({ type: "clear-ai-cache" });
-  await storageSet({ provider: { ...state.provider, apiKey: "" }, classifier: { ...state.classifier, apiKey: "" }, aiEnabled: false });
+  await storageSet({ provider: { ...state.provider, apiKey: "" }, classifier: { ...state.classifier, apiKey: "" }, aiEnabled: false, dismissedKeys: [] });
   get("apiKey").value = "";
   if (get("classifierKey")) get("classifierKey").value = "";
   setToggle("aiEnabled", false);

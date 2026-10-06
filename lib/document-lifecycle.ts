@@ -67,6 +67,11 @@ export class DocumentLifecycle {
     this.state = { ...this.state, storageMode: readStorageMode(backend) };
   }
 
+  /** The store the drafts actually live in, for callers that must reach it directly. */
+  get store(): DocumentStoreBackend {
+    return this.backend;
+  }
+
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {

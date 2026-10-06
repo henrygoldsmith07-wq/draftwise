@@ -44,6 +44,11 @@ interface UseAnalysisArgs {
   classifier?: ClassifierSettings | null;
 }
 
+// Each entry holds analysedText, which is the whole draft. Keeping 24 of those
+// alive meant switching between 24 documents left every one of them resident
+// in memory for the session. Eight still covers snapshot-history navigation.
+const ANALYSIS_CACHE_ENTRIES = 8;
+
 export function useAnalysis({ text, goals, style, settings, aiEnabled, classifier }: UseAnalysisArgs) {
   const [analysis, setAnalysis] = useState(() => emptyResult(text, goals, style));
   const [status, setStatus] = useState<"local" | "analysing" | "ready" | "error">("local");
@@ -53,7 +58,7 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
   const previousAiIssues = useRef<WritingIssue[]>([]);
   const runId = useRef(0);
   const abort = useRef<AbortController | null>(null);
-  const cache = useRef(new LruCache<AnalysisResult>(24));
+  const cache = useRef(new LruCache<AnalysisResult>(ANALYSIS_CACHE_ENTRIES));
   const credentialIdentity = useRef({ providerApiKey: settings.apiKey, classifierApiKey: classifier?.apiKey ?? "" });
 
   useEffect(() => {
@@ -66,6 +71,12 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
     const beforeLocalAnalysis = previousLocalAnalysis.current;
     const changedRange = detectChangedRange(beforeText, text);
     previousText.current = text;
+    // No single contiguous edit range between the two texts means this is not
+    // an edit to the current draft — it is a different document. Drop the
+    // cache so the previous draft's full text does not sit in memory for the
+    // rest of the session. Keys are text fingerprints, so this costs a little
+    // work on re-analysis and never returns the wrong document's results.
+    if (!changedRange && beforeText && beforeText !== text) cache.current.clear();
     const localBase = beforeLocalAnalysis && changedRange
       ? analyzeLocallyIncremental(beforeText, text, beforeLocalAnalysis.issues, changedRange, style, goals)
       : emptyResult(text, goals, style);

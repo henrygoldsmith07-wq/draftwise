@@ -111,9 +111,18 @@ export function findPunctuation(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
   for (const match of text.matchAll(/ {2,}/g)) {
     const start = match.index ?? 0;
+    // Leading spaces on a line are indentation, not a stray double space:
+    // nested list items and indented code are both written that way on purpose.
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    if (!text.slice(lineStart, start).trim()) continue;
     pushIssue(issues, makeIssue("punctuation-extra-space", start, start + match[0].length, match[0], " ", "punctuation", "low", "Extra space", "A single space keeps the document’s rhythm consistent.", 0.99, preferences));
   }
-  for (const match of text.matchAll(/\s+([,.;!?])/g)) {
+  // Anchored to a preceding non-space. Unanchored, `\s+` consumed a whole run of
+  // whitespace and then gave it back one character at a time looking for a
+  // punctuation mark that was not there, at every start position in the run —
+  // roughly 1.5s on a 16 KB run of newlines, on the keystroke path. The
+  // lookbehind makes the run only start where a word has just ended.
+  for (const match of text.matchAll(/(?<=\S)\s+([,.;!?])/g)) {
     const start = match.index ?? 0;
     pushIssue(issues, makeIssue("punctuation-space-before", start, start + match[0].length, match[0], match[1] ?? "", "punctuation", "medium", "Space before punctuation", "Punctuation sits directly after the word before it.", 0.99, preferences));
   }
@@ -131,10 +140,41 @@ export function findPunctuation(text: string, preferences: StylePreferences) {
   return issues;
 }
 
+/**
+ * Words whose full stop does not end a sentence.
+ *
+ * Without this, "Mr. smith", "Dr. jones", "St. mary parish", "etc. the rest"
+ * and "vs. the other option" were all reported as lowercase sentence starts,
+ * at 0.99 confidence, counting against correctness.
+ */
+const SENTENCE_ABBREVIATIONS = new Set([
+  "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc", "eg", "ie",
+  "approx", "est", "dept", "univ", "vol", "ch", "pp", "fig", "no", "al",
+  "inc", "ltd", "co", "corp", "ave", "blvd", "min", "max",
+]);
+
+function endsWithAbbreviation(text: string, stopIndex: number) {
+  let start = stopIndex;
+  while (start > 0 && /[\p{L}.]/u.test(text[start - 1])) start -= 1;
+  return isAbbreviationWord(text.slice(start, stopIndex));
+}
+
+function isAbbreviationWord(word: string) {
+  const normalised = word.toLowerCase().replace(/\./gu, "");
+  return normalised.length > 0 && SENTENCE_ABBREVIATIONS.has(normalised);
+}
+
 export function findCapitalization(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
   for (const match of text.matchAll(/(^|[.!?]\s+)([a-z])/g)) {
-    const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+    const prefix = match[1] ?? "";
+    const start = (match.index ?? 0) + prefix.length;
+    // "Mr. smith" and "etc. the rest" are correct as written. A full stop that
+    // closes a known abbreviation is not a sentence boundary, and neither is
+    // the very start of a draft that opens with one.
+    const precededByAbbreviation = prefix && (match.index ?? 0) > 0 && endsWithAbbreviation(text, (match.index ?? 0) + prefix.length - 2);
+    const opensWithAbbreviation = isAbbreviationWord(/^[\p{L}.]+/u.exec(text.slice(start))?.[0] ?? "");
+    if (precededByAbbreviation || opensWithAbbreviation) continue;
     const original = match[2] ?? "";
     pushIssue(issues, makeIssue("capitalization-sentence-start", start, start + 1, original, original.toUpperCase(), "capitalization", "medium", "Start with a capital letter", "A new sentence usually begins with a capital letter, which makes the structure easier to scan.", 0.99, preferences));
   }

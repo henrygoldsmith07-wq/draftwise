@@ -44,6 +44,15 @@ function isStringMap(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
 }
 
+/**
+ * Custom headers are a JSON object the user pastes in, and it is persisted
+ * verbatim to localStorage. People put tenant tokens in it. Request-time
+ * filtering strips the dangerous header names, but nothing bounded how much
+ * secret this could park on disk, so keep it to a size a hand-written header
+ * set actually needs.
+ */
+const MAX_CUSTOM_HEADERS_CHARS = 4_000;
+
 function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
   return typeof value === "string" && values.includes(value as T);
 }
@@ -105,12 +114,16 @@ export function isProviderSettings(value: unknown): value is ProviderSettings {
     && Number.isFinite(value.maxTokens)
     && value.maxTokens >= 100
     && value.maxTokens <= 4_000
-    && typeof value.customHeaders === "string";
+    && typeof value.customHeaders === "string"
+    && value.customHeaders.length <= MAX_CUSTOM_HEADERS_CHARS;
 }
 
 export function isClassifierSettings(value: unknown): value is ClassifierSettings {
   return isRecord(value)
-    && isSafeUrl(value.baseUrl)
+    // An empty baseUrl means classifier triage is switched off, which is how it
+    // ships. Treating that as invalid would make every saved workspace look
+    // corrupt and throw away the writer's other preferences with it.
+    && (value.baseUrl === "" || isSafeUrl(value.baseUrl))
     && (value.apiKey === undefined || typeof value.apiKey === "string")
     && (value.timeoutMs === undefined || (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs >= 1_000 && value.timeoutMs <= 30_000))
     && (value.maxExcerptChars === undefined || (typeof value.maxExcerptChars === "number" && Number.isFinite(value.maxExcerptChars) && value.maxExcerptChars >= 80 && value.maxExcerptChars <= 2_000))
@@ -211,15 +224,20 @@ function sanitiseProvider(value: unknown, fallback: ProviderSettings): ProviderS
     apiKey: typeof value.apiKey === "string" ? value.apiKey : fallback.apiKey,
     temperature: typeof value.temperature === "number" && Number.isFinite(value.temperature) && value.temperature >= 0 && value.temperature <= 1 ? value.temperature : fallback.temperature,
     maxTokens: typeof value.maxTokens === "number" && Number.isFinite(value.maxTokens) && value.maxTokens >= 100 && value.maxTokens <= 4_000 ? value.maxTokens : fallback.maxTokens,
-    customHeaders: typeof value.customHeaders === "string" ? value.customHeaders : fallback.customHeaders,
+    customHeaders: typeof value.customHeaders === "string" && value.customHeaders.length <= MAX_CUSTOM_HEADERS_CHARS ? value.customHeaders : fallback.customHeaders,
   };
 }
 
 function sanitiseClassifier(value: unknown, fallback: ClassifierSettings | undefined) {
   if (!isRecord(value)) return fallback;
   const safe = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "model"));
+  // A stored empty URL means "switched off" and must survive the round trip.
+  // Falling back to a default here would silently re-enable triage on reload.
+  const baseUrl = safe.baseUrl === ""
+    ? ""
+    : isSafeUrl(safe.baseUrl) ? safe.baseUrl : fallback?.baseUrl ?? DEFAULT_CLASSIFIER_SETTINGS.baseUrl;
   return {
-    baseUrl: isSafeUrl(safe.baseUrl) ? safe.baseUrl : fallback?.baseUrl ?? DEFAULT_CLASSIFIER_SETTINGS.baseUrl,
+    baseUrl,
     ...(typeof safe.apiKey === "string" ? { apiKey: safe.apiKey } : fallback?.apiKey !== undefined ? { apiKey: fallback.apiKey } : {}),
     ...(typeof safe.timeoutMs === "number" && Number.isFinite(safe.timeoutMs) && safe.timeoutMs >= 1_000 && safe.timeoutMs <= 30_000 ? { timeoutMs: safe.timeoutMs } : fallback?.timeoutMs !== undefined ? { timeoutMs: fallback.timeoutMs } : {}),
     ...(typeof safe.maxExcerptChars === "number" && Number.isFinite(safe.maxExcerptChars) && safe.maxExcerptChars >= 80 && safe.maxExcerptChars <= 2_000 ? { maxExcerptChars: safe.maxExcerptChars } : fallback?.maxExcerptChars !== undefined ? { maxExcerptChars: fallback.maxExcerptChars } : {}),

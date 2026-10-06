@@ -62,13 +62,36 @@ function browserLikeContext() {
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
   const manifest = JSON.parse(await readFile(file("extension/manifest.json"), "utf8"));
   assert.ok(!JSON.stringify(manifest).includes("<all_urls>"));
-  assert.deepEqual(manifest.permissions, ["storage", "activeTab", "scripting"]);
+  // activeTab was declared but never used: the toolbar button only opens the
+  // options page, and injection goes through chrome.scripting against origins
+  // the user has explicitly granted. Asking for less is the whole point.
+  assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*", "http://*/*"]);
   assert.equal(manifest.content_scripts, undefined);
   await readFile(file("extension/shared-analysis.js"), "utf8");
   await readFile(file("extension/shared-provider.js"), "utf8");
   await readFile(file("extension/field-classification.js"), "utf8");
   await readFile(file("extension/permissions.js"), "utf8");
+});
+
+test("generated bundles declare each top-level name once", () => {
+  // The bundler concatenates the grammar modules into a single scope and
+  // strips `export`. Two modules that pick the same top-level name therefore
+  // collide, and a duplicated `const` is a SyntaxError that makes the whole
+  // bundle fail to parse. `lexicon.ts` and `consistency.ts` both had a
+  // `COMMON_WORDS` once, which took the service worker down.
+  //
+  // The runtime test below catches this too, but only after every other test in
+  // the file has run, so this check names the offenders directly.
+  for (const bundle of ["shared-analysis.js", "shared-provider.js"]) {
+    const source = readFileSync(new URL(`../extension/${bundle}`, import.meta.url), "utf8");
+    const counts = new Map();
+    for (const match of source.matchAll(/^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gmu)) {
+      counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+    }
+    const collisions = [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+    assert.deepEqual(collisions, [], `${bundle} declares the same name more than once`);
+  }
 });
 
 test("generated bundles load at runtime and the service worker starts without reference errors", async () => {
@@ -264,7 +287,14 @@ test("extension scripts parse and keep provider secrets out of the content scrip
   assert.doesNotMatch(background, /\n\s{8}goals:\s*message\.goals,\s*\n\s{8}style:\s*message\.style,/iu);
   assert.doesNotMatch(background, /draftwise-triage-v1|classifierModel/iu);
   const options = await readFile(file("extension/options.js"), "utf8");
-  assert.match(options, /classifier:\s*\{\s*baseUrl:\s*"https:\/\/classifier\.dev"/iu);
+  // Classifier triage is off until an endpoint is configured. This used to
+  // ship as "https://classifier.dev", and because initialise() copies the
+  // defaults into storage on install, a fresh extension was pointed at that
+  // vendor host whether or not the user had ever chosen it.
+  assert.match(options, /classifier:\s*\{\s*baseUrl:\s*""/iu);
+  assert.match(background, /classifier:\s*\{[^}]*baseUrl:\s*""/iu);
+  assert.doesNotMatch(background, /baseUrl:\s*"https:\/\/classifier\.dev"/iu);
+  assert.doesNotMatch(options, /baseUrl:\s*"https:\/\/classifier\.dev"/iu);
   assert.match(options, /classifier:\s*\{\s*\.\.\.state\.classifier,\s*apiKey:\s*""/iu);
   assert.match(options, /clear-ai-cache/iu);
   assert.match(options, /previousCloudPatterns/iu);

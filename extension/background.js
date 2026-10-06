@@ -11,7 +11,10 @@ const defaults = {
   siteAccess: [],
   aiEnabled: false,
   classifier: {
-    baseUrl: "https://classifier.dev",
+    // Off unless the user configures an endpoint in Options. This must match
+    // DEFAULT_CLASSIFIER_SETTINGS in packages/types, or the extension would
+    // quietly route page text somewhere the app itself refuses to.
+    baseUrl: "",
     apiKey: "",
     uncertainPolicy: "provider",
     timeoutMs: 8000,
@@ -202,7 +205,19 @@ chrome.permissions.onRemoved.addListener(() => {
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
+// Messages that change what the extension may read, or hand back the user's
+// allow-list. A content script runs on every page the user has granted, so
+// these are reserved to the options page; otherwise any granted page could
+// unregister every other site or enumerate the granted origins.
+const PRIVILEGED_MESSAGE_TYPES = new Set(["clear-ai-cache", "register-site", "unregister-site", "list-permissions"]);
+const OPTIONS_PAGE_URL = "options.html";
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (PRIVILEGED_MESSAGE_TYPES.has(message?.type)) {
+    const senderUrl = typeof sender.url === "string" ? sender.url : "";
+    if (!senderUrl.startsWith(chrome.runtime.getURL(OPTIONS_PAGE_URL))) return false;
+  }
   if (message?.type === "clear-ai-cache") {
     clearAiRuntimeState();
     sendResponse({ ok: true });

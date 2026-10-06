@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
-import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
+import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isProviderSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
+import { DEFAULT_PROVIDER_SETTINGS, DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
   const values = new Map(Object.entries(seed));
@@ -78,6 +78,41 @@ test("runtime validators reject malformed classifier settings", () => {
   assert.ok(isClassifierSettings({ baseUrl: "https://classifier.dev", uncertainPolicy: "provider" }));
   assert.equal(isClassifierSettings({ baseUrl: "http://classifier.dev", uncertainPolicy: "provider" }), false);
   assert.equal(isClassifierSettings({ baseUrl: "https://classifier.dev", uncertainPolicy: "maybe" }), false);
+});
+
+test("an empty classifier URL is a valid 'triage off' setting, not corruption", () => {
+  // If "" read as invalid, every saved workspace would fail isWorkspace() and
+  // the writer would lose their goals and style preferences too.
+  assert.ok(isClassifierSettings({ baseUrl: "", uncertainPolicy: "provider" }));
+  const initial = DEFAULT_WORKSPACE();
+  const loaded = readWorkspaceFromStorage(initial, storage({
+    "draftwise:workspace:v2": JSON.stringify({ ...initial, classifier: { baseUrl: "", uncertainPolicy: "provider" }, theme: "dark" }),
+  }));
+  assert.ok(isWorkspace(loaded));
+  assert.equal(loaded.classifier.baseUrl, "", "a cleared classifier must stay cleared across a reload");
+  assert.equal(loaded.theme, "dark", "other preferences must survive alongside a disabled classifier");
+});
+
+test("a fresh install has no classifier endpoint configured", () => {
+  // The product's claim is that drafts never leave the device. This shipped as
+  // "https://classifier.dev", which meant a user who added their own provider
+  // key and switched AI on started sending draft excerpts to that endpoint
+  // without ever having configured one.
+  const workspace = DEFAULT_WORKSPACE();
+  assert.equal(workspace.classifier.baseUrl, "", "classifier triage must be off until an endpoint is entered");
+  assert.equal(workspace.aiEnabled, false, "AI must stay off until the user asks for it");
+});
+
+test("custom headers are bounded before they reach localStorage", () => {
+  // People paste tenant tokens into custom headers. It is persisted verbatim,
+  // so an unbounded value is an unbounded secret left on disk.
+  const oversized = { ...DEFAULT_PROVIDER_SETTINGS, customHeaders: "x".repeat(20_000) };
+  assert.equal(isProviderSettings(oversized), false);
+  const loaded = readWorkspaceFromStorage(DEFAULT_WORKSPACE(), storage({
+    "draftwise:workspace:v2": JSON.stringify({ ...DEFAULT_WORKSPACE(), provider: oversized }),
+  }));
+  assert.ok(isWorkspace(loaded));
+  assert.notEqual(loaded.provider.customHeaders.length, 20_000, "an oversized customHeaders value must be dropped on load");
 });
 
 test("failed local writes return an error instead of a false saved state", () => {

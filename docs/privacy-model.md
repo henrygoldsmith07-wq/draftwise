@@ -2,15 +2,19 @@
 
 Draftwise has three explicit data paths. “Local-first” does not mean “nothing leaves the device” when AI is enabled.
 
+## Nothing is pre-configured
+
+AI is off, and classifier triage ships with **no endpoint configured**. Turning on AI routes unresolved candidates to the provider the user entered, and nowhere else. Draftwise does not choose a destination for you: an earlier version shipped classifier.dev as the default, which meant adding your own provider key was enough to start sending draft excerpts to a third party you had never configured. That is now opt-in, and a regression test holds it there.
+
 ## Data paths
 
-| Data | Local path | Classifier.dev path | Configured provider path |
+| Data | Local path | Configured classifier path | Configured provider path |
 | --- | --- | --- | --- |
-| Draft text | Held in browser state/storage and analysed locally | Only bounded, redacted candidate excerpts | Only chunks selected for provider review or rewrite |
+| Draft text | Held in browser state/storage and analysed locally | Only bounded, redacted candidate excerpts, and only when an endpoint is configured | Only chunks selected for provider review or rewrite |
 | Local rules, scores, stats, and issue spans | On-device | Never sent | Only the selected prompt context is sent when needed |
 | URLs, emails, phone numbers, currencies, percentages, dates, IDs, filenames, model/version strings, UUIDs, tokens, and quoted secrets | Available to local rules | Redacted before transmission | Preserved only when needed for provider validation and protected from accidental rewrites |
-| Provider API key | Local storage only | Never sent to classifier.dev | HTTPS `Authorization` header to the configured provider |
-| Optional classifier workspace key | Local storage only | HTTPS `Authorization` header to classifier.dev | Never sent to the provider |
+| Provider API key | Local storage only | Never sent to the classifier | HTTPS `Authorization` header to the configured provider |
+| Optional classifier workspace key | Local storage only | HTTPS `Authorization` header to the configured classifier | Never sent to the provider |
 | Goals and style preferences | Browser storage and runtime | Not sent in the classifier request | Included as provider prompt context when AI analysis is enabled |
 | Site exclusions and granted origins | Browser/extension storage and permissions | Never sent | Never sent |
 

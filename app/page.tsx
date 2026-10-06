@@ -520,6 +520,7 @@ export default function Home() {
   const clearLocalData = useCallback(() => {
     cancelRewrite();
     void clearAllLocalData({
+      documentBackend: documents.backend,
       onClearMemory: () => {
         clearPersistedData();
         void documents.clearAll({ title: "Untitled draft", draft: "" });

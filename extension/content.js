@@ -57,11 +57,20 @@
   let outline = null;
 
   function dismissalKey(issue) {
-    const original = String(issue.original || "").trim().toLowerCase();
-    return `${issue.ruleId}|${issue.category}|${original}`;
+    // A fingerprint, not the text. These keys are persisted to extension
+    // storage, and up to 200 of them held raw fragments of whatever the writer
+    // had typed into the page — indefinitely, and not cleared by "Forget keys".
+    // The fingerprint matches exactly the same way, so dismissing still works.
+    return `${issue.ruleId}|${issue.category}|${fingerprintText(String(issue.original || "").trim().toLowerCase())}`;
   }
 
   const host = () => location.hostname.replace(/^www\./u, "");
+  /** Put the caret back where the writer was before the panel took it. */
+  const focusActiveField = () => {
+    if (activeField && activeField.isConnected && isEditable(activeField)) {
+      try { activeField.focus(); } catch { /* the field went away */ }
+    }
+  };
   const siteHasAccess = () => Array.isArray(settings.siteAccess) && settings.siteAccess.includes(host());
   const siteIsDisabled = () => !siteHasAccess()
     || (Array.isArray(settings.excludedSites) && settings.excludedSites.some((site) => host() === site || host().endsWith(`.${site}`)))
@@ -197,7 +206,9 @@
     const header = document.createElement("div"); header.className = "dw-head";
     header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", aiStateLabel(), "dw-source"), textNode("span", String(visible.length) + " suggestion" + (visible.length === 1 ? "" : "s"), "dw-count"));
     if (aiPending) header.append(textNode("span", "Checking AI…", "dw-pending"));
-    const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); close.addEventListener("click", () => { panel.hidden = true; }); header.append(close); panel.append(header);
+    const close = textNode("button", "×", "dw-close"); close.type = "button"; close.setAttribute("aria-label", "Close Draftwise suggestions"); // Restore focus to the field the writer was in. Without this the caret fell to
+    // <body> and they lost their place in the sentence they were typing.
+    close.addEventListener("click", () => { panel.hidden = true; focusActiveField(); }); header.append(close); panel.append(header);
     if (!seenOnboarding) {
       // First run only: a short orientation, then it never appears again.
       const welcome = document.createElement("div"); welcome.className = "dw-onboarding";
@@ -371,6 +382,11 @@
     const { items } = prioritiseActive();
     if (!items.length) return;
     if (event.key === "Enter") {
+      // A focused button already handles Enter natively. Applying a suggestion
+      // here as well meant Enter on "Dismiss" or "Disable on this site" ran the
+      // keyboard-selected suggestion instead, and Enter on "Accept" could apply
+      // a different one from the button under the cursor.
+      if (event.target instanceof HTMLButtonElement) return;
       if (focusedIndex < 0 || focusedIndex >= items.length) return;
       const target = items[focusedIndex];
       if (target && target.replacement && target.replacement !== target.original) {
@@ -472,20 +488,30 @@
   }
 
   function initShadow() {
-    const hostElement = document.createElement("div"); hostElement.id = "draftwise-assistant-host"; root = hostElement.attachShadow({ mode: "open" });
+    const hostElement = document.createElement("div"); hostElement.id = "draftwise-assistant-host";
+    // Closed, not open. The panel echoes the writer's own draft text, so an open
+    // root let any page the user granted access to read it via
+    // document.getElementById("draftwise-assistant-host").shadowRoot, and append
+    // its own nodes into the extension's UI. Nothing here needs the page to be
+    // able to reach it.
+    root = hostElement.attachShadow({ mode: "closed" });
     const styles = document.createElement("style"); styles.textContent = shadowStyles(); root.append(styles);
     button = document.createElement("button"); button.className = "dw-button"; button.type = "button"; button.setAttribute("aria-haspopup", "dialog"); button.addEventListener("click", () => { panel.hidden = !panel.hidden; render(); place(); if (!panel.hidden) panel.querySelector("button")?.focus(); }); root.append(button);
     panel = document.createElement("div"); panel.className = "dw-panel"; panel.hidden = true; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Draftwise suggestions"); panel.setAttribute("aria-live", "polite"); root.append(panel); document.documentElement.append(hostElement); button.hidden = true;
     window.addEventListener("scroll", place, true); window.addEventListener("resize", place);
     window.addEventListener("keydown", (event) => {
       if (!panel || panel.hidden) return;
-      // Escape always closes; the arrows and Enter only act when focus is inside
-      // the assistant, so typing in the page's own field is never intercepted.
-      if (event.key === "Escape") { panel.hidden = true; button.focus(); return; }
       const target = event.composedPath ? event.composedPath()[0] : event.target;
-      if (target !== panel && !(target instanceof Node) ) return;
       const insidePanel = target === panel || panel.contains(target);
-      if (event.key !== "Escape" && !insidePanel) return;
+      // Escape always closes, but only pulls focus back to the toolbar button
+      // when the writer is already inside the panel. Doing it unconditionally
+      // meant the first Escape dismissed the panel *and* yanked the caret out
+      // of the page's own editor, destroying their place in the sentence.
+      if (event.key === "Escape") { panel.hidden = true; if (insidePanel) button.focus(); return; }
+      if (!(target instanceof Node)) return;
+      // The arrows and Enter only act when focus is inside the assistant, so
+      // typing in the page's own field is never intercepted.
+      if (!insidePanel) return;
       handlePanelKey(event);
     });
   }

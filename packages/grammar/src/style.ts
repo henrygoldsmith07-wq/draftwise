@@ -22,6 +22,19 @@ import {
   preserveCase,
 } from "./util.ts";
 
+/**
+ * Words whose immediate repetition is correct English.
+ *
+ * - "had" forms the perfect construction: she *had had* enough.
+ * - Intensifiers are routinely doubled for emphasis.
+ * - Reduplicatives are ordinary spoken English.
+ */
+const IDIOMATIC_DOUBLED_WORDS = new Set([
+  "had", "very", "really", "quite", "just", "so", "much", "such", "well",
+  "far", "long", "many", "no", "yes", "bye", "boo", "hush", "tut", "hullo",
+  "goody", "night", "gee", "ahem",
+]);
+
 export function findRepeatedWordsAndPhrases(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
   const tokens = document.tokens;
@@ -29,6 +42,11 @@ export function findRepeatedWordsAndPhrases(text: string, preferences: StylePref
     const previous = tokens[index - 1];
     const current = tokens[index];
     if (previous.lower !== current.lower || previous.end > current.start + 1) continue;
+    // Some doubled words are correct English. "She had had enough" is the
+    // perfect construction, "very very cold" is deliberate emphasis, and "bye
+    // bye" is a reduplicative. Reporting them costs the writer's trust in the
+    // rule that catches a genuine "the the".
+    if (IDIOMATIC_DOUBLED_WORDS.has(previous.lower)) continue;
     pushIssue(issues, makeIssue("repetition-adjacent-word", previous.start, current.end, text.slice(previous.start, current.end), previous.value, "repetition", "medium", "Repeated word", "This word appears twice in a row. Removing the repeat keeps the sentence moving.", 0.99, preferences));
   }
   for (let index = 0; index + 3 < tokens.length; index += 1) {
@@ -58,6 +76,7 @@ export function findRepeatedWordsAndPhrases(text: string, preferences: StylePref
   }
   return issues;
 }
+
 
 export function findStyleIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
@@ -99,6 +118,13 @@ export function findStyleIssues(text: string, preferences: StylePreferences, doc
 }
 
 export function findStructureIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
+  // Stative adjectives that end in -ed.
+  //
+  // The `-ed` alternative in the passive pattern below matched "are red",
+  // "was tired", "naked", "sacred", "beloved" and "wicked" — ordinary prose,
+  // reported as passive constructions. The pattern's -en guard covers "are
+  // often"; this covers the same mistake in its -ed form.
+  const staticEdAdjectives = " red tired naked sacred beloved aged wicked learned crooked jagged ragged blessed cursed diseased supposed used pleased prepared concerned involved married unmarried talented gifted limited unlimited reserved content confident silent violent ";
   const issues: WritingIssue[] = [];
   const sentences = document.sentences;
   const sentenceLimit = preferences.preferredSentenceLength === "short" ? 22 : preferences.preferredSentenceLength === "long" ? 45 : 32;
@@ -129,6 +155,9 @@ export function findStructureIssues(text: string, preferences: StylePreferences,
     const pattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))\b/giu;
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
+      // "The walls are red" and "He was tired" are not passive constructions.
+      const participle = /(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))/iu.exec(match[0].replace(/^\S+\s+/u, ""));
+      if (participle && staticEdAdjectives.includes(` ${participle[0].toLowerCase()} `)) continue;
       // Only offer the change where an actor is plausibly missing. Reporting
       // what happened ("the backlog was cleared") is correct, deliberate prose.
       const sentence = document.sentences.find((span) => start >= span.start && start < span.end);

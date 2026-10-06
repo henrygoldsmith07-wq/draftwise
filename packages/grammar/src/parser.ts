@@ -39,15 +39,22 @@ function sentenceSpans(text: string, allTokens?: Token[]): SentenceSpan[] {
   const spans: SentenceSpan[] = [];
   const tokens = allTokens ?? tokensIn(text);
   let tokenIndex = 0;
-  const pattern = /[^.!?…\n]+(?:[.!?…]+(?=\s|$)|$)/gu;
-  for (const match of text.matchAll(pattern)) {
-    const raw = match[0];
-    const leading = raw.search(/\S/u);
-    if (leading < 0) continue;
-    const start = (match.index ?? 0) + leading;
-    const value = raw.slice(leading).trim();
-    if (!value) continue;
-    const end = start + value.length;
+
+  // A sentence is a run of text ending in .!?…, and the terminator must be
+  // followed by whitespace or the end of the document.
+  //
+  // The lazy body matters, and so does requiring a non-space start. The
+  // previous pattern paired a greedy negated class with an alternation it
+  // could not satisfy, so a long run of spaces was consumed and then
+  // un-consumed one character at a time, at every start position in the run.
+  // One 16 KB whitespace paragraph cost ~1s here and ~2s in analyzeLocally, on
+  // the keystroke path. With `(?=\S)` a start inside a whitespace run is
+  // rejected immediately instead of rescanning the run, and the body only
+  // expands while it is finding a terminator.
+  const pattern = /(?=\S)[^.!?…\n]*?[.!?…]+(?=\s|$)/gu;
+  const addSpan = (start: number, end: number) => {
+    const value = text.slice(start, end);
+    if (!value.trim()) return;
     while (tokenIndex < tokens.length && tokens[tokenIndex].end <= start) tokenIndex += 1;
     const sentenceTokens: Token[] = [];
     while (tokenIndex < tokens.length && tokens[tokenIndex].start < end) {
@@ -55,6 +62,25 @@ function sentenceSpans(text: string, allTokens?: Token[]): SentenceSpan[] {
       tokenIndex += 1;
     }
     spans.push({ text: value, start, end, tokens: sentenceTokens });
+  };
+
+  let consumedTo = 0;
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[0];
+    const leading = raw.search(/\S/u);
+    if (leading < 0) continue;
+    const start = (match.index ?? 0) + leading;
+    const end = (match.index ?? 0) + raw.trimEnd().length;
+    if (!text.slice(start, end).trim()) continue;
+    addSpan(start, end);
+    consumedTo = (match.index ?? 0) + raw.length;
+  }
+
+  // Whatever follows the last terminator is a sentence in its own right.
+  const tailStart = text.slice(consumedTo).search(/\S/u);
+  if (tailStart >= 0) {
+    const start = consumedTo + tailStart;
+    addSpan(start, text.length);
   }
   return spans;
 }

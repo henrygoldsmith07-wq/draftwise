@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeDocument, analyzeLocally, analyzeLocallyIncremental, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
+import { analyzeDocument, analyzeLocally, analyzeLocallyIncremental, detectChangedRange, getWritingStats, mergeWritingIssues, scoreWriting, suggestSpelling } from "../packages/grammar/src/index.ts";
 
 test("local analysis catches typos, punctuation, and repetition", () => {
   const result = analyzeLocally("This is repeatd  wording wording, recieve it!!");
@@ -210,4 +210,51 @@ test("incremental analysis rekeys shifted retained issues to match full analysis
   assert.equal(incrementalIssue.start, fullIssue.start);
   assert.equal(incrementalIssue.end, fullIssue.end);
   assert.equal(incrementalIssue.id, fullIssue.id);
+});
+
+test("incremental analysis never invents a finding inside a word", () => {
+  // The re-analysed window used to start at a fixed 320 characters back. When
+  // that landed mid-sentence, every `^`-anchored rule fired on the slice
+  // boundary: a one-sentence draft produced "n" -> "N" on the "n" inside "and",
+  // at an offset that pointed nowhere.
+  const previousText = "The committee reviewed " + "the proposal and its findings ".repeat(20) + "and signed it off without comment.";
+  const nextText = `${previousText} Now we check this.`;
+  const incremental = analyzeLocallyIncremental(
+    previousText,
+    nextText,
+    analyzeLocally(previousText).issues,
+    detectChangedRange(previousText, nextText),
+  );
+  assert.deepEqual(incremental.issues.filter((issue) => issue.ruleId === "capitalization-sentence-start"), []);
+  // Every surviving finding must still address the text it claims.
+  for (const issue of incremental.issues) {
+    assert.equal(nextText.slice(issue.start, issue.end), issue.original, `${issue.ruleId} offset does not match its text`);
+  }
+});
+
+test("incremental analysis keeps a finding that the re-analysed window cannot see", () => {
+  // A long sentence that begins before the window cannot be re-derived from a
+  // slice taken inside it, but it used to be dropped on the assumption that it
+  // would be.
+  const previousText = "The committee reviewed " + "the proposal and its findings ".repeat(20) + "and signed it off without comment.";
+  const nextText = `${previousText} Now we check this.`;
+  const full = analyzeLocally(nextText).issues.filter((issue) => issue.ruleId === "structure-long-sentence");
+  const incremental = analyzeLocallyIncremental(
+    previousText,
+    nextText,
+    analyzeLocally(previousText).issues,
+    detectChangedRange(previousText, nextText),
+  ).issues.filter((issue) => issue.ruleId === "structure-long-sentence");
+  assert.equal(full.length, 1, "the full analysis finds one long sentence");
+  assert.equal(incremental.length, 1, "incremental analysis must not lose it");
+  assert.equal(incremental[0].start, full[0].start);
+  assert.equal(incremental[0].end, full[0].end);
+});
+
+test("merging issues tolerates a missing list", () => {
+  // Callers merge retained history with recalculated findings, and a document
+  // with no previous analysis has none to pass.
+  assert.deepEqual(mergeWritingIssues(null), []);
+  assert.deepEqual(mergeWritingIssues(undefined), []);
+  assert.deepEqual(mergeWritingIssues([]), []);
 });

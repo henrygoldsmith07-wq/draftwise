@@ -3,8 +3,8 @@
   "name": "Draftwise — private writing assistant",
   "version": "0.2.0",
   "description": "Local-first writing checks and optional BYOK suggestions inside text fields.",
-  "minimum_chrome_version": "110",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "scripting"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "action": {
     "default_title": "Draftwise settings"

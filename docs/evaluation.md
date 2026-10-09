@@ -1,13 +1,63 @@
 # Evaluation
 
-Draftwise has two evaluation corpora plus an operational benchmark, and they serve
-different purposes.
+Draftwise has three regression corpora, a held-out blind corpus and an
+operational benchmark, and they serve different purposes.
 
 | Corpus | Purpose | Tuned against? |
 | --- | --- | --- |
 | `evaluation/corpus.json` | Deterministic regression corpus with labelled expectations | Yes |
 | `evaluation/clean-prose.json` | Clean-text false-positive corpus | Yes |
+| `evaluation/dev-corpus.json` | Development register corpus (essay, chat, mixed) | Yes |
+| `evaluation/context-corpus.json` | Structured, ambiguous, meaning-risk and overlapping cases | Yes |
 | `evaluation/blind-corpus.json` | **Held out.** Independent signal | **No** |
+
+## The context corpus
+
+`corpus.json` is made of single-line, single-clause sentences. Real drafts are
+not: they have headings, lists, quotations and code, they contain sentences where
+a plausible suggestion would damage the meaning, and they produce findings that
+overlap on the same span. None of that was covered, so the main corpus reported
+1.0 precision on inputs it never exercised.
+
+`context-corpus.json` adds those shapes. Each case carries a `notes` field
+explaining what it exists to prove, and three cases carry a `conflict` field
+describing how two findings interact — because a suggestion engine that produces
+two correct findings on one span and then silently drops one is worse than one
+that produces one.
+
+Fields the other corpora do not use:
+
+- `dialect` — which spelling is in force. "Correct British spelling produces
+  nothing" is meaningless without it, and the original corpus only ever asserted
+  that US spellings *are* flagged under a GB preference. A rule that flagged
+  every British word would have scored perfectly.
+- `preferences` — per-case style preferences, so terminology and protected-span
+  behaviour is testable.
+- `acceptable` — outcomes that are defensible but not required, so an ambiguous
+  case is not scored as a miss when the engine makes the other reasonable call.
+- `conflict` — the interaction between two findings on the same text.
+
+The context corpus is reported as its own block rather than averaged into the
+headline number. It is deliberately harder and its expectations are stricter, so
+folding it in would hide a regression in either direction and make the headline
+incomparable with every previous run.
+
+## Reading the numbers
+
+**Precision** is measured on *displayed* suggestions, not raw detections. The
+engine deliberately holds some findings back to keep the review list usable, so a
+raw-detector precision would describe something the writer never sees.
+
+**Recall** is measured against labelled expectations. A case marked `acceptable`
+with an outcome the engine chose is not counted as a miss.
+
+**False-positive rate** counts objective error categories only (spelling,
+grammar, punctuation, capitalization). A stylistic opinion is not a false
+positive — see below.
+
+**Suppression** is reported by reason, never as a single total. A finding held
+back by a cap is a different product decision from one held back as
+register-irrelevant, and the writer can inspect both in "Hidden findings".
 
 ## Why a blind corpus exists
 
@@ -111,8 +161,42 @@ of the structural problems this corpus contains.
 
 ## Suggested next steps
 
-1. Fix the two spelling defects on the development corpus, not here.
-2. Make register affect density: casual text should not be asked to end every
-   fragment, and sentence-start capitalisation should be less eager.
+1. ~~Fix the two spelling defects on the development corpus, not here.~~ **Done.**
+   `settling` → `setting` and `won` → `own` were the fuzzy suggester reaching past
+   valid words for the nearest shape in the compact lexicon. Both words and their
+   inflections are now recognised, which stops the fuzzy path from being consulted
+   at all — the only place the suggestion was made.
+2. ~~Make register affect density: casual text should not be asked to end every
+   fragment, and sentence-start capitalisation should be less eager.~~ **Done for
+   density.** A casual audience or tone now scales the objective and improve tier
+   caps down (0.6), and a narrative intent to 0.8. On the casual probe sentence
+   below, the displayed list fell from 7 findings to 1. The findings themselves
+   are unchanged and still inspectable under "Hidden findings", where they are now
+   labelled `register-budget` rather than a generic density cap. The per-rule
+   eagerness of `capitalization-sentence-start` and
+   `punctuation-missing-terminal` is untouched and remains the largest single
+   source of blind-corpus noise.
 3. Expand the blind corpus. 2,377 words is enough to find problems, not enough to
    trust a rate.
+
+## Investigated and deliberately not changed
+
+A finding strictly contained inside another finding is discarded by the merge:
+`recieve the package today.` produces a spelling finding over `[0,7]` and, in
+principle, a capitalisation finding over `[0,1]`, and only the spelling one
+survives. That looks like a defect — accepting the spelling fix would leave
+`Recieve` mis-cased.
+
+It is not. Accepting any suggestion re-analyses the document, and on the
+re-analysed text (`receive the package today.`) the capitalisation finding is no
+longer shadowed and appears normally. The containment is temporary by
+construction, so nothing is permanently hidden.
+
+Changing it was attempted and reverted. Keeping contained findings broke the
+merge contract the project already asserts in
+`tests/analysis-pipeline.test.mjs` — a stronger overlapping finding suppressing a
+weaker one is the documented behaviour, and containment is a special case of
+overlap. The intent behind it is preserved as the case
+`overlap-spelling-capitalisation-01` in `evaluation/context-corpus.json`, with
+`acceptable` recording that the current behaviour is correct so the point cannot
+be re-litigated without new evidence.

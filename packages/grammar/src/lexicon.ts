@@ -57,6 +57,23 @@ export const TYPO_FIXES : Record<string, string> = {
   responsability: "responsibility",
   tommorrow: "tomorrow",
   writen: "written",
+  // Words the compact lexicon does not carry, so the fuzzy suggester was
+  // reaching past them for the nearest shape it did have. Each of these is a
+  // valid English word being corrected into a different valid English word:
+  //   "settling" -> "setting"  and  "won" (past tense of win) -> "own".
+  // Both are ordinary prose, and a spelling checker that rewrites correct words
+  // is worse than one that misses a typo: the writer stops trusting the rule
+  // that catches the genuine slips. Listing them here stops the fuzzy path from
+  // being consulted at all, which is the only place the suggestion was made.
+  settling: "settling",
+  settle: "settle",
+  settles: "settles",
+  settled: "settled",
+  won: "won",
+  wins: "wins",
+  winning: "winning",
+  winner: "winner",
+  winners: "winners",
 };
 
 // Keep the common lexicon inline so the web app and extension share exactly the same

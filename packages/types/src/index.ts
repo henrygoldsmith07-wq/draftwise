@@ -64,7 +64,7 @@ export interface PrioritisedIssue extends WritingIssue {
 
 export interface SuppressedFinding {
   issue: WritingIssue;
-  reason: "low-confidence-style" | "rule-reduced" | "rule-off" | "density-cap" | "repeated-pattern" | "register-mismatch" | "near-dismissal";
+  reason: "low-confidence-style" | "rule-reduced" | "rule-off" | "density-cap" | "repeated-pattern" | "register-mismatch" | "near-dismissal" | "register-budget";
 }
 
 export interface SuggestionReport {

@@ -1,0 +1,300 @@
+[
+  {
+    "id": "structured-heading-list-01",
+    "kind": "structured",
+    "register": "technical",
+    "text": "## Setup\n\n- Install the CLI.\n- Run the command.\n- Verify the output.\n\nThe tool runs locally and stores nothing.",
+    "expected": [],
+    "notes": "Markdown heading, bullet list and closing sentence. Structured lines must not be treated as prose: the list items are not sentence fragments, and the heading is not a run-on. This is the shape a real technical draft actually has, which the original corpus never contained."
+  },
+  {
+    "id": "structured-quotation-01",
+    "kind": "structured",
+    "register": "academic",
+    "text": "The author writes that \"attention is the rarest form of generosity\" (Smith, 2024).\n\nWe agree, but with one reservation.",
+    "expected": [],
+    "notes": "Quotation marks and a parenthetical citation. The quoted span and the bracketed year must not be parsed as sentence structure, and no capitalisation or fragment finding belongs on either."
+  },
+  {
+    "id": "structured-numbered-01",
+    "kind": "structured",
+    "register": "professional",
+    "text": "Next steps\n\n1. Review the draft.\n2. Send it to the client.\n3. Book the follow-up.\n\nWe can start on Monday.",
+    "expected": [],
+    "notes": "A numbered action list followed by a sentence. The list items are deliberate fragments, so structure-fragment must not fire on them."
+  },
+  {
+    "id": "structured-code-01",
+    "kind": "structured",
+    "register": "technical",
+    "text": "Call the endpoint:\n\n`POST /v1/analyse` returns a JSON object.\n\nThe response is validated before display.",
+    "expected": [],
+    "notes": "Inline code span containing an identifier and a path. Protected spans must not be spell-checked or re-cased."
+  },
+  {
+    "id": "structured-multi-paragraph-01",
+    "kind": "structured",
+    "register": "essay",
+    "text": "Cities are argued into existence.\n\nEvery street that looks inevitable was once a suggestion that somebody made out loud and somebody else refused.\n\nWhat survives is not the best plan but the most persistent one.",
+    "expected": [],
+    "notes": "Three short paragraphs of correct essay prose. Paragraph boundaries are not sentence boundaries, so no capitalisation or punctuation finding belongs at a newline."
+  },
+  {
+    "id": "ambiguous-passive-01",
+    "kind": "ambiguous",
+    "register": "academic",
+    "text": "The samples were collected in March.",
+    "expected": [],
+    "acceptable": [
+      "no finding at all",
+      "a style-passive-voice note, since naming the actor is impossible here"
+    ],
+    "notes": "The passive here is correct scientific reporting where the actor is genuinely unknown. Draftwise currently holds it back as a low-confidence style note in an academic register, which is the right call; the case exists to prove the engine does NOT raise it to an objective finding or count it against the correctness score. Recorded as ambiguous rather than correct so the two cases stay separable."
+  },
+  {
+    "id": "ambiguous-contraction-01",
+    "kind": "ambiguous",
+    "register": "casual",
+    "text": "I can't make it tomorrow, sorry.",
+    "expected": [],
+    "acceptable": [
+      "a formality note when the user's tone goal is formal"
+    ],
+    "notes": "A contraction in casual writing is the writer's voice. Only a formal tone goal justifies flagging it, so a bare casual draft should produce nothing."
+  },
+  {
+    "id": "ambiguous-split-infinitive-01",
+    "kind": "ambiguous",
+    "register": "professional",
+    "text": "We need to carefully review the contract before signing.",
+    "expected": [],
+    "notes": "A split infinitive in modern professional writing is not an error. Draftwise has no rule for it and must not acquire one by inference from this corpus."
+  },
+  {
+    "id": "ambiguous-they-singular-01",
+    "kind": "ambiguous",
+    "register": "professional",
+    "text": "If a user submits a form, they should see a confirmation.",
+    "expected": [],
+    "notes": "Singular 'they' is standard and must never be reported as a subject-verb agreement error. This guards the agreement rule against a real class of false positive."
+  },
+  {
+    "id": "damaging-change-01",
+    "kind": "meaning-risk",
+    "register": "general",
+    "text": "The team will not accept the proposal unless it is revised.",
+    "expected": [],
+    "notes": "'not' is load-bearing. Any suggestion that removes or alters the negation would change the meaning of the sentence, so the correct behaviour is to make no suggestion at all."
+  },
+  {
+    "id": "damaging-change-02",
+    "kind": "meaning-risk",
+    "register": "academic",
+    "text": "The study found no significant difference between the groups.",
+    "expected": [],
+    "notes": "'no significant difference' is the entire result of the study. Wordiness or cliche rules must not touch the phrase, and a conciseness rewrite that shortened it would destroy the finding."
+  },
+  {
+    "id": "damaging-change-03",
+    "kind": "meaning-risk",
+    "register": "technical",
+    "text": "The cache is invalidated only when the key expires.",
+    "expected": [],
+    "notes": "'only' changes the condition. Removing it as a filler word or intensifier would invert the behaviour described."
+  },
+  {
+    "id": "damaging-change-04",
+    "kind": "meaning-risk",
+    "register": "professional",
+    "text": "We may not be able to deliver by Friday.",
+    "expected": [],
+    "notes": "'may not' is hedged uncertainty, not missing punctuation. Terminal-punctuation and agreement rules must not fire here in a way that changes the modal."
+  },
+  {
+    "id": "overlap-spelling-capitalisation-01",
+    "kind": "overlap",
+    "register": "general",
+    "text": "recieve the package today.",
+    "expected": [
+      { "ruleId": "spelling-common-typo", "category": "spelling", "start": 0, "end": 7, "original": "recieve" }
+    ],
+    "acceptable": [
+      "the capitalisation finding over [0,1] may also be shown, if the merge ever learns to keep a contained finding alongside its container",
+      "it may be absent, and surface on re-analysis once the spelling fix is applied — this is the current behaviour and it is acceptable"
+    ],
+    "conflict": "A capitalisation finding would sit strictly inside the spelling finding over the same first word. Accepting the spelling fix re-analyses the text, at which point the capitalisation finding is no longer shadowed and appears. The containment is therefore temporary rather than permanent, so no change is required.",
+    "notes": "This case exists to pin the merge's containment behaviour so it cannot change silently. It was written while trialling a change that kept contained findings instead of suppressing them; that change was reverted because it broke the project's documented merge contract (tests/analysis-pipeline.test.mjs asserts that a stronger overlapping finding suppresses a weaker one, and a contained finding is a special case of that). The draft already ends in a full stop, so no terminal-punctuation finding is expected here."
+  },
+  {
+    "id": "overlap-wordiness-clarity-01",
+    "kind": "overlap",
+    "register": "professional",
+    "text": "In order to utilise the system, we basically need to verify the data.",
+    "expected": [
+      { "ruleId": "wordiness-in-order-to", "category": "conciseness" },
+      { "ruleId": "conciseness-filler", "category": "conciseness" }
+    ],
+    "conflict": "A wordiness rewrite and a filler removal cover the same clause. Applying both in one pass must not produce garbled text, so the second edit has to be validated against the post-first-edit document rather than the original.",
+    "notes": "Two overlapping conciseness findings in one sentence."
+  },
+  {
+    "id": "overlap-repetition-spelling-01",
+    "kind": "overlap",
+    "register": "general",
+    "text": "the the recieve code is correct.",
+    "expected": [
+      { "ruleId": "grammar-duplicate-determiner", "category": "grammar" },
+      { "ruleId": "spelling-common-typo", "category": "spelling" }
+    ],
+    "acceptable": [
+      "capitalization-sentence-start may also be shown, following the same temporary-containment rule as overlap-spelling-capitalisation-01"
+    ],
+    "conflict": "Removing the duplicated 'the' shifts every offset after it, so the spelling suggestion's stored range is stale the moment the first fix is applied. Bulk apply must re-validate each span against the current text rather than the original.",
+    "notes": "A determiner fix that moves a spelling fix's range. Three findings across overlapping and disjoint spans, so the case also proves that fixing one does not silently discard the others. The sentence-start capitalisation finding sits inside the determiner span and is suppressed by the merge; it reappears once the determiner fix is applied and the text is re-analysed, which is the documented behaviour for contained findings."
+  },
+  {
+    "id": "dialect-gb-required-01",
+    "kind": "dialect",
+    "dialect": "en-GB",
+    "goals": { "audience": "professional", "intent": "inform", "tone": "professional" },
+    "text": "The organisation will analyse the colour and centre of the programme.",
+    "expected": [],
+    "notes": "Correct British spelling must produce nothing. This is the counterpart to the US-dialect cases in the original corpus, which only ever asserted that US spellings ARE flagged under a GB preference. Without this case, a rule that flags every British word would still score perfectly."
+  },
+  {
+    "id": "dialect-us-required-01",
+    "kind": "dialect",
+    "dialect": "en-US",
+    "goals": { "audience": "professional", "intent": "inform", "tone": "professional" },
+    "text": "The organization will analyze the color and center of the program.",
+    "expected": [],
+    "notes": "Correct US spelling must produce nothing under a US preference."
+  },
+  {
+    "id": "dialect-gb-contextual-01",
+    "kind": "dialect",
+    "dialect": "en-GB",
+    "goals": { "audience": "technical", "intent": "explain", "tone": "neutral" },
+    "text": "The programme runs on the server and the licence is stored locally.",
+    "expected": [],
+    "notes": "British 'programme' and 'licence' in computing contexts. The contextual dialect rule must not rewrite 'programme' to 'program' when it means a TV or project schedule, and must not touch 'licence' as a noun."
+  },
+  {
+    "id": "terminology-preferred-01",
+    "kind": "terminology",
+    "preferences": { "preferredTerminology": { "login": "sign in" } },
+    "goals": { "audience": "technical", "intent": "explain", "tone": "neutral" },
+    "text": "Click login to continue, then check the login page.",
+    "expected": [
+      { "ruleId": "consistency-preferred-term", "category": "consistency" },
+      { "ruleId": "consistency-preferred-term", "category": "consistency" }
+    ],
+    "notes": "A stated terminology preference must be applied to every occurrence, not just the first. Exercises the preferredTerminology path the original corpus never covered."
+  },
+  {
+    "id": "terminology-protected-01",
+    "kind": "terminology",
+    "preferences": { "preferredTerminology": { "login": "sign in" } },
+    "goals": { "audience": "technical", "intent": "explain", "tone": "neutral" },
+    "text": "The `user_login` field stores the login token. See https://example.com/login for the API.",
+    "expected": [
+      { "ruleId": "consistency-preferred-term", "category": "consistency" }
+    ],
+    "notes": "One legitimate occurrence, one inside a code identifier and one inside a URL. The protected spans must be excluded, so only the prose occurrence is flagged. Terminology rules must not corrupt identifiers."
+  },
+  {
+    "id": "identifiers-code-01",
+    "kind": "false-positive",
+    "register": "technical",
+    "text": "The function `getUserById(id)` returns a Promise<string | null> and the route is /api/users/:id.",
+    "expected": [],
+    "notes": "Code-adjacent text with camelCase, generics and a path parameter. Nothing here is misspelled, and the path parameter must not be read as a fragment."
+  },
+  {
+    "id": "identifiers-version-01",
+    "kind": "false-positive",
+    "register": "technical",
+    "text": "Draftwise 0.2.0 requires Node.js >=22.13.0 and TypeScript 5.9.3.",
+    "expected": [],
+    "notes": "Version numbers and comparison operators. Numeric tokens must not be spell-checked or agreement-checked."
+  },
+  {
+    "id": "names-acronyms-01",
+    "kind": "false-positive",
+    "register": "professional",
+    "text": "Dr Ariadne Smythe from the NGO presented to NASA, the WHO and the BBC.",
+    "expected": [],
+    "notes": "Titles, a personal name and initialisms. Capitalisation, spelling and fragment rules must leave all of them alone."
+  },
+  {
+    "id": "academic-correct-01",
+    "kind": "academic",
+    "register": "academic",
+    "goals": { "audience": "academic", "intent": "explain", "tone": "neutral" },
+    "text": "The analysis compares reported outcomes across three regions and records the limits of each sample. We therefore treat the findings as indicative rather than conclusive.",
+    "expected": [],
+    "notes": "Correct academic prose at sentence length. An academic document must not be penalised for using appropriate technical vocabulary, and these sentences are within normal academic range."
+  },
+  {
+    "id": "academic-technical-vocabulary-01",
+    "kind": "academic",
+    "register": "academic",
+    "goals": { "audience": "academic", "intent": "explain", "tone": "neutral" },
+    "text": "The methodology operationalises the construct through a validated instrument, and the resulting covariance matrix is reported in full.",
+    "expected": [],
+    "notes": "Dense but correct academic vocabulary. Clarity-vague-word and conciseness rules must not flag discipline-specific terms as vague or wordy."
+  },
+  {
+    "id": "technical-terminology-kept-01",
+    "kind": "technical",
+    "register": "technical",
+    "goals": { "audience": "technical", "intent": "explain", "tone": "neutral" },
+    "text": "The service serialises the configuration to the cache, then invalidates the entry when the session token expires.",
+    "expected": [],
+    "notes": "Necessary technical terminology. A technical document must not be encouraged to replace precise terms with vague everyday language."
+  },
+  {
+    "id": "casual-correct-01",
+    "kind": "casual",
+    "register": "casual",
+    "goals": { "audience": "casual", "intent": "inform", "tone": "casual" },
+    "text": "hey, just checking in — are we still on for thursday? i can do after 5 if that works.",
+    "expected": [
+      { "ruleId": "capitalization-pronoun-i", "category": "capitalization" }
+    ],
+    "acceptable": [
+      "at most one or two findings: 'I' is worth correcting in any register, and everything else here is the writer's voice"
+    ],
+    "notes": "Ordinary casual register. The density of capitalisation and terminal-punctuation findings must be low enough that this is not a wall of corrections. Before the register budget change, this draft displayed seven findings under a casual goal; it now displays one, which is the whole point of the case. The remaining 'I' is a genuine correction in every register and is deliberately expected."
+  },
+  {
+    "id": "context-sensitive-agreement-01",
+    "kind": "context-sensitive",
+    "register": "professional",
+    "goals": { "audience": "professional", "intent": "inform", "tone": "neutral" },
+    "text": "The results is clear and the team are ready.",
+    "expected": [
+      { "ruleId": "grammar-subject-verb-agreement", "category": "grammar", "original": "is" },
+      { "ruleId": "grammar-subject-verb-agreement", "category": "grammar", "original": "are" }
+    ],
+    "notes": "Two agreement errors in opposite directions in one sentence. Each verb must be judged against its own subject, not against a single document-wide assumption."
+  },
+  {
+    "id": "context-sensitive-agreement-correct-01",
+    "kind": "context-sensitive",
+    "register": "professional",
+    "goals": { "audience": "professional", "intent": "inform", "tone": "neutral" },
+    "text": "The results are clear and the team is ready.",
+    "expected": [],
+    "notes": "The same two subjects with correct agreement. Guards against a rule that only learns one direction."
+  },
+  {
+    "id": "context-sensitive-abbreviation-01",
+    "kind": "context-sensitive",
+    "register": "professional",
+    "goals": { "audience": "professional", "intent": "inform", "tone": "neutral" },
+    "text": "Dr. smith joined Prof. jones for the meeting with the client.",
+    "expected": [],
+    "notes": "A full stop that closes an abbreviation is not a sentence boundary, so the lowercase word after it is not a lowercase sentence start. Recorded here as a context-sensitive case because it depends entirely on recognising the abbreviation."
+  }
+]

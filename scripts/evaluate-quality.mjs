@@ -16,8 +16,43 @@ import { analyzeLocally, prioritiseSuggestions } from "../packages/grammar/src/i
 const corpus = JSON.parse(await readFile(new URL("../evaluation/corpus.json", import.meta.url), "utf8"));
 const cleanProse = JSON.parse(await readFile(new URL("../evaluation/clean-prose.json", import.meta.url), "utf8"));
 const devCorpus = JSON.parse(await readFile(new URL("../evaluation/dev-corpus.json", import.meta.url), "utf8"));
+// The context corpus adds the shapes the main corpus never contained: structured
+// documents, ambiguous wording, findings where a suggested change would damage
+// meaning, and overlapping findings on one span. It is loaded here rather than in
+// evaluate-blind.mjs because it is a regression corpus like the others, not a
+// held-out measurement. Run with --strict to gate on it.
+const contextCorpus = JSON.parse(await readFile(new URL("../evaluation/context-corpus.json", import.meta.url), "utf8"));
 
 const DEFAULT_GOALS = { audience: "general", intent: "inform", tone: "professional" };
+const DEFAULT_DIALECT = "en-GB";
+
+/**
+ * Per-example analysis options.
+ *
+ * The context corpus is the first corpus to carry dialect, terminology
+ * preferences and explicit goals, because a case like "correct British spelling
+ * produces nothing" is meaningless without saying which dialect is in force.
+ * Anything absent falls back to the same defaults the other corpora use.
+ */
+function optionsFor(example) {
+  const goals = example.goals ?? (example.register === "casual"
+    ? { audience: "casual", intent: "inform", tone: "casual" }
+    : example.register === "academic"
+      ? { audience: "academic", intent: "explain", tone: "neutral" }
+      : example.register === "technical"
+        ? { audience: "technical", intent: "explain", tone: "neutral" }
+        : DEFAULT_GOALS);
+  const dialect = example.dialect ?? DEFAULT_DIALECT;
+  return {
+    goals,
+    dialect,
+    analysisOptions: { dialect, ...(example.preferences ?? {}) },
+    preferences: {
+      dialect,
+      preferredTerminology: example.preferences?.preferredTerminology ?? {},
+    },
+  };
+}
 // A style opinion is not an error. Counting a defensible passive-voice remark as
 // a false positive would punish the engine for offering editorial advice, so the
 // headline false-positive rate covers objective error categories only and
@@ -65,11 +100,11 @@ function evaluatePass(examples, mode) {
 
   for (const example of examples) {
     const register = example.register ?? example.style ?? example.kind ?? "unlabelled";
-    const goals = example.goals ?? DEFAULT_GOALS;
+    const { goals, dialect, analysisOptions, preferences } = optionsFor(example);
     const text = example.text;
     words += wordCount(text);
-    const raw = analyzeLocally(text, { dialect: "en-GB" }, goals);
-    const report = prioritiseSuggestions(raw.issues, { goals, preferences: { dialect: "en-GB" }, text, document: undefined });
+    const raw = analyzeLocally(text, analysisOptions, goals);
+    const report = prioritiseSuggestions(raw.issues, { goals, preferences: { dialect, ...preferences }, text, document: undefined });
     const shown = mode === "displayed" ? report.displayed : raw.issues;
     rawTotal += raw.issues.length;
     displayedTotal += shown.length;
@@ -185,10 +220,21 @@ const allExamples = [...corpus, ...cleanProse.map((example) => ({ ...example, ex
 const rawPass = evaluatePass(allExamples, "raw");
 const displayedPass = evaluatePass(allExamples, "displayed");
 
+// The context corpus is reported separately rather than folded into the headline
+// number. Its cases are deliberately harder (structured documents, meaning-risk
+// spans, overlapping findings) and its expectations are stricter, so averaging it
+// into the main figure would hide a regression in either direction. A separate
+// line also keeps the existing headline comparable with every previous run.
+const contextPass = evaluatePass(contextCorpus, "displayed");
+
 console.log(JSON.stringify({
   corpusSize: allExamples.length,
   raw: rawPass,
   displayed: displayedPass,
+  contextCorpus: {
+    examples: contextCorpus.length,
+    ...contextPass,
+  },
   delta: {
     falsePositivesPer1000Words: Number((rawPass.falsePositivesPer1000Words - displayedPass.falsePositivesPer1000Words).toFixed(3)),
     suggestions: rawPass.displayedSuggestions - displayedPass.displayedSuggestions,
@@ -197,4 +243,12 @@ console.log(JSON.stringify({
   },
 }, null, 2));
 
-if (process.argv.includes("--strict") && (displayedPass.falsePositivesPer1000Words > 1 || displayedPass.precision < 0.7)) process.exit(1);
+// The context corpus gates only when asked for, and only on the metrics that
+// matter for it: an objective false positive, or a missing correction that the
+// case exists to prove is produced. Precision here is measured on displayed
+// suggestions, which is the whole point of the corpus.
+if (process.argv.includes("--strict")) {
+  const mainFails = displayedPass.falsePositivesPer1000Words > 1 || displayedPass.precision < 0.7;
+  const contextFails = contextPass.falsePositivesPer1000Words > 2 || contextPass.recall < 0.85;
+  if (mainFails || contextFails) process.exit(1);
+}

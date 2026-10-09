@@ -185,11 +185,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               <Button size="icon-xs" variant="ghost" aria-label="Undo" disabled={!props.canUndo} onClick={props.onUndo}><Undo2 size={15} /></Button>
               <Button size="icon-xs" variant="ghost" aria-label="Redo" disabled={!props.canRedo} onClick={props.onRedo}><RotateCw size={15} /></Button>
               <span className="toolbar-separator" />
-              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode}><Highlighter size={14} /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
+              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode}><Highlighter size={14} aria-hidden="true" /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
             </div>
             <div className="editor-toolbar-right">
               <span className={`analysis-status ${props.analyzing ? "is-working" : ""}`} role="status" aria-live="polite">
-                {props.analyzing ? <><span className="status-spinner" /> Analysing changed text</> : <><span className="status-check"><Check size={11} /></span> {props.analysisStatusLabel}</>}
+                {props.analyzing
+                  ? <><span className="status-spinner" aria-hidden="true" /> Analysing changed text</>
+                  : <><span className="status-check" aria-hidden="true"><Check size={11} /></span> {props.analysisStatusLabel}</>}
               </span>
               <Button variant="ghost" size="icon-xs" aria-label="Open editor shortcuts" onClick={props.onOpenShortcuts}><Keyboard size={16} /></Button>
               <Button variant="ghost" size="icon-xs" aria-label="Clear document" onClick={props.onClearDocument}><Trash2 size={16} /></Button>
@@ -214,7 +216,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         <aside className="suggestions-column">
           <div className="suggestions-header">
             <div><p className="eyebrow">Live analysis</p><h2>Suggestions <span>{props.suggestions.report.displayedCount}</span></h2></div>
-            <Button size="icon-sm" variant="ghost" aria-label="Collapse suggestions" onClick={props.onToggleSuggestions}><PanelRight size={17} /></Button>
+            <Button size="icon-sm" variant="ghost" aria-label={props.suggestionsOpen ? "Collapse suggestions" : "Show suggestions"} aria-expanded={props.suggestionsOpen} onClick={props.onToggleSuggestions}><PanelRight size={17} /></Button>
           </div>
           {props.suggestions.changesWorthMaking > 0 ? (
             <div className="fix-first-banner">

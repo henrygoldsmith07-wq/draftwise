@@ -292,7 +292,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>
       ) : (
-        <aside className="suggestions-collapsed"><Button size="sm" variant="outline" onClick={props.onToggleSuggestions}><PanelRight size={15} /> Show suggestions</Button></aside>
+        <aside className="suggestions-collapsed"><Button size="sm" variant="outline" aria-label="Show suggestions" aria-expanded={false} onClick={props.onToggleSuggestions}><PanelRight size={15} /> Show suggestions</Button></aside>
       )}
     </div>
   );

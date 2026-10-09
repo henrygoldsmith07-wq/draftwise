@@ -22,6 +22,14 @@ test("toolbar and status controls expose their state to assistive technology", a
   assert.match(collapse[0], /aria-label=\{props\.suggestionsOpen \? "Collapse suggestions" : "Show suggestions"\}/u);
   assert.match(collapse[0], /aria-expanded=\{props\.suggestionsOpen\}/u);
 
+  // The collapsed rail renders a *separate* button with the same job, and it
+  // shipped with neither an accessible label nor a state. Playwright caught this
+  // in the browser: the control resolved by role but reported aria-expanded as
+  // null, so a screen reader had nothing to announce when reopening the panel.
+  const collapsedRail = editor.match(/<aside className="suggestions-collapsed">[\s\S]*?<\/aside>/u);
+  assert.ok(collapsedRail, "collapsed rail should exist");
+  assert.match(collapsedRail[0], /aria-label="Show suggestions"/u);
+  assert.match(collapsedRail[0], /aria-expanded=\{false\}/u);
   // Decorative icons must not be announced. A bare <Check size={11} /> has no
   // accessible name but is still in the tree, so a reader heard a stray node
   // before the actual status text.

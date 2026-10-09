@@ -75,6 +75,8 @@ function describeFamily(family: string, count: number, sample: WritingIssue): st
       return `${count} vague expression${plural}`;
     case "structure-long-sentence":
       return `${count} long sentence${plural}`;
+    case "structure-sticky-sentence":
+      return `${count} sentence${plural} dense with connecting words`;
     case "structure-fragment":
       return `${count} sentence fragment${plural}`;
     case "cliche":

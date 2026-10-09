@@ -38,6 +38,7 @@ function countByRule(issues: WritingIssue[]) {
 const RULE_DRIVER_LABELS: Record<string, string> = {
   "clarity-vague-word": "vague expressions",
   "structure-long-sentence": "long sentences",
+  "structure-sticky-sentence": "sentences dense with connecting words",
   "conciseness-filler": "filler words",
   "wordiness": "wordy phrases",
   "style-passive-voice": "passive constructions",

@@ -48,6 +48,7 @@ const FAMILY_LABELS: Record<string, string> = {
   "clarity-vague-word": "Vague wording suggestions",
   "style-intensifier": "Intensifier suggestions",
   "structure-long-sentence": "Long sentence suggestions",
+  "structure-sticky-sentence": "Dense-sentence suggestions",
   "structure-fragment": "Sentence fragment suggestions",
   "punctuation-oxford-comma": "Oxford comma suggestions",
   "punctuation-missing-terminal": "Missing punctuation suggestions",

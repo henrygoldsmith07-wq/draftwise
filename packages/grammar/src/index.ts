@@ -33,6 +33,7 @@ import {
 import {
   findRepeatedWordsAndPhrases,
   findStructureIssues,
+  findStickySentences,
   findStyleIssues,
 } from "./style.ts";
 import {
@@ -73,6 +74,7 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
     ...findCapitalization(text, preferences),
     ...findRepeatedWordsAndPhrases(text, preferences, document),
     ...findStyleIssues(text, preferences, document),
+    ...findStickySentences(document, preferences),
     ...findStructureIssues(text, preferences, document),
     ...findDocumentStructure(text, preferences, goals, document),
     ...findGoalTerminology(text, goals, preferences, document),

@@ -125,6 +125,12 @@ export function explainRelevance(issue: PrioritisedIssue, goals?: WritingGoals):
         : goals.audience === "academic"
           ? `Long sentences are the main thing that costs an academic reader your argument. Splitting this one is usually worth it.`
           : `Long sentences ask the reader to hold several ideas at once. Splitting one is often easier than rewriting it.`;
+    case "structure-sticky-sentence":
+      return goals.audience === "academic"
+        ? `Academic readers will look for the claim inside this sentence. If most of it is connecting words, the claim is doing very little work.`
+        : goals.intent === "persuade"
+          ? `You are trying to ${intent}. A sentence built from connecting words gives the reader nothing to hold onto.`
+          : `Most of this sentence is connective tissue, so the reader has to work out what it is actually saying.`;
     case "structure-fragment":
       return goals.intent === "story"
         ? `Fragments are normal in narrative prose. Keep this one if the rhythm is doing the work.`

@@ -182,10 +182,17 @@ export function buildActionableInsights(args: {
   for (const [family, group] of candidates) {
     const weight = actionWeight(family, group);
     if (weight <= bestWeight) continue;
-    const representative = [...group].sort((left, right) => {
-      const tier = (value: PrioritisedIssue) => (value.tier === "fix-first" ? 0 : value.tier === "improve" ? 1 : 2);
-      return tier(left) - tier(right) || right.confidence - left.confidence || left.start - right.start;
-    })[0];
+    // `actionable` is displayed-first, so most members are already prioritised;
+    // anything that is not (an un-ranked issue when no displayed list was passed)
+    // sorts after every ranked one rather than being misread as fix-first.
+    const tierOrder = (value: WritingIssue & Partial<PrioritisedIssue>) => {
+      if (value.tier === "fix-first") return 0;
+      if (value.tier === "improve") return 1;
+      if (value.tier === "optional") return 2;
+      return 3;
+    };
+    const representative = [...group].sort((left, right) =>
+      tierOrder(left) - tierOrder(right) || right.confidence - left.confidence || left.start - right.start)[0];
     const objective = ["spelling", "grammar", "punctuation", "capitalization"].includes(representative.category);
     bestWeight = weight;
     nextAction = {
@@ -203,7 +210,9 @@ export function buildActionableInsights(args: {
   }
 
   // Only when nothing objective remains does the headline become stylistic.
-  const anyObjective = [...candidates.entries()].some(([family, group]) =>
+  // Iterating the values directly: the family name is not needed to answer
+  // "is anything here an objective correction".
+  const anyObjective = [...candidates.values()].some((group) =>
     group.some((issue) => ["spelling", "grammar", "punctuation", "capitalization"].includes(issue.category)));
   const onlyStyleRemaining = Boolean(issues.length) && !anyObjective;
 

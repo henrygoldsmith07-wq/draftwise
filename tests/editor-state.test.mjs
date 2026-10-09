@@ -52,11 +52,26 @@ test("forgetting cloud credentials clears custom headers too", async () => {
   assert.match(settings, /Forget cloud credentials/u);
 });
 
-test("Save & close remains open when immediate persistence fails", async () => {
+test("Save & close stays open and explains itself when immediate persistence fails", async () => {
   const settings = await readFile(settingsUrl, "utf8");
-  assert.match(settings, /const result = onSave\?\.\(\);/u);
-  assert.match(settings, /if \(result && !result\.ok\) return;/u);
-  assert.match(settings, /onOpenChange\(false\);/u);
+  // The behaviour under test is unchanged from before: a failed save must not
+  // close the dialog, because the writer has not actually saved anything. What
+  // changed is that the failure is now shown rather than swallowed — the dialog
+  // used to sit there with no explanation, so the writer clicked "Save & close"
+  // repeatedly with no idea why nothing happened.
+  const save = settings.match(/const save = \(\) => \{([\s\S]*?)\n  \};/u);
+  assert.ok(save, "save handler should exist");
+  assert.match(save[1], /const result = onSave\?\.\(\);/u);
+  // Failure keeps the dialog open AND records a reason for it.
+  assert.match(save[1], /if \(result && !result\.ok\)/u);
+  assert.match(save[1], /return;/u);
+  assert.match(save[1], /setSaveError\(/u);
+  // Success still closes.
+  assert.match(save[1], /onOpenChange\(false\);/u);
+  // The reason is rendered accessibly, not set and dropped.
+  assert.match(settings, /role="alert"/u);
+  assert.match(settings, /\{saveError \?/u);
+  assert.match(settings, /Save & close/u);
 });
 
 test("undo and redo cancel stale rewrite state and reset selection", async () => {

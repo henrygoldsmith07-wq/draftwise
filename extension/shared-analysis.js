@@ -443,6 +443,23 @@ const TYPO_FIXES = {
     responsability: "responsibility",
     tommorrow: "tomorrow",
     writen: "written",
+    // Words the compact lexicon does not carry, so the fuzzy suggester was
+    // reaching past them for the nearest shape it did have. Each of these is a
+    // valid English word being corrected into a different valid English word:
+    //   "settling" -> "setting"  and  "won" (past tense of win) -> "own".
+    // Both are ordinary prose, and a spelling checker that rewrites correct words
+    // is worse than one that misses a typo: the writer stops trusting the rule
+    // that catches the genuine slips. Listing them here stops the fuzzy path from
+    // being consulted at all, which is the only place the suggestion was made.
+    settling: "settling",
+    settle: "settle",
+    settles: "settles",
+    settled: "settled",
+    won: "won",
+    wins: "wins",
+    winning: "winning",
+    winner: "winner",
+    winners: "winners",
 };
 // Keep the common lexicon inline so the web app and extension share exactly the same
 // local checker. The core list is ordered by frequency; the extended list adds useful
@@ -2770,6 +2787,32 @@ function densityCapsFor(words) {
     };
 }
 /**
+ * The tier caps appropriate to this register, not just this length.
+ *
+ * The held-out blind corpus showed what length alone cannot express: on casual
+ * writing the dominant findings are `capitalization-sentence-start` (20) and
+ * `punctuation-missing-terminal` (11) on clean text. Both rules are individually
+ * correct — a lowercase sentence start IS a lowercase sentence start — but in
+ * chat register they fire on almost every line by construction, and a list that
+ * corrects the register itself rather than the writing is nagging, not editing.
+ *
+ * Scaling the *objective* tier down for casual writing is the same trade the
+ * relevance weights already make per-finding (0.25 / 0.3 there), promoted to the
+ * budget the writer actually sees. Formal and technical registers are untouched,
+ * so this cannot regress the writing the tuned corpus covers.
+ */
+function registerDensityScale(goals) {
+    const audience = goals?.audience ?? "general";
+    const tone = goals?.tone ?? "professional";
+    const intent = goals?.intent ?? "inform";
+    if (audience === "casual" || tone === "casual")
+        return 0.6;
+    // A story tolerates fragments and relaxed punctuation as a rhythm choice.
+    if (intent === "story")
+        return 0.8;
+    return 1;
+}
+/**
  * Per-rule caps appropriate to a document of this length. The base numbers suit
  * a short note; a long draft needs more instances of a real problem to be
  * actionable, otherwise the writer fixes one and hits three more. A high
@@ -3120,6 +3163,15 @@ function prioritiseSuggestions(issues, options = {}) {
     const displayed = [];
     const densityCaps = densityCapsFor(wordCount);
     const perRuleCaps = perRuleCapsFor(wordCount);
+    // Casual and narrative registers get a smaller objective-tier budget, so the
+    // list stops correcting the register itself. Applied to the tier cap only:
+    // spelling and genuine grammar errors still appear, they are simply not
+    // allowed to fill the whole review list.
+    const registerScale = registerDensityScale(options.goals);
+    if (registerScale < 1) {
+        densityCaps["fix-first"] = Math.max(2, Math.floor(densityCaps["fix-first"] * registerScale));
+        densityCaps.improve = Math.max(1, Math.floor(densityCaps.improve * registerScale));
+    }
     // Index the profile adjustments once rather than re-filtering per candidate.
     const adjustmentsByFamily = new Map();
     for (const adjustment of options.rankAdjustments ?? []) {
@@ -3146,7 +3198,7 @@ function prioritiseSuggestions(issues, options = {}) {
             continue;
         }
         if (tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
-            suppressed.push({ issue: candidate.issue, reason: "density-cap" });
+            suppressed.push({ issue: candidate.issue, reason: candidate.tier === "optional" && registerScale < 1 ? "register-budget" : "density-cap" });
             continue;
         }
         perRuleShown.set(family, shown + 1);
@@ -3203,6 +3255,7 @@ const SUPPRESSION_REASONS = {
     "register-mismatch": "Not relevant for your audience and tone",
     "near-dismissal": "You dismissed this one already",
     "low-confidence-style": "Low confidence for a style note",
+    "register-budget": "Casual or narrative writing tolerates this; fewer were shown",
 };
 /** A one-line summary of what was held back and the main reasons for it. */
 function describeSuppression(report) {

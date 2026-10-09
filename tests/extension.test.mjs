@@ -364,6 +364,57 @@ test("contenteditable text maps preserve paragraphs, br nodes, nested spans, and
   assert.equal(ranges.length, 2);
 });
 
+test("dom utils bind editors that are editable through an inherited attribute", async () => {
+  const source = await readFile(file("extension/dom-utils.js"), "utf8");
+  const context = { console };
+  vm.runInNewContext(source, context);
+
+  // Models the real DOM closely enough for the path under test: `matches` is
+  // selector-driven, and an element only answers "yes" to [contenteditable] when
+  // it actually carries the attribute. `children` mirrors what the tag walk uses.
+  const editable = (tagName, { carriesAttribute, isContentEditable }, children = []) => {
+    const element = fakeElement(tagName, children);
+    element.carriesAttribute = carriesAttribute;
+    element.isContentEditable = isContentEditable;
+    element.children = children.filter((child) => child.nodeType === 1);
+    element.matches = (selector) => {
+      if (selector.includes("textarea")) return tagName === "textarea";
+      if (selector.includes("input")) return tagName === "input";
+      if (selector.includes("designmode")) return carriesAttribute;
+      if (selector.includes("contenteditable")) return carriesAttribute;
+      return false;
+    };
+    return element;
+  };
+
+  // A rich-text wrapper carries the attribute; the field itself does not.
+  // The selector cannot see it, because inheritance is not expressible in CSS.
+  const field = editable("div", { carriesAttribute: false, isContentEditable: true }, [fakeText("Some prose the writer typed.")]);
+  const plain = editable("div", { carriesAttribute: false, isContentEditable: false }, [fakeText("Not editable.")]);
+  const wrapper = editable("section", { carriesAttribute: false, isContentEditable: false }, [field, plain]);
+
+  const bound = [];
+  context.DraftwiseDom.bindEditableSubtree(wrapper, (node) => bound.push(node));
+
+  // Only the inherited field is bound. The wrapper is not, and neither is the
+  // non-editable div. Before this, the extension silently did nothing on sites
+  // that set the attribute on a wrapper, which is what most of them do.
+  assert.deepEqual(bound, [field]);
+
+  // A field that carries the attribute itself is bound exactly once, not twice:
+  // the selector already finds it and the tag walk must not repeat it.
+  const explicit = editable("div", { carriesAttribute: true, isContentEditable: true }, [fakeText("Explicitly editable.")]);
+  const boundExplicit = [];
+  context.DraftwiseDom.bindEditableSubtree(editable("section", { carriesAttribute: false, isContentEditable: false }, [explicit]), (node) => boundExplicit.push(node));
+  assert.deepEqual(boundExplicit, [explicit]);
+
+  // A plain textarea is still bound exactly once.
+  const textarea = editable("textarea", { carriesAttribute: false, isContentEditable: true }, [fakeText("x")]);
+  const boundTextarea = [];
+  context.DraftwiseDom.bindEditableSubtree(editable("section", { carriesAttribute: false, isContentEditable: false }, [textarea]), (node) => boundTextarea.push(node));
+  assert.deepEqual(boundTextarea, [textarea]);
+});
+
 test("mutation handling binds only added editable subtrees", async () => {
   const source = await readFile(file("extension/dom-utils.js"), "utf8");
   const context = { console };

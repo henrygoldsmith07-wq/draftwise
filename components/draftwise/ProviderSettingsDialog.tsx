@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ChevronRight, Info, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -48,9 +49,19 @@ export function ProviderSettingsDialog({
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
   const classifierValue: ClassifierSettings = classifier ?? DEFAULT_CLASSIFIER_SETTINGS;
   const patchClassifier = (patch: Partial<ClassifierSettings>) => onClassifierChange?.({ ...classifierValue, ...patch });
+  // A failed save used to just refuse to close the dialog, leaving the writer
+  // clicking "Save & close" with no idea why nothing happened. The error exists
+  // (useDraftPersistence returns one when hydration has not finished, and the
+  // document store returns one when local storage is unavailable), so it is now
+  // shown with a next action instead of silently discarded.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const save = () => {
     const result = onSave?.();
-    if (result && !result.ok) return;
+    if (result && !result.ok) {
+      setSaveError(result.error || "Your settings could not be saved on this device. Your text is still in the editor.");
+      return;
+    }
+    setSaveError(null);
     onOpenChange(false);
   };
   const forget = () => {
@@ -232,6 +243,12 @@ export function ProviderSettingsDialog({
         </div>
 
         <DialogFooter className="settings-footer">
+          {saveError ? (
+            <div className="settings-save-error" role="alert">
+              <span>{saveError}</span>
+              <button type="button" onClick={() => setSaveError(null)}>Dismiss</button>
+            </div>
+          ) : null}
           <Button variant="ghost" onClick={forget}><Trash2 size={14} /> Forget cloud credentials</Button>
           <Button variant="ghost" onClick={onClearData}>Clear local data</Button>
           <Button onClick={save}><ShieldCheck size={14} /> Save & close</Button>

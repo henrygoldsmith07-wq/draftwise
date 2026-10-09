@@ -1,7 +1,32 @@
 (function () {
   "use strict";
 
-  const EDITABLE_SELECTOR = 'textarea, input, [contenteditable="true"]';
+  const EDITABLE_SELECTOR = 'textarea, input, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"], [designmode="on"]';
+  // Elements that are editable but the selector cannot see.
+  //
+  // The selector above misses editors whose editable-ness is inherited from a
+  // wrapper, because CSS inheritance is not expressible in a selector. These are
+  // common — several rich-text libraries set the attribute on a container — and
+  // missing them meant the extension silently did nothing on sites that
+  // otherwise looked supported.
+  //
+  // `isContentEditable` is the live computed property and already accounts for
+  // inheritance, so the inherited case is exactly "editable, but not selected".
+  // Scanning by tag rather than by selector is what makes those reachable.
+  function findInheritedEditables(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return [];
+    const found = [];
+    const seen = new Set();
+    const visit = (node) => {
+      if (!node) return;
+      if (node.nodeType === 1 && !node.matches(EDITABLE_SELECTOR) && node.isContentEditable) {
+        if (!seen.has(node)) { seen.add(node); found.push(node); }
+      }
+      for (const child of node.children || []) visit(child);
+    };
+    visit(root);
+    return found;
+  }
   const BLOCK_TAGS = new Set([
     "address", "article", "aside", "blockquote", "div", "dl", "dt", "dd", "fieldset", "figcaption", "figure", "footer", "form",
     "h1", "h2", "h3", "h4", "h5", "h6", "header", "li", "main", "nav", "ol", "p", "pre", "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
@@ -119,8 +144,14 @@
 
   function bindEditableSubtree(root, bind) {
     if (!root || typeof bind !== "function") return;
-    if (typeof root.matches === "function" && root.matches(EDITABLE_SELECTOR)) bind(root);
-    if (typeof root.querySelectorAll === "function") root.querySelectorAll(EDITABLE_SELECTOR).forEach(bind);
+    // Bound exactly once per element: the selector pass covers everything it can
+    // see, and the tag walk only picks up what the selector missed.
+    const bound = new Set();
+    const bindOnce = (element) => { if (!bound.has(element)) { bound.add(element); bind(element); } };
+    if (typeof root.matches === "function" && root.matches(EDITABLE_SELECTOR)) bindOnce(root);
+    if (typeof root.querySelectorAll !== "function") return;
+    root.querySelectorAll(EDITABLE_SELECTOR).forEach(bindOnce);
+    findInheritedEditables(root).forEach(bindOnce);
   }
 
   function handleAddedNodes(records, bind) {

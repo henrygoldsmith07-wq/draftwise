@@ -36,7 +36,7 @@ jobs:
           node --experimental-strip-types scripts/evaluate-triage-live.mjs $args > triage-live-report.json
       - name: Upload live evaluation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: triage-live-report
           path: triage-live-report.json

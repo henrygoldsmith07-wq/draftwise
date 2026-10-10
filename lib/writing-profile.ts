@@ -1,4 +1,5 @@
 import type { StylePreferences, WritingIssue } from "../packages/types/src/index.ts";
+import { ruleFamily } from "../packages/grammar/src/index.ts";
 
 /**
  * The local Writing Profile.
@@ -15,6 +16,11 @@ import type { StylePreferences, WritingIssue } from "../packages/types/src/index
  * - Choosing "Show fewer" or "Turn off" records the family so the user can see
  *   and undo it outside the suggestion card.
  * - Nothing is ever removed from the list automatically.
+ *
+ * `familyOf` used to be a second copy of `ruleFamily` from the grammar package.
+ * Two implementations of "which rule family is this" drift the moment a new
+ * family is added to one and not the other, and the profile is the layer that
+ * decides what the writer stops seeing — so it now calls the shared one.
  */
 
 export type LearnedEntryKind = "dismissal-pattern" | "reduced-family" | "disabled-family";
@@ -35,11 +41,7 @@ export const LEARNED_ENTRY_LIMIT = 50;
 export const DISMISSAL_LEARNING_THRESHOLD = 3;
 
 export function familyOf(issue: Pick<WritingIssue, "ruleId">) {
-  const ruleId = issue.ruleId;
-  if (ruleId.startsWith("wordiness-")) return "wordiness";
-  if (ruleId.startsWith("style-cliche-")) return "cliche";
-  if (ruleId.startsWith("grammar-confused-")) return "confused-word";
-  return ruleId;
+  return ruleFamily(issue.ruleId);
 }
 
 const FAMILY_LABELS: Record<string, string> = {

@@ -6,7 +6,7 @@ import { ArrowDown, Check, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buildExplanation, categoryColors } from "@/packages/grammar/src";
-import type { IssueCategory, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
+import type { PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
 export function HighlightLayer({ text, issues, activeIssueId }: { text: string; issues: WritingIssue[]; activeIssueId: string | null }) {
   const nodes = useMemo<ReactNode[]>(() => {
@@ -102,11 +102,4 @@ export function SuggestionCard({ issue, active, onSelect, onAccept, onDismiss, o
     {groupActions && groupActions.count > 1 ? <div className="suggestion-group-actions"><span>{groupActions.label}</span><button type="button" onClick={groupActions.onApplyAll} disabled={!groupActions.safeToApplyAll} title={groupActions.safeToApplyAll ? `Replace all ${groupActions.count} occurrences` : "Meaning can differ by context, so this pattern is reviewed one at a time"}>{groupActions.safeToApplyAll ? `Replace all ${groupActions.count}` : "Review one by one"}</button><button type="button" onClick={groupActions.onDismissAll}>Dismiss all {groupActions.count}</button></div> : null}
     {controls ? <div className="suggestion-controls"><span>Suggestion type</span><button type="button" onClick={controls.onReduceRule}>Show fewer</button><button type="button" onClick={controls.onTurnOffRule}>Turn off</button></div> : null}
   </article>;
-}
-
-export function categoryMatches(issue: WritingIssue, filter: "all" | "grammar" | "style" | IssueCategory) {
-  if (filter === "all") return true;
-  if (filter === "grammar") return ["grammar", "spelling", "punctuation", "capitalization"].includes(issue.category);
-  if (filter === "style") return !["grammar", "spelling", "punctuation", "capitalization"].includes(issue.category);
-  return issue.category === filter;
 }

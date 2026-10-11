@@ -184,7 +184,8 @@ test("sticky-sentence findings appear in the review list with an explanation", a
   // disagree with a number rather than an opinion.
   await expect(card).toContainText(/% of this sentence/u);
   // It must be dismissible: an unexplainable suggestion is not a suggestion.
-  // The accessible name comes from aria-label, which overrides the visible
-  // "Ignore this" text — matching on the visible string alone finds nothing.
-  await expect(card.getByRole("button", { name: /^Dismiss /u })).toBeVisible();
+  // The accessible name is the visible text itself ("Ignore this"). It carries
+  // no aria-label on purpose: a label that does not contain the visible text
+  // violates label-content-name-mismatch, which axe-core reports as serious.
+  await expect(card.getByRole("button", { name: /^Ignore this$/u })).toBeVisible();
 });

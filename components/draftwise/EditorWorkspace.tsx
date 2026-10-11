@@ -32,6 +32,9 @@ import type { RewritePreviewState } from "@/hooks/useRewrite";
 
 interface EditorWorkspaceProps {
   draft: string;
+  /** True while the document store is still hydrating: the draft on screen is
+   * the seed, not the writer's, so the editor must stay read-only. */
+  loading: boolean;
   goals: WritingGoals;
   style: StylePreferences;
   analysis: AnalysisResult;
@@ -206,7 +209,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           </div>
           <div className="editor-scroll-wrap">
             <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.openIssues} activeIssueId={props.activeIssueId} /></div>
-            <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} data-review-guard aria-label="Draft editor" placeholder="Start writing…" />
+            <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} data-review-guard aria-label="Draft editor" disabled={props.loading} placeholder="Start writing…" />
           </div>
           <div className="editor-footer">
             <span><Keyboard size={14} /> Select text for rewrite tools</span>

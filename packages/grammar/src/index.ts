@@ -139,6 +139,10 @@ export function detectChangedRange(previousText: string, nextText: string) {
   return { start, end, previousEnd };
 }
 
+// A change covering more than this fraction of the document cannot benefit from
+// incremental analysis: there is nothing outside the window worth retaining.
+const INCREMENTAL_MAX_CHANGED_RATIO = 0.5;
+
 export function analyzeLocallyIncremental(
   previousText: string,
   nextText: string,
@@ -148,6 +152,18 @@ export function analyzeLocallyIncremental(
   goals?: WritingGoals,
 ) {
   if (!changedRange || previousText === nextText) return analyzeLocally(nextText, options, goals);
+  // When the edit touches most of the document — a wholesale paste, a document
+  // switch, a replace-all — the incremental window can only re-analyse a few
+  // hundred characters around the change and every finding outside it is
+  // discarded as "unaffected" by retainUnaffectedIssues, even though the text
+  // it used to match no longer exists. A writer who pasted a long draft was
+  // shown two findings instead of twenty. Above this ratio, analyse the whole
+  // document instead: the fast path is only worth taking when there is
+  // genuinely something left to retain.
+  const changedSpan = Math.max(changedRange.end - changedRange.start, changedRange.previousEnd - changedRange.start);
+  if (nextText.length > 0 && changedSpan / nextText.length > INCREMENTAL_MAX_CHANGED_RATIO) {
+    return analyzeLocally(nextText, options, goals);
+  }
   const startedAt = analysisNow();
   const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
   const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);

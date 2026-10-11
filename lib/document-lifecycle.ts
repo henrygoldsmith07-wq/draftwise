@@ -104,7 +104,25 @@ export class DocumentLifecycle {
     const seed: DocumentsSeed = { ...this.seed, ...seedOverride };
     this.loadPromise = (async () => {
       const stored = await this.backend.list();
+      // Storage reads are async, so a writer can start typing before hydration
+      // resolves. Their edits live in state and must not be discarded by the
+      // load: an earlier version called setState here unconditionally, and any
+      // draft replaced during the read silently reverted to the seeded sample
+      // about a second later. A queued write is the honest signal that the
+      // writer has newer work than what the read will return, and it does not
+      // depend on when load() happened to be called.
+      const editedId = this.state.activeId;
+      const edited = this.findById(editedId);
+      const hasUnsavedWork = this.pending.has(editedId);
       if (stored.length === 0) {
+        // Nothing on disk. If the writer already typed into the seeded
+        // document during the read, that document is theirs: keep it and
+        // persist it instead of replacing it with a fresh seed.
+        if (hasUnsavedWork && edited) {
+          this.setState({ activeId: edited.id, hydrated: true });
+          this.queueWrite(edited);
+          return;
+        }
         const initial = createDocument(seed.title, seed.draft);
         try {
           await this.backend.put(initial);
@@ -123,11 +141,19 @@ export class DocumentLifecycle {
       // Restore the last-opened document when it still exists. "Most recently
       // edited" is only a fallback: it is not synonymous with "last opened".
       const preferred = preferredActiveId ? ordered.find((document) => document.id === preferredActiveId) : undefined;
+      const nextActive = preferred?.id ?? ordered[0].id;
+      // If the writer has been editing the active document since the read
+      // began, keep their version and re-queue it for persistence rather than
+      // handing back the stored copy.
+      const merged = hasUnsavedWork && edited?.id === nextActive
+        ? ordered.map((document) => (document.id === nextActive ? { ...document, ...edited } : document))
+        : ordered;
       this.setState({
-        documents: ordered,
-        activeId: preferred?.id ?? ordered[0].id,
+        documents: merged,
+        activeId: nextActive,
         hydrated: true,
       });
+      if (hasUnsavedWork && edited?.id === nextActive && edited) this.queueWrite(edited);
     })();
     return this.loadPromise;
   }

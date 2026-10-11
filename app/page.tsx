@@ -14,6 +14,7 @@ import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsD
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
 import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
+import { issueForReviewAction, reviewActionForKey, reviewAnnouncement as reviewAnnouncementFor, stepReviewIndex } from "@/lib/review-navigation";
 import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
@@ -39,7 +40,11 @@ type WorkspaceView = "home" | "write" | "insights" | "extension" | "history";
 function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const shortcuts = [
     ["Save locally", "⌘ / Ctrl + S"],
-    ["Accept visible suggestions", "⌘ / Ctrl + Enter"],
+    ["Next suggestion", "⌘ / Ctrl + ↓"],
+    ["Previous suggestion", "⌘ / Ctrl + ↑"],
+    ["Accept the current suggestion", "⌘ / Ctrl + Enter"],
+    ["Ignore the current suggestion", "⌘ / Ctrl + Backspace"],
+    ["Accept all visible suggestions", "Ctrl + Shift + Enter"],
     ["Close rewrite preview", "Esc"],
     ["Open shortcuts", "?"],
   ];
@@ -133,6 +138,9 @@ export default function Home() {
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
   const [reviewedCount, setReviewedCount] = useState(0);
+  // Spoken confirmation for keyboard review. Keyboard users get no hover
+  // state, so without this a Tab through the list is silent.
+  const [reviewAnnouncement, setReviewAnnouncement] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newDraftOpen, setNewDraftOpen] = useState(false);
@@ -561,13 +569,63 @@ export default function Home() {
         return;
       }
       if (settingsOpen || shortcutsOpen || newDraftOpen || clearDataOpen) return;
-      if (modifier && event.key === "Enter") { event.preventDefault(); acceptAll(); return; }
+      // Keyboard-driven review. The shortcuts dialog promises the writer can
+      // keep their hands on the draft; without these bindings the only way to
+      // move between findings, or to accept and ignore one, was the mouse.
+      // Guarded inside reviewActionForKey so it never fires while typing.
+      const reviewAction = view === "write" && !rewritePreview ? reviewActionForKey(event) : null;
+      if (reviewAction) {
+        event.preventDefault();
+        if (reviewAction === "next" || reviewAction === "previous") {
+          const current = visibleIssues.findIndex((issue) => issue.id === currentActiveIssueId);
+          const index = stepReviewIndex(current === -1 ? null : current, visibleIssues.length, reviewAction);
+          const target = issueForReviewAction(visibleIssues, index);
+          if (target) {
+            setActiveIssueId(target.id);
+            setReviewAnnouncement(reviewAnnouncementFor(target, index, visibleIssues.length));
+            // Move the caret so the finding is visible in the editor, but do NOT
+            // call focus(). An earlier version focused the textarea here, which
+            // put focus inside the guarded field and blocked the next press —
+            // the review loop advanced exactly once and then went dead.
+            window.setTimeout(() => {
+              const editor = textareaRef.current;
+              if (!editor) return;
+              editor.setSelectionRange(target.start, target.end);
+              editor.blur();
+            }, 0);
+          }
+          return;
+        }
+        // Accept/ignore act on the current finding, or the highest-priority one
+        // when nothing is selected yet, so the first keypress is never a no-op.
+        const current = visibleIssues.findIndex((issue) => issue.id === currentActiveIssueId);
+        const target = issueForReviewAction(visibleIssues, current === -1 ? 0 : current);
+        if (!target) return;
+        if (reviewAction === "accept") {
+          if (!target.replacement || target.replacement === target.original) {
+            // Nothing safe to insert. Say so rather than silently doing
+            // nothing: a keypress with no feedback reads as a broken key.
+            setReviewAnnouncement(`${target.title} has no automatic change. Press Backspace to ignore it.`);
+            return;
+          }
+          acceptIssue(target);
+        } else {
+          dismissIssue(target);
+        }
+        return;
+      }
+      // Accept-all rewrites the whole document, so it must never fire while the
+      // caret is in the draft: Ctrl+Enter is a common way to finish a paragraph,
+      // and this branch used to rewrite the text mid-sentence.
+      const inEditableProse = event.target instanceof HTMLTextAreaElement
+        || (event.target instanceof HTMLElement && (event.target.isContentEditable || event.target.getAttribute("data-review-guard") !== null));
+      if (modifier && event.key === "Enter" && !event.shiftKey && !inEditableProse) { event.preventDefault(); acceptAll(); return; }
       if (event.key === "Escape" && rewritePreview) { cancelRewrite(); return; }
       if (event.key === "?" && !modifier && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); setShortcutsOpen(true); }
     };
     window.addEventListener("keydown", handleShortcuts);
     return () => window.removeEventListener("keydown", handleShortcuts);
-  }, [acceptAll, cancelRewrite, clearDataOpen, documents, newDraftOpen, redo, rewritePreview, saveAll, settingsOpen, shortcutsOpen, undo]);
+  }, [acceptAll, acceptIssue, cancelRewrite, clearDataOpen, currentActiveIssueId, dismissIssue, documents, newDraftOpen, redo, rewritePreview, saveAll, settingsOpen, shortcutsOpen, undo, view, visibleIssues]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
   // Truthful save state: combines workspace-settings persistence and the
@@ -625,7 +683,7 @@ export default function Home() {
 
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
+          {view === "write" ? <EditorWorkspace draft={draftText} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} style={workspace.style} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}

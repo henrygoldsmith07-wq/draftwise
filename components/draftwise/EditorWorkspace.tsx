@@ -47,6 +47,8 @@ interface EditorWorkspaceProps {
   analysisStatusLabel: string;
   analysisError?: string | null;
   savedLabel: string;
+  /** Live-region text for keyboard review moves; empty when not reviewing by keyboard. */
+  reviewAnnouncement: string;
   saveError?: string | null;
   selection: { start: number; end: number };
   selectedText: string;
@@ -139,6 +141,11 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       : "A few useful changes";
   return (
     <div className={`workspace-grid ${props.focusMode ? "is-focus-mode" : ""}`}>
+      {/* Spoken confirmation for keyboard review. Visually hidden but in the
+          accessibility tree: a keyboard writer gets no hover state, so this is
+          the only signal that Tab moved the review cursor and what it landed
+          on. */}
+      <p className="sr-only" role="status" aria-live="polite">{props.reviewAnnouncement}</p>
       <section className="editor-column">
         <div className="workspace-heading">
           <div>
@@ -199,7 +206,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           </div>
           <div className="editor-scroll-wrap">
             <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.openIssues} activeIssueId={props.activeIssueId} /></div>
-            <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} aria-label="Draft editor" placeholder="Start writing…" />
+            <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} data-review-guard aria-label="Draft editor" placeholder="Start writing…" />
           </div>
           <div className="editor-footer">
             <span><Keyboard size={14} /> Select text for rewrite tools</span>

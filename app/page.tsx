@@ -611,11 +611,16 @@ export default function Home() {
       </header>
 
       <div className="app-body">
-        <aside className="left-rail">
-          <div className="rail-nav"><button className={view === "home" ? "rail-button active" : "rail-button"} onClick={() => setView("home")} type="button"><FileText size={18} /><span>Documents</span></button><button className={view === "write" ? "rail-button active" : "rail-button"} onClick={() => setView("write")} type="button"><PenLine size={18} /><span>Write</span></button><button className={view === "insights" ? "rail-button active" : "rail-button"} onClick={() => setView("insights")} type="button"><BarChart3 size={18} /><span>Insights</span></button><button className={view === "extension" ? "rail-button active" : "rail-button"} onClick={() => setView("extension")} type="button"><Puzzle size={18} /><span>Extension</span><span className="rail-new">new</span></button></div>
+        <aside className="left-rail" aria-label="Draftwise sections">
+          <div className="rail-nav"><button className={view === "home" ? "rail-button active" : "rail-button"} onClick={() => setView("home")} type="button" aria-label="Documents"><FileText size={18} aria-hidden="true" /><span>Documents</span></button><button className={view === "write" ? "rail-button active" : "rail-button"} onClick={() => setView("write")} type="button" aria-label="Write"><PenLine size={18} aria-hidden="true" /><span>Write</span></button>{/* The "new" badge is decorative, but its text still contributes to the
+    button's computed visible text. axe's label-content-name-mismatch wants the
+    accessible name to CONTAIN that text, so the label keeps the full string
+    ("Insights new") rather than just "Insights" — a screen reader announces
+    the whole thing, which is accurate: the item is marked new. */}
+<button className={view === "insights" ? "rail-button active" : "rail-button"} onClick={() => setView("insights")} type="button" aria-label="Insights new"><BarChart3 size={18} aria-hidden="true" /><span>Insights</span><span className="rail-new" aria-hidden="true"> new</span></button><button className={view === "extension" ? "rail-button active" : "rail-button"} onClick={() => setView("extension")} type="button" aria-label="Extension new"><Puzzle size={18} aria-hidden="true" /><span>Extension</span><span className="rail-new" aria-hidden="true"> new</span></button></div>
           <div className="rail-divider" />
           <div className="rail-context"><span className="rail-eyebrow">Writing goals</span><div className="rail-goal"><Target size={15} /><span>{workspace.goals.audience}</span></div><div className="rail-goal"><Flag size={15} /><span>{workspace.goals.intent}</span></div><div className="rail-goal"><Sparkles size={15} /><span>{workspace.goals.tone}</span></div><button className="rail-edit" onClick={() => setView("write")} type="button">Edit goals <Target size={13} /></button></div>
-          <div className="rail-bottom"><button className="rail-button" type="button" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /><span>Settings</span></button><button className="rail-button" type="button" onClick={() => setShortcutsOpen(true)}><CircleHelp size={17} /><span>Shortcuts</span><kbd>?</kbd></button></div>
+          <div className="rail-bottom"><button className="rail-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings2 size={17} aria-hidden="true" /><span>Settings</span></button><button className="rail-button" type="button" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts"><CircleHelp size={17} aria-hidden="true" /><span>Shortcuts</span><kbd aria-hidden="true">?</kbd></button></div>
         </aside>
 
         <div className="app-content">

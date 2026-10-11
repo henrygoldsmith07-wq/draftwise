@@ -21,7 +21,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, type SuggestionCardControls } from "@/components/draftwise/EditorPrimitives";
 import { DocumentOverview, SuppressedFindings } from "@/components/draftwise/DocumentOverview";
 import { RewritePreview } from "@/components/draftwise/RewritePreview";
@@ -185,7 +184,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               <Button size="icon-xs" variant="ghost" aria-label="Undo" disabled={!props.canUndo} onClick={props.onUndo}><Undo2 size={15} /></Button>
               <Button size="icon-xs" variant="ghost" aria-label="Redo" disabled={!props.canRedo} onClick={props.onRedo}><RotateCw size={15} /></Button>
               <span className="toolbar-separator" />
-              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode}><Highlighter size={14} aria-hidden="true" /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
+              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode} aria-label={props.focusMode ? "Exit focus mode" : "Check as I write mode"}><Highlighter size={14} aria-hidden="true" /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
             </div>
             <div className="editor-toolbar-right">
               <span className={`analysis-status ${props.analyzing ? "is-working" : ""}`} role="status" aria-live="polite">
@@ -213,7 +212,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       </section>
 
       {props.suggestionsOpen ? (
-        <aside className="suggestions-column">
+        <aside className="suggestions-column" aria-label="Writing suggestions">
           <div className="suggestions-header">
             <div><p className="eyebrow">Live analysis</p><h2>Suggestions <span>{props.suggestions.report.displayedCount}</span></h2></div>
             <Button size="icon-sm" variant="ghost" aria-label={props.suggestionsOpen ? "Collapse suggestions" : "Show suggestions"} aria-expanded={props.suggestionsOpen} onClick={props.onToggleSuggestions}><PanelRight size={17} /></Button>
@@ -242,14 +241,35 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             <ScoreRing score={props.analysis.scores.overall} />
           </div>
           <div className="issue-tabs">
-            <Tabs value={props.filter} onValueChange={(value) => { props.onFilterChange(value as TierFilter); }}>
-              <TabsList variant="line">
-                <TabsTrigger value="fix-first">{TIER_LABELS["fix-first"]} <span>{props.suggestions.report.byTier["fix-first"]}</span></TabsTrigger>
-                <TabsTrigger value="improve">{TIER_LABELS.improve} <span>{props.suggestions.report.byTier.improve}</span></TabsTrigger>
-                <TabsTrigger value="optional">{TIER_LABELS.optional} <span>{props.suggestions.report.byTier.optional}</span></TabsTrigger>
-                <TabsTrigger value="all">All <span>{props.suggestions.report.displayedCount}</span></TabsTrigger>
-              </TabsList>
-            </Tabs>
+            {/* A radiogroup, not Tabs. This is a single-select filter with no
+                content panels, and Radix Tabs emits aria-controls pointing at a
+                tabpanel that does not exist — axe-core flags that as a critical
+                aria-valid-attr-value violation. role="radiogroup" describes what
+                the control actually is, and each option reports its own checked
+                state rather than implying a hidden panel. */}
+            <div className="issue-tabs-list" role="radiogroup" aria-label="Filter suggestions by urgency">
+              {(["fix-first", "improve", "optional"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={props.filter === value}
+                  className={props.filter === value ? "issue-tab is-active" : "issue-tab"}
+                  onClick={() => props.onFilterChange(value)}
+                >
+                  {TIER_LABELS[value]} <span>{props.suggestions.report.byTier[value]}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={props.filter === "all"}
+                className={props.filter === "all" ? "issue-tab is-active" : "issue-tab"}
+                onClick={() => props.onFilterChange("all")}
+              >
+                All <span>{props.suggestions.report.displayedCount}</span>
+              </button>
+            </div>
             <p className="issue-tabs-help">{TIER_DESCRIPTIONS[props.filter === "all" ? "improve" : props.filter]}</p>
           </div>
           {props.categoryOptions.length > 0 && (

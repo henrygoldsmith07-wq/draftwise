@@ -105,6 +105,8 @@ export function buildSuggestionState(args: {
   dismissedKeys: string[];
   ruleDismissalCounts?: Record<string, number>;
   text?: string;
+  /** Findings the writer opened out of the held-back list; shown again by id. */
+  unhiddenIssueIds?: string[];
 }): SuggestionState {
   const dismissed = args.dismissedKeys.flatMap((key) => {
     const entry = dismissalFromKey(key);
@@ -120,6 +122,7 @@ export function buildSuggestionState(args: {
     ruleDismissalCounts: args.ruleDismissalCounts,
     rankAdjustments,
     text: args.text,
+    alwaysDisplay: args.unhiddenIssueIds,
     anchorFor: args.text === undefined ? undefined : (issue) => issueAnchors(args.text as string, issue),
   });
 

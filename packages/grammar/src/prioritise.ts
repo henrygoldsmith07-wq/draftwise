@@ -66,6 +66,13 @@ export interface PrioritiseOptions {
   rankAdjustments?: Array<{ family: string; rankDelta: number; reason: string }>;
   text?: string;
   document?: ParsedDocument;
+  /**
+   * Issue ids the writer deliberately opened out of the held-back list. These
+   * bypass every cap and are always displayed with their real tier and rank:
+   * the finding was hidden by budget, not by judgement, so re-deriving its tier
+   * here would be a second, disagreeing classification.
+   */
+  alwaysDisplay?: Iterable<string>;
 }
 
 export interface PrioritiseResult {
@@ -418,15 +425,20 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
   }
 
   const candidates: Candidate[] = [];
+  // Findings the writer opened out of the held-back list. They still pass
+  // through the whole classifier — the point is that they are not suppressed
+  // afterwards, so the override is applied at the two places findings leave the
+  // pipeline rather than short-circuiting classification.
+  const alwaysShown = new Set(options.alwaysDisplay ?? []);
   for (const issue of issues) {
     const kind = classifyIssueKind(issue);
     const family = ruleFamily(issue.ruleId);
-    if (ruleOff.has(family)) {
+    if (ruleOff.has(family) && !alwaysShown.has(issue.id)) {
       suppressed.push({ issue, reason: "rule-off" });
       continue;
     }
     const nearDismissal = isDismissalNear(issue);
-    if (nearDismissal) {
+    if (nearDismissal && !alwaysShown.has(issue.id)) {
       suppressed.push({ issue, reason: "near-dismissal" });
       continue;
     }
@@ -499,7 +511,17 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
     for (const candidate of kept) {
       grouped.push({ ...candidate, groupedCount: rest.length, groupedIds: [first.issue.id] });
     }
-    for (const candidate of folded) suppressed.push({ issue: candidate.issue, reason: "repeated-pattern" });
+    for (const candidate of folded) {
+      // A finding the writer opened out of the held-back list keeps its place
+      // in the group: it was folded to keep the list reviewable, not because it
+      // was judged wrong, so forcing it back is what makes that choice
+      // reversible rather than final.
+      if (alwaysShown.has(candidate.issue.id)) {
+        grouped.push({ ...candidate, groupedCount: rest.length, groupedIds: [first.issue.id] });
+        continue;
+      }
+      suppressed.push({ issue: candidate.issue, reason: "repeated-pattern" });
+    }
     report.groupedCount += folded.length;
   }
 
@@ -538,11 +560,15 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
     const dampened = ruleReduced.has(family) || dampenedFamilies.has(family);
     const perRuleCap = dampened ? 1 : perRuleCaps[candidate.kind];
     const shown = perRuleShown.get(family) ?? 0;
-    if (shown >= perRuleCap) {
+    // The writer opened this one out of the held-back list, so it is displayed
+    // whatever the budget says and does not consume a slot either: charging it
+    // against the cap would evict a finding the writer never asked to hide.
+    const forced = alwaysShown.has(candidate.issue.id);
+    if (!forced && shown >= perRuleCap) {
       suppressed.push({ issue: candidate.issue, reason: dampened ? "rule-reduced" : "density-cap" });
       continue;
     }
-    if (tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
+    if (!forced && tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
       suppressed.push({ issue: candidate.issue, reason: candidate.tier === "optional" && registerScale < 1 ? "register-budget" : "density-cap" });
       continue;
     }

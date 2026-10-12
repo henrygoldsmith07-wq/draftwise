@@ -4,8 +4,15 @@ import { useMemo, useState } from "react";
 import { ChevronDown, Compass, EyeOff, ListTree } from "lucide-react";
 import { buildDocumentOutline, summariseDocument } from "@/packages/grammar/src";
 import { SUPPRESSION_REASONS, describeSuppression } from "@/packages/grammar/src/prioritise.ts";
-import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingStats, StylePreferences } from "@/packages/types/src";
+import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingIssue, WritingStats, StylePreferences } from "@/packages/types/src";
 import type { SuggestionState } from "@/lib/suggestions";
+
+/**
+ * How many held-back findings to list before asking the writer to filter. The
+ * list is a route into the draft, not the review list itself, so it stays
+ * bounded no matter how long the document is.
+ */
+const SUPPRESSED_PREVIEW_LIMIT = 20;
 
 /**
  * Whole-document reading for the writer.
@@ -113,17 +120,36 @@ export function DocumentOverview({ text, stats, goals, style, onJumpToRange }: {
  * Suppressing low-value findings is the right call for a reviewable list. Doing
  * it silently is not: on a long draft "N findings held back" reads as "there is
  * nothing else wrong", which is the most misleading thing the product could say.
- * This makes the trade inspectable without putting the noise back in the list.
+ *
+ * An earlier version counted the reasons and stopped there, so "51 findings held
+ * back" was a dead end — the writer was told real findings existed and given no
+ * way to reach any of them. Every suppressed entry already carries its own
+ * issue, so each one is listed and jumps to the passage it came from.
  */
-export function SuppressedFindings({ suppressed, report }: { suppressed: SuppressedFinding[]; report: SuggestionReport }) {
+export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
+  suppressed: SuppressedFinding[];
+  report: SuggestionReport;
+  onSelectIssue?: (issue: WritingIssue) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [reasonFilter, setReasonFilter] = useState<string | null>(null);
   if (!report.suppressedCount) return null;
 
-  const byReason = new Map<string, number>();
+  const byReason = new Map<string, SuppressedFinding[]>();
   for (const entry of suppressed) {
-    byReason.set(entry.reason, (byReason.get(entry.reason) ?? 0) + 1);
+    const bucket = byReason.get(entry.reason);
+    if (bucket) bucket.push(entry);
+    else byReason.set(entry.reason, [entry]);
   }
-  const reasons = [...byReason.entries()].sort((left, right) => right[1] - left[1]);
+  // Keep the most common reason first: it is the one worth showing by default.
+  const reasons = [...byReason.entries()].sort((left, right) => right[1].length - left[1].length);
+
+  // Findings the writer turned off or dismissed themselves are not actionable
+  // here — jumping to them would offer a fix they already refused.
+  const ACTIONABLE = new Set(["density-cap", "repeated-pattern", "low-confidence-style", "register-budget"]);
+  const shown = reasonFilter
+    ? suppressed.filter((entry) => entry.reason === reasonFilter)
+    : suppressed.filter((entry) => ACTIONABLE.has(entry.reason));
 
   return (
     <div className="suppressed-findings">
@@ -135,14 +161,53 @@ export function SuppressedFindings({ suppressed, report }: { suppressed: Suppres
       {open ? (
         <div className="suppressed-body">
           <p>{describeSuppression(report)}</p>
-          <ul>
-            {reasons.map(([reason, count]) => (
-              <li key={reason}>
-                <span>{SUPPRESSION_REASONS[reason as keyof typeof SUPPRESSION_REASONS] ?? reason}</span>
-                <em>{count}</em>
-              </li>
+          <div className="suppressed-reasons">
+            {reasons.map(([reason, entries]) => (
+              <button
+                key={reason}
+                type="button"
+                className={reasonFilter === reason ? "is-active" : ""}
+                aria-pressed={reasonFilter === reason}
+                onClick={() => setReasonFilter((value) => (value === reason ? null : reason))}
+              >
+                {SUPPRESSION_REASONS[reason as keyof typeof SUPPRESSION_REASONS] ?? reason}
+                <em>{entries.length}</em>
+              </button>
             ))}
-          </ul>
+            {reasonFilter ? (
+              <button type="button" className="suppressed-reasons-clear" onClick={() => setReasonFilter(null)}>
+                Clear filter
+              </button>
+            ) : null}
+          </div>
+          {shown.length ? (
+            <ul className="suppressed-list">
+              {shown.slice(0, SUPPRESSED_PREVIEW_LIMIT).map((entry) => (
+                <li key={entry.issue.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectIssue?.(entry.issue)}
+                    disabled={!onSelectIssue}
+                    title={`Jump to: ${entry.issue.original || entry.issue.title}`}
+                  >
+                    <span>{entry.issue.title}</span>
+                    <em>{entry.issue.original?.trim() || "open the passage"}</em>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="suppressed-empty">
+              {reasonFilter
+                ? "None of those are left to review here."
+                : "Everything held back was turned off or dismissed by you, so there is nothing new to open."}
+            </p>
+          )}
+          {shown.length > SUPPRESSED_PREVIEW_LIMIT ? (
+            <p className="suppressed-more">
+              Showing the first {SUPPRESSED_PREVIEW_LIMIT} of {shown.length}. Filter by a reason to narrow the list.
+            </p>
+          ) : null}
           <small>These are real findings. They are hidden to keep the list reviewable, not because they do not matter.</small>
         </div>
       ) : null}

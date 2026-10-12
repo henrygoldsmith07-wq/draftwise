@@ -137,6 +137,10 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
+  // Findings the writer explicitly opened out of the held-back list. Density
+  // caps hide these by design; this is the deliberate override that makes the
+  // cap inspectable rather than a silent ceiling.
+  const [unhiddenIssueIds, setUnhiddenIssueIds] = useState<string[]>([]);
   const [reviewedCount, setReviewedCount] = useState(0);
   // Spoken confirmation for keyboard review. Keyboard users get no hover
   // state, so without this a Tab through the list is silent.
@@ -228,8 +232,8 @@ export default function Home() {
     [issues, dismissedIssueKeys, draftText],
   );
   const suggestions = useMemo(
-    () => buildSuggestionState({ issues: openIssues, goals: workspace.goals, style: workspace.style, dismissedKeys: dismissedIssueKeys, text: draftText }),
-    [dismissedIssueKeys, openIssues, draftText, workspace.goals, workspace.style],
+    () => buildSuggestionState({ issues: openIssues, goals: workspace.goals, style: workspace.style, dismissedKeys: dismissedIssueKeys, text: draftText, unhiddenIssueIds }),
+    [dismissedIssueKeys, openIssues, draftText, workspace.goals, workspace.style, unhiddenIssueIds],
   );
   const visibleIssues = useMemo(
     () => sortForReview(filterByTier(filterByCategory(suggestions.displayed, categoryFilter), filter)),
@@ -534,6 +538,12 @@ export default function Home() {
 
   const onSelectIssue = useCallback((issue: WritingIssue) => {
     setActiveIssueId(issue.id);
+    // A finding from the held-back list is not in openIssues, so there is no
+    // card to act on. Unhiding it by id puts exactly that one finding into the
+    // review list: the writer reached for it deliberately, and this is the
+    // difference between "we held 51 back" being informative and being a dead
+    // end. Everything else stays suppressed.
+    setUnhiddenIssueIds((current) => (current.includes(issue.id) ? current : [...current, issue.id]));
     window.setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(issue.start, issue.end); }, 0);
   }, []);
 

@@ -136,7 +136,41 @@ export default function Home() {
   const [filter, setFilter] = useState<TierFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
-  const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>([]);
+  // Persist dismissals as the writer makes them.
+  //
+  // Two hazards, both of which destroyed data in earlier attempts:
+  //
+  // 1. The workspace hydrates from storage after first render, so state starts
+  //    empty while storage holds the stored list. Writing immediately would save
+  //    the empty list over it.
+  // 2. Conversely, adopting storage's list whenever they differ silently reverts
+  //    a dismissal the writer just made, because both effects see the same
+  //    change.
+  //
+  // The distinction is timing: adopt storage only during the hydration window,
+  // persist afterwards. lastPersisted is the single source of truth for "what
+  // storage already has", so the two paths can never both act on one change.
+  const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>(workspace.dismissedIssueKeys ?? []);
+  const lastPersistedDismissals = useRef<string[] | null>(null);
+  useEffect(() => {
+    if (!hydrated) return;
+    const stored = workspace.dismissedIssueKeys ?? [];
+    // First pass after hydration: storage wins, and this becomes the baseline.
+    if (lastPersistedDismissals.current === null) {
+      lastPersistedDismissals.current = stored;
+      const same = stored.length === dismissedIssueKeys.length
+        && stored.every((key, index) => key === dismissedIssueKeys[index]);
+      if (!same) setDismissedIssueKeys(stored);
+      return;
+    }
+    // After that the writer's state is authoritative.
+    const last = lastPersistedDismissals.current;
+    const unchanged = last.length === dismissedIssueKeys.length
+      && last.every((key, index) => key === dismissedIssueKeys[index]);
+    if (unchanged) return;
+    lastPersistedDismissals.current = dismissedIssueKeys;
+    updateWorkspace({ dismissedIssueKeys });
+  }, [hydrated, workspace.dismissedIssueKeys, dismissedIssueKeys, updateWorkspace]);
   // Findings the writer explicitly opened out of the held-back list. Density
   // caps hide these by design; this is the deliberate override that makes the
   // cap inspectable rather than a silent ceiling.

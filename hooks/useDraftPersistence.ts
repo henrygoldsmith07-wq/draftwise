@@ -258,7 +258,20 @@ function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, un
     // Legacy `title`/`draft` fields are deliberately ignored: document content
     // lives in the document store. `activeDocumentId` is metadata only.
     activeDocumentId: typeof value.activeDocumentId === "string" && value.activeDocumentId ? value.activeDocumentId : initial.activeDocumentId,
+    // Dismissals are decisions, not session state. Malformed entries are dropped
+    // rather than trusted, and the list is bounded because it grows with use: a
+    // writer who dismisses hundreds of findings must not grow storage without
+    // limit. The newest keys are the ones worth keeping.
+    dismissedIssueKeys: sanitiseDismissedKeys(value.dismissedIssueKeys, initial.dismissedIssueKeys ?? []),
   };
+}
+
+const MAX_PERSISTED_DISMISSALS = 500;
+
+function sanitiseDismissedKeys(value: unknown, initial: string[]): string[] {
+  if (!Array.isArray(value)) return initial;
+  const keys = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  return [...new Set(keys)].slice(-MAX_PERSISTED_DISMISSALS);
 }
 
 export function readLegacyWorkspace(initial: DraftwiseWorkspace, storage: WorkspaceStorage): DraftwiseWorkspace {

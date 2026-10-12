@@ -415,6 +415,13 @@ export interface DraftwiseWorkspace {
   aiEnabled: boolean;
   theme: "light" | "dark" | "system";
   activeDocumentId?: string;
+  /**
+   * Dismissed suggestion keys. A dismissal is a decision the writer made, not
+   * session state: losing every dismissal on reload means the product asks the
+   * same question again after every refresh, and a bulk dismissal of forty
+   * findings is silently undone. Bounded, because the array grows with use.
+   */
+  dismissedIssueKeys?: string[];
 }
 
 export const DEFAULT_GOALS: WritingGoals = {

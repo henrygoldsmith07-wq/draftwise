@@ -572,6 +572,27 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
       suppressed.push({ issue: candidate.issue, reason: candidate.tier === "optional" && registerScale < 1 ? "register-budget" : "density-cap" });
       continue;
     }
+    // A forced finding is displayed whatever the budget says, and it must not
+    // consume a slot either. Charging it against the cap would evict a finding
+    // the writer never asked to hide: opening one held-back finding would
+    // silently remove a different one, so the visible count never grows and the
+    // writer's action appears to do nothing.
+    if (forced) {
+      displayed.push({
+        ...candidate.issue,
+        tier: candidate.tier,
+        kind: candidate.kind,
+        rank: candidate.rank,
+        contextRelevance: candidate.relevance,
+        impact: candidate.impact,
+        groupedCount: candidate.groupedCount,
+        groupedIds: candidate.groupedIds,
+        reasonCodes: candidate.reasonCodes,
+        start: candidate.issue.start,
+        end: candidate.issue.end,
+      });
+      continue;
+    }
     perRuleShown.set(family, shown + 1);
     tierShown[candidate.tier] += 1;
     displayed.push({

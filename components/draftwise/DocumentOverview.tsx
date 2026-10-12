@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Compass, EyeOff, ListTree } from "lucide-react";
+import { ChevronDown, Compass, EyeOff, ListTree, Search, X } from "lucide-react";
 import { buildDocumentOutline, summariseDocument } from "@/packages/grammar/src";
 import { SUPPRESSION_REASONS, describeSuppression } from "@/packages/grammar/src/prioritise.ts";
 import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingIssue, WritingStats, StylePreferences } from "@/packages/types/src";
@@ -13,6 +13,12 @@ import type { SuggestionState } from "@/lib/suggestions";
  * bounded no matter how long the document is.
  */
 const SUPPRESSED_PREVIEW_LIMIT = 20;
+
+/** Upper bound on what "Show more" can reveal before it re-prompts to filter. */
+const SUPPRESSED_LIST_LIMIT = 100;
+
+/** Only show the search input once there are enough findings to warrant one. */
+const SEARCH_THRESHOLD = 8;
 
 /**
  * Whole-document reading for the writer.
@@ -133,6 +139,8 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
 }) {
   const [open, setOpen] = useState(false);
   const [reasonFilter, setReasonFilter] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [visibleLimit, setVisibleLimit] = useState(SUPPRESSED_PREVIEW_LIMIT);
   if (!report.suppressedCount) return null;
 
   const byReason = new Map<string, SuppressedFinding[]>();
@@ -147,9 +155,25 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
   // Findings the writer turned off or dismissed themselves are not actionable
   // here — jumping to them would offer a fix they already refused.
   const ACTIONABLE = new Set(["density-cap", "repeated-pattern", "low-confidence-style", "register-budget"]);
-  const shown = reasonFilter
+  const base = reasonFilter
     ? suppressed.filter((entry) => entry.reason === reasonFilter)
     : suppressed.filter((entry) => ACTIONABLE.has(entry.reason));
+
+  // The reason filter narrows by WHY a finding was held back. It cannot answer
+  // "where is the spelling finding I remember writing?", which is the actual
+  // question on a draft with 200 held-back findings and 20 shown. This matches
+  // the dashboard's own search, over the finding's title, the offending text
+  // and the passage around it.
+  const needle = query.trim().toLocaleLowerCase();
+  const shown = !needle
+    ? base
+    : base.filter((entry) => {
+      const issue = entry.issue;
+      return (issue.title ?? "").toLocaleLowerCase().includes(needle)
+        || (issue.original ?? "").toLocaleLowerCase().includes(needle)
+        || (issue.replacement ?? "").toLocaleLowerCase().includes(needle)
+        || (issue.explanation ?? "").toLocaleLowerCase().includes(needle);
+    });
 
   return (
     <div className="suppressed-findings">
@@ -180,9 +204,28 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
               </button>
             ) : null}
           </div>
+          {/* Shown once there is anything worth searching: a 4-finding list does
+              not need a search box, and an empty one should not invite typing. */}
+          {base.length > SEARCH_THRESHOLD ? (
+            <label className="suppressed-search">
+              <Search size={12} aria-hidden="true" />
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search held-back findings"
+                aria-label="Search held-back findings"
+              />
+              {query ? (
+                <button type="button" aria-label="Clear search" onClick={() => setQuery("")}>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ) : null}
+            </label>
+          ) : null}
           {shown.length ? (
             <ul className="suppressed-list">
-              {shown.slice(0, SUPPRESSED_PREVIEW_LIMIT).map((entry) => (
+              {shown.slice(0, visibleLimit).map((entry) => (
                 <li key={entry.issue.id}>
                   <button
                     type="button"
@@ -198,15 +241,24 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
             </ul>
           ) : (
             <p className="suppressed-empty">
-              {reasonFilter
-                ? "None of those are left to review here."
-                : "Everything held back was turned off or dismissed by you, so there is nothing new to open."}
+              {needle
+                ? `Nothing held back matches “${query.trim()}”.`
+                : reasonFilter
+                  ? "None of those are left to review here."
+                  : "Everything held back was turned off or dismissed by you, so there is nothing new to open."}
             </p>
           )}
-          {shown.length > SUPPRESSED_PREVIEW_LIMIT ? (
-            <p className="suppressed-more">
-              Showing the first {SUPPRESSED_PREVIEW_LIMIT} of {shown.length}. Filter by a reason to narrow the list.
-            </p>
+          {shown.length > visibleLimit ? (
+            <>
+              <p className="suppressed-more">
+                Showing {visibleLimit} of {shown.length}
+                {needle ? " matches" : " held back"}.{" "}
+                {needle ? "Narrow the search to see the rest." : "Search or filter by a reason to narrow the list."}
+              </p>
+              <button type="button" className="suppressed-show-all" onClick={() => setVisibleLimit(SUPPRESSED_LIST_LIMIT)}>
+                Show {Math.min(SUPPRESSED_LIST_LIMIT, shown.length) - visibleLimit} more
+              </button>
+            </>
           ) : null}
           <small>These are real findings. They are hidden to keep the list reviewable, not because they do not matter.</small>
         </div>

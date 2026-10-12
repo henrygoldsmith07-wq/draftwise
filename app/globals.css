@@ -196,7 +196,9 @@ button { cursor: pointer; }
 /* The held-back list is a tap target on mobile, not a hover affordance. */
 .suppressed-list { max-height: 200px; }
 .suppressed-list button { padding: 7px 9px; font-size: 11px; min-height: 32px; }
-.suppressed-reasons button { padding: 6px 11px; font-size: 10.5px; min-height: 30px; } }
+.suppressed-reasons button { padding: 6px 11px; font-size: 10.5px; min-height: 30px; }
+.suppressed-search { padding: 6px 10px; min-height: 34px; }
+.suppressed-search input { font-size: 11px; } }
 @media (max-width: 640px) { .topbar { height: 60px; }.app-body { min-height: calc(100vh - 60px); }.left-rail { position: fixed; bottom: 0; left: 0; right: 0; z-index: 25; width: 100%; height: 58px; padding: 7px 10px; border-right: 0; border-top: 1px solid var(--shell-border); background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(14px); }.rail-nav, .rail-bottom { display: flex; flex: 1; justify-content: space-around; gap: 4px; }.rail-bottom { margin-top: 0; }.rail-button { flex: 1; justify-content: center; }.rail-new { display: none; }.workspace-grid { padding: 26px 14px 82px; }.workspace-heading { align-items: flex-start; flex-direction: column; gap: 13px; }.workspace-heading h1 { font-size: 27px; }.heading-actions { width: 100%; }.heading-actions [data-slot="button"]:last-child { margin-left: auto; }.goal-bar { align-items: stretch; flex-wrap: wrap; gap: 6px; }.goal-bar-label { width: 100%; padding-bottom: 3px; }.goal-select { flex: 1; min-width: 94px; border-left: 0; border-top: 1px solid var(--border); padding: 8px 19px 4px 7px; }.editor-card { min-height: 450px; height: 62vh; }.editor-highlight-scroll, .editor-input { padding: 25px 21px; font-size: 17px; }.editor-footer { padding-inline: 11px; }.editor-footer span:last-child { display: none; }.toolbar-text { font-size: 0; padding-inline: 5px; }
 .toolbar-text .sr-only, .analysis-status .sr-only { position: static; }.toolbar-text svg { margin: 0; }.analysis-status { font-size: 0; }.status-check { margin: 0; }.workspace-footnote { align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; line-height: 1.4; }.workspace-footnote button { margin-left: 0; }.suggestions-column { margin-top: 26px; }.score-card { padding: 16px; }.score-ring { width: 87px; height: 87px; }.score-ring strong { font-size: 20px; }.issue-tabs [data-slot="tabs-list"] { gap: 13px; }.full-view { padding: 34px 16px 82px; }.full-view-heading { flex-direction: column; align-items: flex-start; }.full-view-heading h1 { font-size: 29px; }.insights-grid { display: flex; flex-direction: column; }.insights-score-panel, .insights-stats-panel, .insights-tone-panel, .insights-privacy-panel { padding: 17px; }.large-stat-grid { gap: 7px; }.metric-card { padding: 11px; }.metric-card strong { font-size: 19px; }.extension-preview { min-height: 260px; }.fake-page { min-height: 225px; padding: 38px 18px; }.fake-assistant { top: 45px; right: 12px; transform: scale(.88); transform-origin: top right; }.extension-grid { grid-template-columns: 1fr; }.settings-grid { grid-template-columns: 1fr; }.rewrite-columns { grid-template-columns: 1fr; gap: 5px; }.rewrite-arrow { transform: none; }.rewrite-actions { flex-wrap: wrap; }.custom-rewrite { width: 100%; max-width: none; margin: 4px 0 0; }.rewrite-toolbar { gap: 2px; }.rewrite-toolbar-label { width: 100%; padding-bottom: 3px; } }
 
@@ -341,6 +343,17 @@ button { cursor: pointer; }
 .suppressed-list button em { font-style: normal; font-weight: 650; color: var(--ink-soft); font-size: 9px; }
 .suppressed-empty { margin: 0; font-size: 10px; line-height: 1.5; color: var(--ink-soft); }
 .suppressed-more { margin: 4px 0 0; font-size: 9.5px; color: var(--ink-soft); }
+/* Search and "show more": the reason filter narrows by why a finding was held
+   back, which cannot answer "where is the finding I remember writing?". */
+.suppressed-search { display: flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink-soft); }
+.suppressed-search input { border: 0; background: transparent; padding: 2px 0; width: 100%; font-size: 10px; color: var(--ink); }
+.suppressed-search input::placeholder { color: var(--ink-soft); }
+.suppressed-search input:focus { outline: none; }
+.suppressed-search:focus-within { border-color: var(--mint-deep); }
+.suppressed-search button { display: inline-flex; border: 0; background: transparent; color: var(--ink-soft); cursor: pointer; padding: 2px; }
+.suppressed-search button:hover { color: var(--ink); }
+.suppressed-show-all { border: 0; background: transparent; color: var(--mint-deep); font-size: 9.5px; font-weight: 700; cursor: pointer; padding: 3px 0; text-align: left; }
+.suppressed-show-all:hover { text-decoration: underline; }
 .suppressed-body small { font-size: 9.5px; line-height: 1.45; color: var(--ink-soft); }
 
 /* Goal-aware and ranking explanations on the suggestion card. */

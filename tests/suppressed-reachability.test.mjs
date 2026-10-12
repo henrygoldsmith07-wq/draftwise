@@ -65,6 +65,28 @@ test("opening one finding leaves every other finding suppressed", () => {
   assert.equal(after.suppressed.filter((entry) => entry.issue.id === target.issue.id).length, 0);
 });
 
+test("opening a held-back finding does not displace another", () => {
+  const before = stateFor();
+  const ACTIONABLE = new Set(["density-cap", "repeated-pattern", "low-confidence-style", "register-budget"]);
+  const base = before.suppressed.filter((entry) => ACTIONABLE.has(entry.reason));
+  const target = base.find((entry) => entry.issue.original?.includes("tommorow"));
+  assert.ok(target, "fixture should hold a spelling finding back by budget");
+
+  const after = stateFor({ unhiddenIssueIds: [target.issue.id] });
+  const beforeIds = new Set(before.displayed.map((issue) => issue.id));
+
+  // Exactly one added, and nothing removed. A forced finding must not consume a
+  // density slot: charging it against the tier budget evicted a finding the
+  // writer never asked to hide, so the count stayed flat and opening one
+  // appeared to do nothing at all.
+  const added = after.displayed.filter((issue) => !beforeIds.has(issue.id));
+  const removed = before.displayed.filter((issue) => !after.displayed.some((candidate) => candidate.id === issue.id));
+  assert.equal(added.length, 1, `expected one added, got ${added.length}`);
+  assert.equal(added[0].id, target.issue.id);
+  assert.equal(removed.length, 0, "opening a finding must not hide a different one");
+  assert.equal(after.displayed.length, before.displayed.length + 1);
+});
+
 test("an unknown or stale id changes nothing", () => {
   const before = stateFor();
   const after = stateFor({ unhiddenIssueIds: ["no-such-issue-id"] });

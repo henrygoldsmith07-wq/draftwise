@@ -113,6 +113,18 @@ test("editing the middle of a long draft keeps findings from before the edit", a
   await page.getByLabel("Draft editor").fill(buildLongDraft(6));
   await expect(page.getByLabel("Draft editor")).toHaveValue(/Section 6 of the plan/);
   await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 45_000 });
+  // The first card appears while analysis is still running, so counting there
+  // reads a partial list — 2 cards in a full run where the settled count is 8.
+  // The status label always reads "Local analysis only" with AI off, so it says
+  // nothing about whether the sweep finished. Wait for the card count itself to
+  // stop changing instead.
+  await expect(async () => {
+    const first = await page.locator(".suggestion-card").count();
+    await page.waitForTimeout(700);
+    const second = await page.locator(".suggestion-card").count();
+    expect(second).toBe(first);
+    expect(first).toBeGreaterThanOrEqual(6);
+  }).toPass({ timeout: 45_000 });
 
   const before = await page.locator(".suggestion-card").count();
   expect(before).toBeGreaterThanOrEqual(6);

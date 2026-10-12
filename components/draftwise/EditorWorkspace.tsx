@@ -317,7 +317,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               return <SuggestionCard key={issue.id} issue={issue} active={issue.id === props.activeIssueId} onSelect={() => props.onSelectIssue(issue)} onAccept={() => props.onAcceptIssue(issue)} onDismiss={() => props.onDismissIssue(issue)} onAddToDictionary={() => props.onAddToDictionary(issue.original)} controls={controls} groupActions={groupActions} goals={props.goals} style={props.style} />;
             }) : <div className="empty-suggestions"><div className="empty-icon"><CheckCheck size={22} /></div><h3>{props.analyzing ? "Checking deeper analysis" : "Clean so far"}</h3><p>{props.analyzing ? "Local checks are complete while deeper analysis runs." : "Your draft has no open suggestions in this view."}</p></div>}
           </div>
-          <SuppressedFindings suppressed={props.suggestions.suppressed} report={props.suggestions.report} onSelectIssue={props.onSelectIssue} />
+          <SuppressedFindings suppressed={props.suggestions.suppressed} report={props.suggestions.report} onSelectIssue={props.onSelectIssue} onDismissMany={props.onDismissGroup} />
           {props.reviewedCount > 0 ? <div className="review-completion" role="status">{props.reviewedCount} important change{props.reviewedCount === 1 ? "" : "s"} reviewed.</div> : null}
           <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>

@@ -527,7 +527,16 @@ export default function Home() {
   const dismissGroup = useCallback((groupIssues: WritingIssue[]) => {
     setDismissedIssueKeys((current) => [...new Set([...current, ...groupIssues.map((entry) => getIssueDismissalKey(entry, draftText))])]);
     setActiveIssueId(null);
-  }, [draftText]);
+    // A bulk dismissal is a stronger signal than a single one, and the Writing
+    // Profile is what turns repeated dismissals into "show fewer of this". Without
+    // this, dismissing thirty findings at once taught the profile nothing while
+    // dismissing them one at a time would have dampened the family.
+    updateWorkspace((current) => {
+      let style = current.style;
+      for (const entry of groupIssues) style = recordDismissal(style, entry);
+      return { ...current, style };
+    });
+  }, [draftText, updateWorkspace]);
 
   const scrollEditor = useCallback(() => {
     if (textareaRef.current && highlightRef.current) {

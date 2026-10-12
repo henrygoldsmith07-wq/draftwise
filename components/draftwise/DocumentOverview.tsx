@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Compass, EyeOff, ListTree, Search, X } from "lucide-react";
+import { CheckCheck, ChevronDown, Compass, EyeOff, ListTree, Search, X } from "lucide-react";
 import { buildDocumentOutline, summariseDocument } from "@/packages/grammar/src";
 import { SUPPRESSION_REASONS, describeSuppression } from "@/packages/grammar/src/prioritise.ts";
 import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingIssue, WritingStats, StylePreferences } from "@/packages/types/src";
@@ -19,6 +19,12 @@ const SUPPRESSED_LIST_LIMIT = 100;
 
 /** Only show the search input once there are enough findings to warrant one. */
 const SEARCH_THRESHOLD = 8;
+
+/**
+ * Bulk dismissal is only worth offering above this many findings: below it,
+ * dismissing individually is cheaper than reading and confirming a dialog.
+ */
+const BATCH_THRESHOLD = 5;
 
 /**
  * Whole-document reading for the writer.
@@ -132,15 +138,18 @@ export function DocumentOverview({ text, stats, goals, style, onJumpToRange }: {
  * way to reach any of them. Every suppressed entry already carries its own
  * issue, so each one is listed and jumps to the passage it came from.
  */
-export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
+export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismissMany }: {
   suppressed: SuppressedFinding[];
   report: SuggestionReport;
   onSelectIssue?: (issue: WritingIssue) => void;
+  /** Bulk dismissal for the currently filtered set. Omit to hide the affordance. */
+  onDismissMany?: (issues: WritingIssue[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reasonFilter, setReasonFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(SUPPRESSED_PREVIEW_LIMIT);
+  const [batchConfirm, setBatchConfirm] = useState(false);
   if (!report.suppressedCount) return null;
 
   const byReason = new Map<string, SuppressedFinding[]>();
@@ -248,6 +257,32 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue }: {
                   : "Everything held back was turned off or dismissed by you, so there is nothing new to open."}
             </p>
           )}
+          {/* Bulk handling for the filtered set. Opening them one at a time does
+              not scale, and a writer who does not want this kind of feedback at
+              all currently has to dismiss each finding individually. Only offered
+              for reasons the writer can meaningfully refuse in bulk — a density
+              cap is a budget, not a judgement about the writing. */}
+          {onDismissMany && shown.length > BATCH_THRESHOLD ? (
+            batchConfirm ? (
+              <div className="suppressed-batch-confirm" role="alertdialog" aria-label="Confirm dismissing these findings">
+                <p>
+                  Dismiss all {shown.length}{needle ? " matches" : reasonFilter ? " findings of this kind" : " held-back findings"}?
+                  This also tells Draftwise to show you less of this kind of note.
+                </p>
+                <div className="suppressed-batch-actions">
+                  <button type="button" className="suppressed-batch-yes" onClick={() => { onDismissMany(shown.map((entry) => entry.issue)); setBatchConfirm(false); }}>
+                    Dismiss all {shown.length}
+                  </button>
+                  <button type="button" onClick={() => setBatchConfirm(false)}>Keep them</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="suppressed-batch" onClick={() => setBatchConfirm(true)}>
+                <CheckCheck size={12} aria-hidden="true" /> Dismiss all {shown.length}
+                {needle ? " matches" : reasonFilter ? " of this kind" : " held back"}
+              </button>
+            )
+          ) : null}
           {shown.length > visibleLimit ? (
             <>
               <p className="suppressed-more">

@@ -3147,15 +3147,20 @@ function prioritiseSuggestions(issues, options = {}) {
         return false;
     };
     const candidates = [];
+    // Findings the writer opened out of the held-back list. They still pass
+    // through the whole classifier — the point is that they are not suppressed
+    // afterwards, so the override is applied at the two places findings leave the
+    // pipeline rather than short-circuiting classification.
+    const alwaysShown = new Set(options.alwaysDisplay ?? []);
     for (const issue of issues) {
         const kind = classifyIssueKind(issue);
         const family = ruleFamily(issue.ruleId);
-        if (ruleOff.has(family)) {
+        if (ruleOff.has(family) && !alwaysShown.has(issue.id)) {
             suppressed.push({ issue, reason: "rule-off" });
             continue;
         }
         const nearDismissal = isDismissalNear(issue);
-        if (nearDismissal) {
+        if (nearDismissal && !alwaysShown.has(issue.id)) {
             suppressed.push({ issue, reason: "near-dismissal" });
             continue;
         }
@@ -3229,8 +3234,17 @@ function prioritiseSuggestions(issues, options = {}) {
         for (const candidate of kept) {
             grouped.push({ ...candidate, groupedCount: rest.length, groupedIds: [first.issue.id] });
         }
-        for (const candidate of folded)
+        for (const candidate of folded) {
+            // A finding the writer opened out of the held-back list keeps its place
+            // in the group: it was folded to keep the list reviewable, not because it
+            // was judged wrong, so forcing it back is what makes that choice
+            // reversible rather than final.
+            if (alwaysShown.has(candidate.issue.id)) {
+                grouped.push({ ...candidate, groupedCount: rest.length, groupedIds: [first.issue.id] });
+                continue;
+            }
             suppressed.push({ issue: candidate.issue, reason: "repeated-pattern" });
+        }
         report.groupedCount += folded.length;
     }
     // A rule that keeps firing in one draft is offering the same advice again and
@@ -3271,11 +3285,15 @@ function prioritiseSuggestions(issues, options = {}) {
         const dampened = ruleReduced.has(family) || dampenedFamilies.has(family);
         const perRuleCap = dampened ? 1 : perRuleCaps[candidate.kind];
         const shown = perRuleShown.get(family) ?? 0;
-        if (shown >= perRuleCap) {
+        // The writer opened this one out of the held-back list, so it is displayed
+        // whatever the budget says and does not consume a slot either: charging it
+        // against the cap would evict a finding the writer never asked to hide.
+        const forced = alwaysShown.has(candidate.issue.id);
+        if (!forced && shown >= perRuleCap) {
             suppressed.push({ issue: candidate.issue, reason: dampened ? "rule-reduced" : "density-cap" });
             continue;
         }
-        if (tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
+        if (!forced && tierShown[candidate.tier] >= densityCaps[candidate.tier]) {
             suppressed.push({ issue: candidate.issue, reason: candidate.tier === "optional" && registerScale < 1 ? "register-budget" : "density-cap" });
             continue;
         }
@@ -3722,9 +3740,24 @@ function detectChangedRange(previousText, nextText) {
     }
     return { start, end, previousEnd };
 }
+// A change covering more than this fraction of the document cannot benefit from
+// incremental analysis: there is nothing outside the window worth retaining.
+const INCREMENTAL_MAX_CHANGED_RATIO = 0.5;
 function analyzeLocallyIncremental(previousText, nextText, previousIssues, changedRange, options = {}, goals) {
     if (!changedRange || previousText === nextText)
         return analyzeLocally(nextText, options, goals);
+    // When the edit touches most of the document — a wholesale paste, a document
+    // switch, a replace-all — the incremental window can only re-analyse a few
+    // hundred characters around the change and every finding outside it is
+    // discarded as "unaffected" by retainUnaffectedIssues, even though the text
+    // it used to match no longer exists. A writer who pasted a long draft was
+    // shown two findings instead of twenty. Above this ratio, analyse the whole
+    // document instead: the fast path is only worth taking when there is
+    // genuinely something left to retain.
+    const changedSpan = Math.max(changedRange.end - changedRange.start, changedRange.previousEnd - changedRange.start);
+    if (nextText.length > 0 && changedSpan / nextText.length > INCREMENTAL_MAX_CHANGED_RATIO) {
+        return analyzeLocally(nextText, options, goals);
+    }
     const startedAt = analysisNow();
     const previousRegion = expandLocalContext(previousText, changedRange.start, changedRange.previousEnd);
     const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);

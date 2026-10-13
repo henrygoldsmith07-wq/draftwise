@@ -87,6 +87,28 @@ test("opening a held-back finding does not displace another", () => {
   assert.equal(after.displayed.length, before.displayed.length + 1);
 });
 
+test("opening many held-back findings cannot flood the review list", () => {
+  // Forced findings bypass their tier budget by design, so without a ceiling on
+  // the total a writer who opens every held-back finding dismantles the density
+  // cap entirely — 40 opened findings took a 14-card list to 54. The ceiling
+  // keeps "reach the rest" from becoming "show everything".
+  const issues = analyzeLocally(longDraft, style, goals).issues;
+  const base = buildSuggestionState({ issues, goals, style, dismissedKeys: [], text: longDraft });
+  const ACTIONABLE = new Set(["density-cap", "repeated-pattern", "low-confidence-style", "register-budget"]);
+  const actionable = base.suppressed.filter((entry) => ACTIONABLE.has(entry.reason));
+  assert.ok(actionable.length > 20, "fixture should have plenty to open");
+
+  const allIds = actionable.map((entry) => entry.issue.id);
+  const after = buildSuggestionState({ issues, goals, style, dismissedKeys: [], text: longDraft, unhiddenIssueIds: allIds });
+
+  // The list grew well past the default budget, so opening still works...
+  assert.ok(after.displayed.length > base.displayed.length + 20, "opening findings should grow the list");
+  // ...but it is bounded, and the overflow went back to held-back rather than
+  // vanishing, so the writer is never told fewer findings exist than do.
+  assert.ok(after.displayed.length <= 60, `list should stay bounded, got ${after.displayed.length}`);
+  assert.ok(after.suppressed.length > 0, "overflow should return to the held-back list, not disappear");
+});
+
 test("an unknown or stale id changes nothing", () => {
   const before = stateFor();
   const after = stateFor({ unhiddenIssueIds: ["no-such-issue-id"] });

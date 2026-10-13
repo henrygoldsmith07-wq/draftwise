@@ -95,6 +95,11 @@ export const SUGGESTION_DENSITY_CAPS: Record<SuggestionTier, number> = {
   optional: 5,
 };
 
+/** Opening held-back findings may grow the list to this many times the budget. */
+const FORCED_TOTAL_MULTIPLE = 2;
+/** ...and never past this many, however long the document. */
+const FORCED_TOTAL_CEILING = 60;
+
 /**
  * Per 1,000 words each tier is allowed this many displayed suggestions.
  *
@@ -140,6 +145,21 @@ export function densityCapsFor(words: number): Record<SuggestionTier, number> {
     improve: scaleCap(SUGGESTION_DENSITY_CAPS.improve, words, SUGGESTION_DENSITY_PER_THOUSAND_WORDS.improve),
     optional: scaleCap(SUGGESTION_DENSITY_CAPS.optional, words, SUGGESTION_DENSITY_PER_THOUSAND_WORDS.optional),
   };
+}
+
+/**
+ * The most findings the review list will hold once the writer starts opening
+ * held-back ones.
+ *
+ * Forced findings bypass their tier's budget by design, so without a ceiling on
+ * the total a writer who opens every held-back finding dismantles the density
+ * cap: 40 opened findings took a 14-card list to 54. This keeps "reach the
+ * rest" from becoming "show everything" while still letting the writer pull in
+ * more than the default budget allows — it is a generous ceiling, not the cap.
+ */
+function forcedTotal(caps: Record<SuggestionTier, number>, words: number): number {
+  const sum = caps["fix-first"] + caps.improve + caps.optional;
+  return Math.max(sum, Math.min(sum * FORCED_TOTAL_MULTIPLE, FORCED_TOTAL_CEILING + Math.round(words / 250)));
 }
 
 /**
@@ -609,6 +629,23 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
   }
 
   displayed.sort((left, right) => right.rank - left.rank || left.start - right.start);
+
+  // Forced findings bypass their tier's budget, which is what makes opening one
+  // out of the held-back list work at all. But it also means a writer who opens
+  // every held-back finding dismantles the density cap entirely: 40 opened
+  // findings took the review list from 14 cards to 54, which is precisely the
+  // flood the caps exist to prevent. Bound the total instead of trusting the
+  // override, so "reach the rest" never becomes "show everything".
+  const forcedCap = forcedTotal(densityCaps, wordCount);
+  if (displayed.length > forcedCap) {
+    // Highest-ranked first, so the writer keeps the findings that matter most
+    // and the overflow returns to the held-back list rather than vanishing.
+    const kept = displayed.slice(0, forcedCap);
+    const overflow = displayed.slice(forcedCap);
+    for (const issue of overflow) suppressed.push({ issue, reason: "density-cap" });
+    displayed.length = 0;
+    displayed.push(...kept);
+  }
 
   report.displayedCount = displayed.length;
   report.suppressedCount = suppressed.length;

@@ -175,17 +175,24 @@ export default function Home() {
   // caps hide these by design; this is the deliberate override that makes the
   // cap inspectable rather than a silent ceiling.
   const [unhiddenIssueIds, setUnhiddenIssueIds] = useState<string[]>([]);
-  // Issue ids embed offsets, so they are only meaningful against the document
-  // they were computed from. Reset whenever the active document changes: every
-  // path that swaps documents (new, clear, restore sample, import, version
-  // restore) clears dismissals by hand, and a stale id here would force-show a
-  // different finding in the new document — the writer never opened it.
-  const unhiddenForDocument = useRef<string | null>(documents.activeId);
-  useEffect(() => {
-    if (unhiddenForDocument.current === documents.activeId) return;
-    unhiddenForDocument.current = documents.activeId;
+  // Issue ids embed offsets, so they are only meaningful against the text they
+  // were computed from. Reset whenever that text is replaced wholesale: a new or
+  // imported document, a restored version, the sample, or a clear. In each case
+  // the same offsets describe different words, so a surviving id would force-show
+  // a finding via alwaysDisplay that the writer never opened — and unlike a
+  // dismissal, which is anchored to its surrounding sentence, this id is a bare
+  // offset with nothing to match against.
+  //
+  // Keyed on text rather than document id, because version restore replaces the
+  // draft inside the same document and a stale id survives that just the same.
+  // Typing does not trip this: the reference is only updated from these paths.
+  const unhiddenForText = useRef<string | null>(null);
+  // Takes the replacement text rather than reading draftText, because callers
+  // invoke this in the same tick as updateDraft and the state has not applied yet.
+  const resetUnhidden = useCallback((nextText: string) => {
+    unhiddenForText.current = nextText;
     setUnhiddenIssueIds([]);
-  }, [documents.activeId]);
+  }, []);
   const [reviewedCount, setReviewedCount] = useState(0);
   // Spoken confirmation for keyboard review. Keyboard users get no hover
   // state, so without this a Tab through the list is silent.
@@ -423,7 +430,8 @@ export default function Home() {
     setActiveIssueId(null);
     // A new document means the writer is writing: land them in the editor.
     setView("write");
-  }, [cancelRewrite, documents, setSelection]);
+    resetUnhidden(document.draft);
+  }, [cancelRewrite, documents, resetUnhidden, setSelection]);
 
   const newDocument = useCallback(() => {
     if (!(documents.active?.draft ?? "").trim()) {
@@ -452,11 +460,9 @@ export default function Home() {
     updateDraft("");
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
-    // Same document id, so the reset effect above will not fire. The old ids
-    // were computed against text that no longer exists.
-    setUnhiddenIssueIds([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, setSelection, updateDraft]);
+    resetUnhidden("");
+  }, [cancelRewrite, resetUnhidden, setSelection, updateDraft]);
 
   const restoreSample = useCallback(() => {
     cancelRewrite();
@@ -464,7 +470,8 @@ export default function Home() {
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, setSelection, updateDraft]);
+    resetUnhidden(SAMPLE_DOCUMENT);
+  }, [cancelRewrite, resetUnhidden, setSelection, updateDraft]);
 
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
@@ -500,8 +507,9 @@ export default function Home() {
       setDismissedIssueKeys([]);
       setActiveIssueId(null);
       setView("write");
+      resetUnhidden(result.text);
     });
-  }, [documents]);
+  }, [documents, resetUnhidden]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -771,7 +779,7 @@ export default function Home() {
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
           {view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} style={workspace.style} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
-          {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
+          {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
         </div>
       </div>

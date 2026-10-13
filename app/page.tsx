@@ -175,6 +175,17 @@ export default function Home() {
   // caps hide these by design; this is the deliberate override that makes the
   // cap inspectable rather than a silent ceiling.
   const [unhiddenIssueIds, setUnhiddenIssueIds] = useState<string[]>([]);
+  // Issue ids embed offsets, so they are only meaningful against the document
+  // they were computed from. Reset whenever the active document changes: every
+  // path that swaps documents (new, clear, restore sample, import, version
+  // restore) clears dismissals by hand, and a stale id here would force-show a
+  // different finding in the new document — the writer never opened it.
+  const unhiddenForDocument = useRef<string | null>(documents.activeId);
+  useEffect(() => {
+    if (unhiddenForDocument.current === documents.activeId) return;
+    unhiddenForDocument.current = documents.activeId;
+    setUnhiddenIssueIds([]);
+  }, [documents.activeId]);
   const [reviewedCount, setReviewedCount] = useState(0);
   // Spoken confirmation for keyboard review. Keyboard users get no hover
   // state, so without this a Tab through the list is silent.
@@ -441,6 +452,9 @@ export default function Home() {
     updateDraft("");
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
+    // Same document id, so the reset effect above will not fire. The old ids
+    // were computed against text that no longer exists.
+    setUnhiddenIssueIds([]);
     setActiveIssueId(null);
   }, [cancelRewrite, setSelection, updateDraft]);
 

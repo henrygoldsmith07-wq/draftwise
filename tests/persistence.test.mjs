@@ -115,8 +115,50 @@ test("custom headers are bounded before they reach localStorage", () => {
   assert.notEqual(loaded.provider.customHeaders.length, 20_000, "an oversized customHeaders value must be dropped on load");
 });
 
-test("failed local writes return an error instead of a false saved state", () => {
-  const initial = DEFAULT_WORKSPACE();
+test("acceptance counts survive a save and reload", () => {
+  // The profile learns from acceptances as well as dismissals. If the new
+  // counter is not round-tripped the learning silently resets on every reload
+  // and the writer's endorsements never accumulate.
+  const workspace = {
+    ...DEFAULT_WORKSPACE(),
+    style: { ...DEFAULT_WORKSPACE().style, acceptanceCounts: { "style-passive-voice": 7 } },
+  };
+  const loaded = readWorkspaceFromStorage(DEFAULT_WORKSPACE(), storage({
+    "draftwise:workspace:v2": JSON.stringify(workspace),
+  }));
+  assert.ok(isWorkspace(loaded));
+  assert.equal(loaded.style.acceptanceCounts?.["style-passive-voice"], 7);
+});
+
+test("a corrupt acceptance count is dropped rather than trusted", () => {
+  const loaded = readWorkspaceFromStorage(DEFAULT_WORKSPACE(), storage({
+    "draftwise:workspace:v2": JSON.stringify({
+      ...DEFAULT_WORKSPACE(),
+      style: { ...DEFAULT_WORKSPACE().style, acceptanceCounts: { "style-passive-voice": "many" } },
+    }),
+  }));
+  assert.ok(isWorkspace(loaded), "a bad counter must not invalidate the whole workspace");
+  assert.equal(loaded.style.acceptanceCounts?.["style-passive-voice"], undefined);
+});
+
+test("an accepted-pattern entry keeps its kind across a reload", () => {
+  // An unrecognised kind falls back to "dismissal-pattern", which would relabel
+  // endorsed advice as dampened and offer the writer "Forget this" for
+  // something they had explicitly kept.
+  const loaded = readWorkspaceFromStorage(DEFAULT_WORKSPACE(), storage({
+    "draftwise:workspace:v2": JSON.stringify({
+      ...DEFAULT_WORKSPACE(),
+      style: {
+        ...DEFAULT_WORKSPACE().style,
+        learned: [{ id: "learned-accept-style-passive-voice", kind: "accepted-pattern", label: "Passive voice suggestions", detail: "You accepted this 5 times.", family: "style-passive-voice", createdAt: 1, source: "learned" }],
+      },
+    }),
+  }));
+  assert.ok(isWorkspace(loaded));
+  assert.equal(loaded.style.learned?.[0].kind, "accepted-pattern");
+});
+
+test("failed local writes return an error instead of a false saved state", () => {  const initial = DEFAULT_WORKSPACE();
   const result = writeWorkspaceToStorage(initial, {
     ...storage(),
     setItem() {

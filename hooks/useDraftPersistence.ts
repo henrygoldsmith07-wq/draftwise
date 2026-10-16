@@ -89,6 +89,7 @@ export function isStylePreferences(value: unknown): value is StylePreferences {
     && isStringArray(value.ignoredRuleIds)
     && (value.reducedRuleIds === undefined || isStringArray(value.reducedRuleIds))
     && (value.dismissalCounts === undefined || (isRecord(value.dismissalCounts) && Object.values(value.dismissalCounts).every((count) => typeof count === "number" && Number.isFinite(count))))
+    && (value.acceptanceCounts === undefined || (isRecord(value.acceptanceCounts) && Object.values(value.acceptanceCounts).every((count) => typeof count === "number" && Number.isFinite(count))))
     && (value.learned === undefined || Array.isArray(value.learned))
     && isStringMap(value.preferredTerminology)
     && typeof value.oxfordComma === "boolean"
@@ -193,11 +194,18 @@ function sanitiseStyle(value: unknown, fallback: StylePreferences): StylePrefere
     dismissalCounts: isRecord(value.dismissalCounts)
       ? Object.fromEntries(Object.entries(value.dismissalCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])))
       : (fallback as { dismissalCounts?: Record<string, number> }).dismissalCounts,
+    acceptanceCounts: isRecord(value.acceptanceCounts)
+      ? Object.fromEntries(Object.entries(value.acceptanceCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])))
+      : (fallback as { acceptanceCounts?: Record<string, number> }).acceptanceCounts,
     learned: Array.isArray(value.learned)
       ? value.learned.flatMap((entry): LearnedPreference[] => (isRecord(entry) && typeof entry.id === "string" && typeof entry.family === "string" && typeof entry.label === "string"
         ? [{
             id: entry.id,
-            kind: entry.kind === "reduced-family" || entry.kind === "disabled-family" ? entry.kind : "dismissal-pattern",
+            // Every kind has to be listed. An unrecognised one falls back to
+            // "dismissal-pattern", so omitting "accepted-pattern" silently
+            // relabelled accepted advice as dampened on the next reload and
+            // offered the writer "Forget this" for something they had endorsed.
+            kind: entry.kind === "reduced-family" || entry.kind === "disabled-family" || entry.kind === "accepted-pattern" ? entry.kind : "dismissal-pattern",
             label: entry.label,
             detail: typeof entry.detail === "string" ? entry.detail : "",
             family: entry.family,

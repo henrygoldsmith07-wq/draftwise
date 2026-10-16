@@ -41,6 +41,23 @@ export function importDocument(fileName: string, content: string): ImportResult 
   return { ok: true, title: titleFromFilename(fileName), text, format };
 }
 
+/**
+ * Reject an oversized file before its contents are read.
+ *
+ * `File.text()` materialises the whole file in memory, and the only size check
+ * used to happen afterwards on the decoded string — so a 200 MB file was read
+ * into memory in full and only then refused. The byte bound was declared but
+ * never consulted. Checking `file.size` first costs nothing and refuses the
+ * file before any of it is loaded.
+ */
+export function oversizedImport(file: { size: number }): string | null {
+  if (file.size > MAX_IMPORT_BYTES) {
+    const limit = Math.round(MAX_IMPORT_BYTES / 1_000_000);
+    return `That file is too large to import (over ${limit} MB).`;
+  }
+  return null;
+}
+
 export function exportAsText(title: string, draft: string) {
   return { filename: `${safeFilename(title)}.txt`, content: draft, type: "text/plain;charset=utf-8" };
 }

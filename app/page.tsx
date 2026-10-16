@@ -19,6 +19,8 @@ import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
+import { countWords } from "@/lib/writing-activity";
+import { WritingActivityStore } from "@/lib/activity-store";
 import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
@@ -260,6 +262,35 @@ export default function Home() {
   // document while the store is still loading.
   const loading = !hydrated || !documents.hydrated;
 
+  // Writing-activity tracking. Keystrokes only flip a flag and stash the text
+  // in a ref; a 30-second interval folds additions into the activity store.
+  // The store is read through useSyncExternalStore (like the document store),
+  // so render never touches storage: the shell still server-renders, and no
+  // setState-in-effect exists anywhere on this path. Baselines are per
+  // document so switching drafts never credits one document's words to
+  // another, and a single tick credits at most a fast typist's output so
+  // bulk restores cannot mint a week's worth of words in one go.
+  const [activityStore] = useState(() => new WritingActivityStore());
+  const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
+  const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
+  const docsReady = documents.hydrated;
+  useEffect(() => {
+    if (!hydrated || !docsReady) return;
+    activityStore.hydrate(window.localStorage);
+    const timer = window.setInterval(() => {
+      const tracker = activityRef.current;
+      if (!tracker.keystrokeSinceTick) return;
+      tracker.keystrokeSinceTick = false;
+      const words = countWords(tracker.draft);
+      const baseline = tracker.baselines.get(activeId) ?? words;
+      tracker.baselines.set(activeId, words);
+      const credited = Math.min(Math.max(0, words - baseline), 500);
+      if (credited === 0) return;
+      activityStore.record(window.localStorage, credited, 30_000);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [hydrated, docsReady, activeId, activityStore]);
+
   const updateDraft = useCallback((next: string, recordHistory = true) => {
     // Until both stores have hydrated there is no active document to write to,
     // and updateActive silently no-ops — the editor is disabled during that
@@ -270,6 +301,8 @@ export default function Home() {
       return;
     }
     documents.updateActive({ draft: next });
+    activityRef.current.keystrokeSinceTick = true;
+    activityRef.current.draft = next;
     if (recordHistory) {
       historyStore.commit(activeId, next);
     }
@@ -851,7 +884,7 @@ export default function Home() {
         <div className="app-content">
           {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
           {view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
-          {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} style={workspace.style} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
+          {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} style={workspace.style} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
           {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
         </div>

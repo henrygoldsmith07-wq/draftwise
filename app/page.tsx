@@ -16,10 +16,10 @@ import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
 import { issueForReviewAction, reviewActionForKey, reviewAnnouncement as reviewAnnouncementFor, stepReviewIndex } from "@/lib/review-navigation";
 import { clearAllLocalData } from "@/lib/clear-local-data";
-import { recordDismissal, recordRuleControl } from "@/lib/writing-profile";
+import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
-import { downloadFile, exportAsMarkdown, exportAsText, importDocument } from "@/lib/import-export";
+import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
@@ -150,25 +150,33 @@ export default function Home() {
   // The distinction is timing: adopt storage only during the hydration window,
   // persist afterwards. lastPersisted is the single source of truth for "what
   // storage already has", so the two paths can never both act on one change.
+  //
+  // The adoption runs during render rather than in an effect. React's "adjust
+  // state when a prop changes" pattern is legal there and re-renders
+  // immediately without committing the intermediate value; calling setState in
+  // an effect body instead commits twice and can cascade.
   const [dismissedIssueKeys, setDismissedIssueKeys] = useState<string[]>(workspace.dismissedIssueKeys ?? []);
-  const lastPersistedDismissals = useRef<string[] | null>(null);
+  const [dismissalsAdopted, setDismissalsAdopted] = useState(false);
+  if (hydrated && !dismissalsAdopted) {
+    // Setting state from inside this branch is the supported pattern: React
+    // bails out of the intermediate render and re-runs immediately with the new
+    // value, so nothing is ever committed in the half-adopted state.
+    setDismissalsAdopted(true);
+    setDismissedIssueKeys(workspace.dismissedIssueKeys ?? []);
+  }
+  // After the hydration window the writer's state is authoritative: anything it
+  // does that differs from what storage last held is persisted.
+  //
+  // The baseline is read from `workspace.dismissedIssueKeys` itself rather than
+  // mirrored into more state. Workspace is the persisted record, so "what
+  // storage already has" is exactly what it holds, and comparing against it
+  // directly keeps the two paths from both acting on one change.
   useEffect(() => {
     if (!hydrated) return;
     const stored = workspace.dismissedIssueKeys ?? [];
-    // First pass after hydration: storage wins, and this becomes the baseline.
-    if (lastPersistedDismissals.current === null) {
-      lastPersistedDismissals.current = stored;
-      const same = stored.length === dismissedIssueKeys.length
-        && stored.every((key, index) => key === dismissedIssueKeys[index]);
-      if (!same) setDismissedIssueKeys(stored);
-      return;
-    }
-    // After that the writer's state is authoritative.
-    const last = lastPersistedDismissals.current;
-    const unchanged = last.length === dismissedIssueKeys.length
-      && last.every((key, index) => key === dismissedIssueKeys[index]);
+    const unchanged = stored.length === dismissedIssueKeys.length
+      && stored.every((key, index) => key === dismissedIssueKeys[index]);
     if (unchanged) return;
-    lastPersistedDismissals.current = dismissedIssueKeys;
     updateWorkspace({ dismissedIssueKeys });
   }, [hydrated, workspace.dismissedIssueKeys, dismissedIssueKeys, updateWorkspace]);
   // Findings the writer explicitly opened out of the held-back list. Density
@@ -334,7 +342,19 @@ export default function Home() {
 
   const advanceFocus = useCallback((issues: PrioritisedIssue[], handled: WritingIssue) => {
     setReviewedCount((count) => count + 1);
-    const next = issues.find((issue) => issue.id !== handled.id);
+    // Move to the *next* suggestion, not the first one.
+    //
+    // This previously took `issues.find(issue => issue.id !== handled.id)`,
+    // which is the first element of the list whenever the handled issue is not
+    // itself first. Accepting card 5 of 12 threw the writer back to card 1, so
+    // Ctrl+Enter looped over the same two suggestions instead of walking the
+    // draft, and the count climbed while nothing new was reviewed.
+    const index = issues.findIndex((issue) => issue.id === handled.id);
+    const next = index === -1
+      // The handled issue is no longer in the visible list (it was resolved, or
+      // filtered out). Stay where the writer was rather than jumping to the top.
+      ? issues[0]
+      : issues[index + 1] ?? issues[0];
     if (!next) {
       setActiveIssueId(null);
       return;
@@ -349,9 +369,13 @@ export default function Home() {
   const acceptIssue = useCallback((issue: WritingIssue) => {
     if (!issue.replacement || issue.replacement === issue.original || draftText.slice(issue.start, issue.end) !== issue.original) return;
     updateDraft(`${draftText.slice(0, issue.start)}${issue.replacement}${draftText.slice(issue.end)}`);
+    // Acting on a suggestion is evidence too. Dismissal learning alone could
+    // only ever suppress a rule, so a family the writer accepted every time
+    // looked exactly like one they had never seen.
+    updateWorkspace((current) => ({ ...current, style: recordAcceptance(current.style, issue) }));
     advanceFocus(visibleIssues, issue);
     window.setTimeout(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(issue.start, issue.start + issue.replacement.length); }, 0);
-  }, [advanceFocus, updateDraft, visibleIssues, draftText]);
+  }, [advanceFocus, updateDraft, updateWorkspace, visibleIssues, draftText]);
 
   const dismissIssue = useCallback((issue: WritingIssue) => {
     setDismissedIssueKeys((current) => [...new Set([...current, getIssueDismissalKey(issue, draftText)])]);
@@ -366,9 +390,17 @@ export default function Home() {
       // Checkpoint first: bulk-applying suggestions is a major operation.
       documents.saveSnapshot("manual");
       updateDraft(next);
+      // Bulk acceptance is the strongest evidence of all: the writer read a set
+      // of suggestions and took every one. Recorded per family so a single
+      // sweep can cross the threshold for the kinds they actually act on.
+      updateWorkspace((current) => {
+        let style = current.style;
+        for (const issue of visibleIssues) style = recordAcceptance(style, issue);
+        return { ...current, style };
+      });
     }
     setActiveIssueId(null);
-  }, [documents, updateDraft, visibleIssues, draftText]);
+  }, [documents, updateDraft, updateWorkspace, visibleIssues, draftText]);
 
   const applyHistory = useCallback((next: string | null) => {
     if (next !== null) {
@@ -495,6 +527,14 @@ export default function Home() {
   }, [cancelRewrite, documents, setSelection]);
 
   const importFromFile = useCallback((file: File) => {
+    // Refuse an oversized file before reading it. `file.text()` loads the whole
+    // file into memory, so checking afterwards meant a huge file was fully read
+    // and only then rejected.
+    const tooLarge = oversizedImport(file);
+    if (tooLarge) {
+      setImportError(tooLarge);
+      return;
+    }
     void file.text().then((content) => {
       const result = importDocument(file.name, content);
       if (!result.ok) {

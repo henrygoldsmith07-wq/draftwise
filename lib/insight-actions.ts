@@ -7,7 +7,7 @@ import type {
   WritingIssue,
 } from "../packages/types/src/index.ts";
 import { ruleFamily } from "../packages/grammar/src/index.ts";
-import { familyLabel } from "../lib/writing-profile.ts";
+import { DISMISSAL_LEARNING_THRESHOLD, familyLabel } from "../lib/writing-profile.ts";
 
 /**
  * Actionable insights.
@@ -160,7 +160,7 @@ export function buildActionableInsights(args: {
         label: familyLabel(family),
         count: group.length,
         description: describeFamily(family, group.length, group[0]),
-        repeatedlyDismissed: (style?.dismissalCounts?.[family] ?? 0) >= 3,
+        repeatedlyDismissed: (style?.dismissalCounts?.[family] ?? 0) >= DISMISSAL_LEARNING_THRESHOLD,
         target: sorted[0],
       };
     })

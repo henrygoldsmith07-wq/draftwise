@@ -236,7 +236,7 @@ export interface WritingGoals {
 /** A transparent entry in the local Writing Profile; every one is user-removable. */
 export interface LearnedPreference {
   id: string;
-  kind: "dismissal-pattern" | "reduced-family" | "disabled-family";
+  kind: "dismissal-pattern" | "reduced-family" | "disabled-family" | "accepted-pattern";
   label: string;
   detail: string;
   family: string;
@@ -254,6 +254,16 @@ export interface StylePreferences {
   reducedRuleIds: string[];
   /** How many times the writer dismissed each suggestion family; drives learning. */
   dismissalCounts?: Record<string, number>;
+  /**
+   * How many times the writer accepted each suggestion family.
+   *
+   * The profile previously learned only from dismissals, so its only possible
+   * direction was suppression: a writer who accepted every passive-voice
+   * suggestion and dismissed none looked identical to one who had never seen
+   * the rule. Recording acceptance lets the profile recognise advice that is
+   * working for this writer and keep it in view.
+   */
+  acceptanceCounts?: Record<string, number>;
   /** What the Writing Profile has learned; inspectable and editable in Settings. */
   learned?: LearnedPreference[];
   preferredTerminology: Record<string, string>;

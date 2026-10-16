@@ -8,9 +8,9 @@ import {
   FileText,
   Highlighter,
   Keyboard,
-  MoreHorizontal,
   PanelRight,
   RotateCw,
+  Settings2,
   ShieldCheck,
   Target,
   Trash2,
@@ -204,7 +204,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               </span>
               <Button variant="ghost" size="icon-xs" aria-label="Open editor shortcuts" onClick={props.onOpenShortcuts}><Keyboard size={16} /></Button>
               <Button variant="ghost" size="icon-xs" aria-label="Clear document" onClick={props.onClearDocument}><Trash2 size={16} /></Button>
-              <Button variant="ghost" size="icon-xs" aria-label="More editor actions" onClick={props.onOpenShortcuts}><MoreHorizontal size={16} /></Button>
+              <Button variant="ghost" size="icon-xs" aria-label="Open settings" onClick={props.onOpenSettings}><Settings2 size={16} /></Button>
             </div>
           </div>
           <div className="editor-scroll-wrap">

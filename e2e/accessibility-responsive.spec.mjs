@@ -29,6 +29,9 @@ async function openApp(page) {
   });
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(page.getByLabel("Draft editor")).toBeVisible();
 }
 

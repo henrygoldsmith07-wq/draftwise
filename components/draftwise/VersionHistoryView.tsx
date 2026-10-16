@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ArrowLeft, Copy, History, RotateCcw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDialogFocusTrap } from "@/hooks/useDialogFocusTrap";
 import type { DocumentSnapshot, StoredDocument } from "@/lib/documents";
 
 function formatTimestamp(timestamp: number) {
@@ -42,6 +43,12 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
   const snapshots = [...document.snapshots].reverse();
   const preview = snapshots.find((snapshot) => snapshot.id === previewId) ?? null;
+  // The preview is a real dialog: it traps Tab, closes on Escape, and hands
+  // focus back to the Preview button it opened from. The close callback is
+  // stable so opening the dialog arms the trap once instead of re-arming it
+  // on every render and yanking focus back to the start.
+  const closePreview = useCallback(() => setPreviewId(null), []);
+  const previewDialogRef = useDialogFocusTrap<HTMLDivElement>(preview !== null, closePreview);
 
   return <section className="full-view">
     <div className="full-view-heading">
@@ -92,7 +99,7 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
     </div>
 
     {preview ? (
-      <div className="history-preview" role="dialog" aria-label="Version preview">
+      <div ref={previewDialogRef} className="history-preview" role="dialog" aria-modal="true" tabIndex={-1} aria-label="Version preview">
         <div className="history-preview-header">
           <strong>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</strong>
           <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)}><X size={15} /></button>

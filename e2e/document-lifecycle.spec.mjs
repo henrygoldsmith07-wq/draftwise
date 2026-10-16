@@ -24,6 +24,9 @@ async function openApp(page) {
   });
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(editor(page)).toBeVisible();
 }
 
@@ -65,6 +68,9 @@ test("document lifecycle: create, type, autosave, switch, refresh restores last-
   await page.waitForTimeout(800);
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(editor(page)).toHaveValue("Beta body text for document B.");
   await expect(titleInput(page)).toHaveValue("Doc B");
 
@@ -102,6 +108,9 @@ test("rename persists across reload and dashboard", async ({ page }) => {
   await page.waitForTimeout(800);
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(titleInput(page)).toHaveValue("Renamed Document");
   await page.getByRole("button", { name: "Documents" }).click({ force: true });
   await expect(page.locator(".document-card-title", { hasText: "Renamed Document" })).toBeVisible();
@@ -119,6 +128,9 @@ test("rapid switching keeps both documents' content correct after reload", async
   await page.waitForTimeout(800);
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(editor(page)).toHaveValue("RAPID-A-CONTENT");
   await openDocumentByTitle(page, "Rapid B");
   await expect(editor(page)).toHaveValue("RAPID-B-CONTENT");
@@ -161,6 +173,9 @@ test("delete: deleting a document never resurrects it after reload", async ({ pa
   await page.waitForTimeout(800);
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await page.getByRole("button", { name: "Documents" }).click({ force: true });
   await waitForAppReady(page);
   await expect(page.locator(".document-card-title", { hasText: "Doomed" })).toHaveCount(0);
@@ -197,6 +212,9 @@ test("import markdown, edit, and reload keeps the imported document", async ({ p
   await page.waitForTimeout(800);
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(editor(page)).toHaveValue(/then edited/u);
 });
 
@@ -248,6 +266,9 @@ test("storage degradation: blocked IndexedDB shows truthful UI and never claims 
   });
   await page.reload();
   await waitForAppReady(page);
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await editor(page).fill("Written while storage is degraded.");
   await page.waitForTimeout(1000);
   const status = await page.locator(".saved-dot").getAttribute("title");

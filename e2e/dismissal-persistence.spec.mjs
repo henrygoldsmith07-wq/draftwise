@@ -20,6 +20,9 @@ async function openWorkspace(page) {
   });
   await page.reload();
   await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });
 }
 
@@ -61,6 +64,9 @@ test("a bulk dismissal survives a reload", async ({ page }) => {
 
   await page.reload();
   await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });
   await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 45_000 });
 
@@ -101,6 +107,9 @@ test("a single dismissal survives a reload", async ({ page }) => {
 
   await page.reload();
   await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });
   await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 45_000 });
 
@@ -123,6 +132,9 @@ test("corrupt stored dismissals are ignored rather than hiding suggestions", asy
   });
   await page.reload();
   await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });
 
   const draft = MISSES.map((word, index) => (

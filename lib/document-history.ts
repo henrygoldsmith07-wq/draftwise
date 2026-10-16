@@ -1,4 +1,4 @@
-import { commitHistory, stepHistory, type HistoryState } from "../hooks/useHistory.ts";
+import { commitHistory, stepHistory, type HistoryState } from "./editor-history.ts";
 
 /**
  * Per-document undo/redo history.

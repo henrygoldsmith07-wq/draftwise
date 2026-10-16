@@ -1,13 +1,11 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { clampSelection } from "../lib/selection.ts";
 
-export function clampSelection(selection: { start: number; end: number }, length: number) {
-  const safeLength = Math.max(0, Math.floor(length));
-  const start = Math.max(0, Math.min(safeLength, selection.start));
-  const end = Math.max(start, Math.min(safeLength, selection.end));
-  return start === selection.start && end === selection.end ? selection : { start, end };
-}
+// clampSelection lives in lib/selection.ts; this re-export keeps existing
+// import paths working.
+export * from "../lib/selection.ts";
 
 export function useSelection(text: string) {
   const [storedSelection, setStoredSelection] = useState({ start: 0, end: 0 });

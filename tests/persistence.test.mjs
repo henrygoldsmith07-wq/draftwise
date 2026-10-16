@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isProviderSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../hooks/useDraftPersistence.ts";
+import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isProviderSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../lib/workspace-storage.ts";
 import { DEFAULT_PROVIDER_SETTINGS, DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {

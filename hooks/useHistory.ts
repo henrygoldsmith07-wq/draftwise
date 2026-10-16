@@ -2,7 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import {
+  DEFAULT_HISTORY_CHAR_BUDGET,
+  DEFAULT_HISTORY_LIMIT,
   commitHistory,
+  defaultHistoryWeight,
   stepHistory,
   type HistoryState,
 } from "../lib/editor-history.ts";

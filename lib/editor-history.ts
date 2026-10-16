@@ -13,10 +13,10 @@ export interface HistoryState<T> {
   index: number;
 }
 
-const DEFAULT_HISTORY_LIMIT = 80;
-const DEFAULT_HISTORY_CHAR_BUDGET = 2_000_000;
+export const DEFAULT_HISTORY_LIMIT = 80;
+export const DEFAULT_HISTORY_CHAR_BUDGET = 2_000_000;
 
-function defaultHistoryWeight(value: unknown) {
+export function defaultHistoryWeight(value: unknown) {
   return typeof value === "string" ? value.length : 0;
 }
 

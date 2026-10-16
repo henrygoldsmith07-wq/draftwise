@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { commitHistory, stepHistory } from "../hooks/useHistory.ts";
-import { clampSelection } from "../hooks/useSelection.ts";
+import { commitHistory, stepHistory } from "../lib/editor-history.ts";
+import { clampSelection } from "../lib/selection.ts";
 
 test("rapid history commits preserve every intermediate undo point", () => {
   let state = { values: ["a"], index: 0 };

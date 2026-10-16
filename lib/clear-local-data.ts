@@ -4,7 +4,7 @@ import {
   type DocumentStoreBackend,
 } from "./documents.ts";
 import { ACTIVITY_STORAGE_KEY } from "./writing-activity.ts";
-import { clearWorkspaceStorage, type WorkspaceStorage } from "../hooks/useDraftPersistence.ts";
+import { clearWorkspaceStorage, type WorkspaceStorage } from "./workspace-storage.ts";
 
 /**
  * Everything "Clear all local Draftwise data" must remove. The privacy promise

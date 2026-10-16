@@ -225,6 +225,9 @@ test("clear all local data removes every stored surface and starts clean", async
   const scratch = storage({
     "draftwise:workspace:v2": JSON.stringify({ version: 2 }),
     "draftwise:draft": "legacy",
+    // A dated record of when the writer writes: the residue clear-all exists
+    // to remove, and the regression this test pins.
+    "draftwise:activity:v1": JSON.stringify({ version: 1, days: [{ date: "2026-10-16", words: 40, activeMs: 1000 }] }),
     [DOCUMENTS_LOCAL_STORAGE_KEY]: JSON.stringify([{ id: "doc-1", title: "Old", draft: "Old secret text" }]),
   });
   let memoryCleared = false;
@@ -237,6 +240,7 @@ test("clear all local data removes every stored surface and starts clean", async
   assert.equal(result.ok, true);
   assert.equal(scratch.getItem("draftwise:workspace:v2"), null);
   assert.equal(scratch.getItem("draftwise:draft"), null);
+  assert.equal(scratch.getItem("draftwise:activity:v1"), null);
   assert.equal(scratch.getItem(DOCUMENTS_LOCAL_STORAGE_KEY), null);
   assert.equal((await backend.list()).length, 0);
   assert.equal(memoryCleared, true);
@@ -248,7 +252,7 @@ test("clear all local data leaves no credentials behind", async () => {
   });
   const result = await clearAllLocalData({ storage: scratch, documentBackend: new MemoryDocumentBackend() });
   assert.equal(result.ok, true);
-  for (const key of ["draftwise:workspace:v2", "draftwise:draft", "draftwise:goals", "draftwise:provider", "draftwise:theme", "draftwise:ai-enabled", DOCUMENTS_LOCAL_STORAGE_KEY]) {
+  for (const key of ["draftwise:workspace:v2", "draftwise:draft", "draftwise:goals", "draftwise:provider", "draftwise:theme", "draftwise:ai-enabled", DOCUMENTS_LOCAL_STORAGE_KEY, "draftwise:activity:v1"]) {
     assert.equal(scratch.getItem(key), null, `key ${key} must be removed`);
   }
 });

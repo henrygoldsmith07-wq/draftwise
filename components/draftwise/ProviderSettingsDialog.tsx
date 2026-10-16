@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, Info, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronRight, Download, Info, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { downloadFile } from "@/lib/import-export";
+import { exportProfile, importProfile } from "@/lib/profile-transfer";
 import type { ClassifierSettings, ProviderSettings, StylePreferences } from "@/packages/types/src";
 import { DEFAULT_CLASSIFIER_SETTINGS } from "@/packages/types/src";
 
@@ -55,6 +57,29 @@ export function ProviderSettingsDialog({
   // document store returns one when local storage is unavailable), so it is now
   // shown with a next action instead of silently discarded.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Profile portability: the writer's learned language data as a file they
+  // own. Export downloads it; import merges a file additively and reports
+  // exactly what changed. Secrets never enter the file (see profile-transfer).
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const exportStyleProfile = () => {
+    const exported = exportProfile(style);
+    downloadFile({ filename: "draftwise-profile.json", content: JSON.stringify(exported, null, 2), type: "application/json;charset=utf-8" });
+    setTransferMessage("Profile exported. It holds your words and preferences only — no keys, no drafts.");
+  };
+  const importStyleProfile = (file: File) => {
+    // Refuse anything implausible before reading it into memory.
+    if (file.size > 1_000_000) {
+      setTransferMessage("That file is too large to be a profile (over 1 MB).");
+      return;
+    }
+    void file.text().then((text) => {
+      const result = importProfile(style, text);
+      setTransferMessage(result.message);
+      if (result.ok && result.merged) patchStyle(result.merged);
+    }).catch(() => {
+      setTransferMessage("That file could not be read.");
+    });
+  };
   const save = () => {
     const result = onSave?.();
     if (result && !result.ok) {
@@ -238,6 +263,14 @@ export function ProviderSettingsDialog({
                 <span>{style.personalDictionary.join(" · ")}</span>
               </div>
             ) : null}
+            <div className="writing-profile-transfer">
+              <Button size="sm" variant="outline" onClick={exportStyleProfile}><Download size={13} /> Export profile</Button>
+              <label className="writing-profile-import">
+                <Upload size={13} /> Import profile
+                <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importStyleProfile(file); event.target.value = ""; }} />
+              </label>
+            </div>
+            {transferMessage ? <p className="writing-profile-transfer-message" role="status">{transferMessage}</p> : null}
           </div>
 
           <div className="settings-footnote">

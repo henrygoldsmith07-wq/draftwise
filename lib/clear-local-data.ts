@@ -3,6 +3,7 @@ import {
   LocalStorageDocumentBackend,
   type DocumentStoreBackend,
 } from "./documents.ts";
+import { ACTIVITY_STORAGE_KEY } from "./writing-activity.ts";
 import { clearWorkspaceStorage, type WorkspaceStorage } from "../hooks/useDraftPersistence.ts";
 
 /**
@@ -51,6 +52,19 @@ export async function clearAllLocalData(options: ClearLocalDataOptions = {}) {
       storage.removeItem(DOCUMENTS_LOCAL_STORAGE_KEY);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Failed to clear document fallback");
+    }
+  }
+
+  // 3b. The writing-activity log. It lives under its own key outside the
+  //     versioned workspace, so the workspace clear above misses it — and a
+  //     "cleared everything" promise that leaves a dated record of when the
+  //     writer writes is exactly the kind of residue this action exists to
+  //     remove.
+  if (storage) {
+    try {
+      storage.removeItem(ACTIVITY_STORAGE_KEY);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Failed to clear writing activity");
     }
   }
 

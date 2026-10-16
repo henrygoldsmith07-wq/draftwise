@@ -337,6 +337,12 @@ button { cursor: pointer; }
 .writing-profile-empty { font-size: 11px; color: var(--ink-soft); line-height: 1.5; margin: 0; }
 .writing-profile-dictionary { border-top: 1px solid var(--border); padding-top: 8px; font-size: 10.5px; }
 .writing-profile-dictionary strong { color: var(--ink); display: block; margin-bottom: 2px; }
+.writing-profile-transfer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; }
+.writing-profile-import { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 12px; font-weight: 550; cursor: pointer; }
+.writing-profile-import:hover { border-color: color-mix(in srgb, var(--mint-deep) 45%, var(--border)); }
+.writing-profile-import:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
+.writing-profile-import input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.writing-profile-transfer-message { font-size: 10.5px; color: var(--ink-soft); line-height: 1.5; margin: 0; }
 .suggestion-context { display: block; margin: 4px 0; padding: 6px 9px; border-left: 2px solid var(--border); color: var(--ink-soft); font-size: 10.5px; line-height: 1.5; font-style: italic; background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 0 7px 7px 0; }
 .suggestion-group-actions { display: flex; align-items: center; gap: 6px; padding: 6px 11px; border-top: 1px solid var(--border); font-size: 9.5px; color: var(--ink-soft); }
 .suggestion-group-actions span { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }

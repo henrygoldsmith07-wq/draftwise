@@ -105,7 +105,11 @@ export default function Home() {
   // Document content lives in exactly one state system: the document store.
   // The editor reads documents.active and writes back through updateActive;
   // workspace holds only global configuration plus activeDocumentId metadata.
-  const documents = useDocuments({ title: "Untitled draft", draft: SAMPLE_DOCUMENT }, hydrated, workspace.activeDocumentId);
+  // A fresh install seeds an empty draft, never sample prose. The sample used
+  // to be the seed, so first run opened the editor cursor-deep in foreign text
+  // presented as the writer's own draft. The sample still exists as an
+  // explicit action (loadSampleDocument); it is never persisted uninvited.
+  const documents = useDocuments({ title: "Untitled draft", draft: "" }, hydrated, workspace.activeDocumentId);
   const draftText = documents.active?.draft ?? "";
   const draftTitle = documents.active?.title ?? "Untitled draft";
   // Undo/redo is scoped per document: each document owns its own stack, so
@@ -132,7 +136,20 @@ export default function Home() {
   const highlightRef = useRef<HTMLDivElement>(null);
   const registerTextarea = useCallback((element: HTMLTextAreaElement | null) => { textareaRef.current = element; }, []);
   const registerHighlight = useCallback((element: HTMLDivElement | null) => { highlightRef.current = element; }, []);
-  const [view, setView] = useState<WorkspaceView>("write");
+  // Home first. Opening in the editor used to land a fresh install inside the
+  // seeded sample; the dashboard is the honest default, and opening any
+  // document still lands in the editor from there.
+  const [view, setView] = useState<WorkspaceView>("home");
+  // Returning writers resume where they left off: once both stores hydrate,
+  // a single render-phase adoption moves to the editor when real words exist.
+  // A fresh install owns no words (the seed is empty by design), so it stays
+  // on the dashboard. This is adoption during render, not setState in an
+  // effect, following the same pattern as the dismissal hydration below.
+  const [resumed, setResumed] = useState(false);
+  if (hydrated && documents.hydrated && !resumed) {
+    setResumed(true);
+    if (documents.documents.some((document) => document.draft.trim() !== "")) setView("write");
+  }
   const [filter, setFilter] = useState<TierFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
@@ -505,6 +522,22 @@ export default function Home() {
     resetUnhidden(SAMPLE_DOCUMENT);
   }, [cancelRewrite, resetUnhidden, setSelection, updateDraft]);
 
+  /**
+   * The first-run "try the sample" path. Unlike the seed (which must stay
+   * empty), this is the writer explicitly asking for sample prose — so it
+   * arrives in its own clearly-titled document and lands in the editor.
+   */
+  const loadSampleDocument = useCallback(() => {
+    cancelRewrite();
+    const document = documents.createNew("Sample draft", SAMPLE_DOCUMENT);
+    historyStore.open(document.id, document.draft);
+    setSelection({ start: 0, end: 0 });
+    setDismissedIssueKeys([]);
+    setActiveIssueId(null);
+    setView("write");
+    resetUnhidden(document.draft);
+  }, [cancelRewrite, documents, resetUnhidden, setSelection]);
+
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
       setView("write");
@@ -816,7 +849,7 @@ export default function Home() {
         </aside>
 
         <div className="app-content">
-          {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} onOpen={openDocument} onNew={startNewDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
+          {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
           {view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={workspace.goals} style={workspace.style} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={workspace.goals} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} style={workspace.style} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}

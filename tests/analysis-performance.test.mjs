@@ -3,6 +3,7 @@ import test from "node:test";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
 import { parseDocument } from "../packages/grammar/src/parser.ts";
 import { findPunctuation } from "../packages/grammar/src/grammar.ts";
+import { findSpelling } from "../packages/grammar/src/spelling.ts";
 import { DEFAULT_GOALS, DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
 
 const style = DEFAULT_STYLE_PREFERENCES;
@@ -52,6 +53,29 @@ test("a whitespace-heavy document stays responsive end to end", () => {
   const text = `Intro paragraph.\n\n${" ".repeat(32_000)}\n\nClosing paragraph here.`;
   const total = elapsed(() => analyzeLocally(text, style, goals));
   assert.ok(total < BUDGET_MS, `analyzeLocally took ${total}ms on a 32 KB whitespace paragraph`);
+});
+
+test("a book-length draft does not make spelling quadratic", () => {
+  // Guards the per-token dialect lookup: it used to allocate per word
+  // (Object.entries + lowercasing on every token), costing ~1.4s of a 2.6s
+  // spelling pass on a 180k-word draft. Same shape as the whitespace guards
+  // above — a loose scaling budget, not a timing assertion.
+  const sentence = "The quick brown fox jumps over the lazy dog near the river. ";
+  const small = sentence.repeat(3_750);
+  const large = sentence.repeat(15_000);
+  elapsed(() => findSpelling(small, style));
+  const smallMs = elapsed(() => findSpelling(small, style));
+  const largeMs = elapsed(() => findSpelling(large, style));
+  // 4x the words. Linear work grows roughly 4x; quadratic grows ~16x.
+  assert.ok(largeMs < Math.max(2_000, smallMs * 10), `findSpelling scaled badly: ${smallMs}ms -> ${largeMs}ms`);
+});
+
+test("the spelling fast path still corrects genuine typos", () => {
+  // The lookup rewrite must not change what the pass reports: a real slip is
+  // still flagged while ordinary words survive.
+  const issues = findSpelling("I recieve the flow of scores daily.", style);
+  assert.ok(issues.some((issue) => issue.original === "recieve"), "expected recieve to be flagged");
+  assert.ok(!issues.some((issue) => issue.original === "flow" || issue.original === "scores"), "ordinary words must survive");
 });
 
 test("ordinary prose still parses into the same sentences", () => {

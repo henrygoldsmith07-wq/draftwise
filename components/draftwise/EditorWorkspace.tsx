@@ -214,6 +214,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="editor-footer">
             <span><Keyboard size={14} /> Select text for rewrite tools</span>
             <span>{props.draft.length.toLocaleString("en-GB")} characters · {Math.ceil(props.draft.length / 4).toLocaleString("en-GB")} tokens</span>
+            {/* Mobile only (see .editor-jump): the suggestions sit below the
+                whole editor column on small screens, so review is a blind
+                scroll without this. A plain anchor needs no state and moves
+                focus nowhere it should not go. */}
+            {props.suggestionsOpen && props.visibleIssues.length > 0 ? (
+              <a className="editor-jump" href="#suggestions">↓ {props.visibleIssues.length} suggestion{props.visibleIssues.length === 1 ? "" : "s"}</a>
+            ) : null}
           </div>
         </div>
 
@@ -222,7 +229,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       </section>
 
       {props.suggestionsOpen ? (
-        <aside className="suggestions-column" aria-label="Writing suggestions">
+        <aside id="suggestions" className="suggestions-column" aria-label="Writing suggestions">
           <div className="suggestions-header">
             <div><p className="eyebrow">Live analysis</p><h2>Suggestions <span>{props.suggestions.report.displayedCount}</span></h2></div>
             <Button size="icon-sm" variant="ghost" aria-label={props.suggestionsOpen ? "Collapse suggestions" : "Show suggestions"} aria-expanded={props.suggestionsOpen} onClick={props.onToggleSuggestions}><PanelRight size={17} /></Button>

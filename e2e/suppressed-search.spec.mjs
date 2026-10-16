@@ -18,6 +18,9 @@ async function openWorkspace(page) {
   });
   await page.reload();
   await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  // Fresh installs open on the documents dashboard, so step into the editor.
+  // On a resumed session this is a no-op: the app is already writing.
+  await page.getByRole("button", { name: "Write", exact: true }).click();
   // The save dot appears while the document store is still hydrating; filling
   // before the editor is enabled types into a field that discards its value.
   await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });

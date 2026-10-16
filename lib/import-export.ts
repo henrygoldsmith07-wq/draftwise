@@ -7,6 +7,16 @@
  * is rejected before it reaches the editor.
  */
 
+/**
+ * Two bounds, and the character one is usually tighter: 500,000 ASCII
+ * characters are roughly 0.5 MB, well under the 2 MB byte bound, so Latin
+ * text hits the character bound first — the one that protects the analysis
+ * pass, which scales with characters, not bytes. The byte bound only bites
+ * first past ~4 bytes per character (dense CJK/emoji runs), where it protects
+ * memory instead. Neither implies the other, so both stay: removing the byte
+ * bound re-opens the pre-read memory blowup, removing the char bound lets a
+ * 2 MB ASCII file through to the analysers.
+ */
 export const MAX_IMPORT_BYTES = 2_000_000;
 export const MAX_IMPORT_CHARS = 500_000;
 

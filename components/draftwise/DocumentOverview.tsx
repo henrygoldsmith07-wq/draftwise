@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { CheckCheck, ChevronDown, Compass, EyeOff, ListTree, Search, X } from "lucide-react";
+import { useDialogFocusTrap } from "@/hooks/useDialogFocusTrap";
 import { buildDocumentOutline, summariseDocument } from "@/packages/grammar/src";
 import { SUPPRESSION_REASONS, describeSuppression } from "@/packages/grammar/src/prioritise.ts";
 import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingIssue, WritingStats, StylePreferences } from "@/packages/types/src";
@@ -150,6 +151,14 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
   const [query, setQuery] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(SUPPRESSED_PREVIEW_LIMIT);
   const [batchConfirm, setBatchConfirm] = useState(false);
+  // The bulk-dismiss confirmation is an alertdialog: it needs the same trap
+  // as the version preview, plus an explicit focus target. The trigger button
+  // unmounts while the confirmation is showing, so the "previously focused"
+  // element is detached by close time — the trigger ref reattaches when the
+  // button returns and focus lands back on it.
+  const closeBatchConfirm = useCallback(() => setBatchConfirm(false), []);
+  const batchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const batchDialogRef = useDialogFocusTrap<HTMLDivElement>(batchConfirm, closeBatchConfirm, batchTriggerRef);
   if (!report.suppressedCount) return null;
 
   const byReason = new Map<string, SuppressedFinding[]>();
@@ -264,7 +273,7 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
               cap is a budget, not a judgement about the writing. */}
           {onDismissMany && shown.length > BATCH_THRESHOLD ? (
             batchConfirm ? (
-              <div className="suppressed-batch-confirm" role="alertdialog" aria-label="Confirm dismissing these findings">
+              <div ref={batchDialogRef} className="suppressed-batch-confirm" role="alertdialog" aria-modal="true" tabIndex={-1} aria-label="Confirm dismissing these findings">
                 <p>
                   Dismiss all {shown.length}{needle ? " matches" : reasonFilter ? " findings of this kind" : " held-back findings"}?
                   This also tells Draftwise to show you less of this kind of note.
@@ -277,7 +286,7 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
                 </div>
               </div>
             ) : (
-              <button type="button" className="suppressed-batch" onClick={() => setBatchConfirm(true)}>
+              <button ref={batchTriggerRef} type="button" className="suppressed-batch" onClick={() => setBatchConfirm(true)}>
                 <CheckCheck size={12} aria-hidden="true" /> Dismiss all {shown.length}
                 {needle ? " matches" : reasonFilter ? " of this kind" : " held back"}
               </button>

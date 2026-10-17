@@ -27,7 +27,7 @@ import { RewritePreview } from "@/components/draftwise/RewritePreview";
 import { hasActionableReplacement } from "@/lib/issue-actions";
 import { rewriteActionsFor } from "@/lib/rewrite-actions";
 import { type CategoryFilter, type SuggestionState, TIER_DESCRIPTIONS, TIER_LABELS, type TierFilter } from "@/lib/suggestions";
-import type { AnalysisResult, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
+import type { AnalysisResult, Dialect, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
 
 interface EditorWorkspaceProps {
@@ -37,6 +37,9 @@ interface EditorWorkspaceProps {
   loading: boolean;
   goals: WritingGoals;
   style: StylePreferences;
+  /** The active document's dialect; changing it re-analyses spelling for this draft only. */
+  dialect: Dialect;
+  onDialectChange: (dialect: Dialect) => void;
   analysis: AnalysisResult;
   openIssues: WritingIssue[];
   visibleIssues: PrioritisedIssue[];
@@ -169,6 +172,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <GoalSelect label="Tone" value={props.goals.tone} options={toneOptions} onChange={(value) => props.onGoalChange({ tone: value as WritingGoals["tone"] })} />
           <GoalSelect label="Type" value={props.goals.documentType ?? ""} options={documentTypeOptions} onChange={(value) => props.onGoalChange({ documentType: value ? (value as WritingGoals["documentType"]) : undefined })} />
           <GoalSelect label="Length" value={props.goals.targetLength ? String(props.goals.targetLength) : ""} options={[{ value: "", label: "Any" }, { value: "300", label: "~300 words" }, { value: "600", label: "~600 words" }, { value: "1200", label: "~1,200 words" }, { value: "2500", label: "~2,500 words" }]} onChange={(value) => props.onGoalChange({ targetLength: value ? Number(value) : undefined })} />
+          <GoalSelect label="English" value={props.dialect} options={[{ value: "en-GB", label: "British" }, { value: "en-US", label: "American" }]} onChange={(value) => props.onDialectChange(value as Dialect)} />
         </div>
 
         {props.selection.end > props.selection.start ? (

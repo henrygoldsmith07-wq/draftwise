@@ -9,7 +9,7 @@
  * snapshots, so a writer can duplicate, rename, search and restore without any
  * cloud involvement.
  */
-import type { WritingGoals } from "../packages/types/src/index.ts";
+import type { Dialect, StylePreferences, WritingGoals } from "../packages/types/src/index.ts";
 import { isWritingGoals } from "./workspace-storage.ts";
 
 export interface DocumentSnapshot {
@@ -35,6 +35,15 @@ export interface StoredDocument {
    * them; anything without them falls back to the workspace default.
    */
   goals?: WritingGoals;
+  /**
+   * This document's spelling dialect. Absent on older documents, which follow
+   * the workspace default: a writer with a US client and a UK journal should
+   * not have to flip a global switch (and re-analyse every draft's spelling)
+   * each time they switch documents. Only the dialect varies per document;
+   * the learned profile (dictionary, dismissal history) stays global because
+   * it describes the writer, not the draft.
+   */
+  dialect?: Dialect;
   /**
    * What the last analysis found, kept so the document list can show it.
    *
@@ -63,6 +72,7 @@ export interface DocumentSummary {
   excerpt: string;
   review?: DocumentReview;
   goals?: WritingGoals;
+  dialect?: Dialect;
 }
 
 export interface DocumentStoreBackend {
@@ -95,7 +105,7 @@ export function createDocumentId() {
   return `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createDocument(title: string, draft = "", now = Date.now(), goals?: WritingGoals): StoredDocument {
+export function createDocument(title: string, draft = "", now = Date.now(), goals?: WritingGoals, dialect?: Dialect): StoredDocument {
   return {
     id: createDocumentId(),
     title: title || "Untitled draft",
@@ -105,6 +115,7 @@ export function createDocument(title: string, draft = "", now = Date.now(), goal
     wordCount: countWords(draft),
     snapshots: [],
     ...(goals ? { goals: { ...goals } } : {}),
+    ...(dialect ? { dialect } : {}),
   };
 }
 
@@ -118,6 +129,7 @@ function summarise(document: StoredDocument): DocumentSummary {
     excerpt: document.draft.trim().replace(/\s+/gu, " ").slice(0, 120),
     ...(document.review ? { review: document.review } : {}),
     ...(document.goals ? { goals: document.goals } : {}),
+    ...(document.dialect ? { dialect: document.dialect } : {}),
   };
 }
 
@@ -179,7 +191,19 @@ export function sanitiseStoredDocument(value: unknown): StoredDocument | null {
     // Stored data is untrusted: malformed goals are dropped and the document
     // falls back to the workspace default rather than crashing analysis.
     ...(isWritingGoals(record.goals) ? { goals: record.goals } : {}),
+    ...(record.dialect === "en-GB" || record.dialect === "en-US" ? { dialect: record.dialect } : {}),
   };
+}
+
+/**
+ * The style a document is actually analysed with: the workspace style with
+ * the document's own dialect overlaid, falling back to the workspace default
+ * for documents saved before per-document dialects existed. Pure so the
+ * merge rule is unit-tested in one place rather than reimplemented per call.
+ */
+export function resolveDocumentStyle(style: StylePreferences, dialect?: Dialect): StylePreferences {
+  if (!dialect || dialect === style.dialect) return style;
+  return { ...style, dialect };
 }
 
 /** Stored data is untrusted: anything odd is dropped rather than trusted. */

@@ -365,6 +365,43 @@ export class DocumentLifecycle {
     return summariseDocuments(this.state.documents, query);
   }
 
+  /**
+   * Replace the whole library (backup restore). The caller passes documents
+   * that already survived validation; storage failures are reported rather
+   * than swallowed, and failed writes stay queued so nothing is silently
+   * lost. Callers must not reload until this reports success: pending writes
+   * live in memory and a reload would drop them.
+   */
+  async replaceAll(documents: StoredDocument[], activeId?: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (documents.length === 0) return { ok: false as const, error: "That backup holds no documents to restore." };
+    this.pending.clear();
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    try {
+      await this.backend.clear();
+    } catch (error) {
+      this.setState({ saveStatus: "error" });
+      return { ok: false as const, error: error instanceof Error ? error.message : "Could not clear the current documents." };
+    }
+    let failed = false;
+    for (const document of documents) {
+      try {
+        await this.backend.put(document);
+      } catch {
+        failed = true;
+        this.pending.set(document.id, document);
+      }
+    }
+    const nextActive = activeId && documents.some((document) => document.id === activeId)
+      ? activeId
+      : documents[0].id;
+    this.setState({ documents: [...documents], activeId: nextActive, saveStatus: failed ? "error" : "saved" });
+    if (failed) return { ok: false as const, error: "Some restored documents could not be saved. Nothing was reloaded; retry the restore." };
+    return { ok: true as const };
+  }
+
   /** Remove every trace of stored documents and return to a clean first-run state. */
   async clearAll(freshSeed: DocumentsSeed = this.seed): Promise<void> {
     this.pending.clear();

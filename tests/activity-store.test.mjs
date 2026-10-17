@@ -81,6 +81,17 @@ test("refresh notices a new day without waiting for a write", () => {
   assert.equal(calls, 1);
 });
 
+test("replace swaps the log wholesale and persists it (backup restore)", () => {
+  const storage = memoryStorage();
+  const store = new WritingActivityStore();
+  store.hydrate(storage, day(2026, 10, 16));
+  store.replace({ version: 1, days: [{ date: "2026-10-17", words: 50, activeMs: 1000 }] }, storage, day(2026, 10, 18));
+  assert.equal(store.getSnapshot().words, 50);
+  const reloaded = new WritingActivityStore();
+  reloaded.hydrate(storage, day(2026, 10, 18));
+  assert.equal(reloaded.getSnapshot().words, 50);
+});
+
 test("recording without storage is a safe no-op", () => {
   const store = new WritingActivityStore();
   store.hydrate(undefined, day(2026, 10, 16));

@@ -17,6 +17,7 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
 - Preview-first rewrites with local fallback, protected URLs, emails, dates, currencies, identifiers, filenames, quoted text, and stale-selection checks. AI alternatives remain previews until chosen.
+- Full backup and restore: every document with its goals and history, settings, and writing activity as one versioned JSON file from Settings. A backup includes API keys so a restore brings back a working app — keep the file private.
 - Dependency-light Manifest V3 extension. Dynamic content-script registration runs only on explicitly granted sites; provider-origin access is separately granted to the service worker, and the content script never receives the API key.
 
 ## Run locally

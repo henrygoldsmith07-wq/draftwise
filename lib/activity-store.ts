@@ -75,6 +75,18 @@ export class WritingActivityStore {
     this.recompute(now);
   }
 
+  /**
+   * Replace the log wholesale (backup restore). The replacement is already
+   * validated by the caller; it is persisted at once so a reload right after
+   * the restore still sees it.
+   */
+  replace(log: ActivityLog, storage: ActivityStorage | undefined, now = new Date()) {
+    this.loaded = true;
+    this.log = log;
+    if (storage) writeActivityLog(this.log, storage);
+    this.recompute(now);
+  }
+
   private recompute(now: Date) {
     const next = weekTotals(this.log, now);
     // Reuse the previous object when nothing moved, so subscribers do not

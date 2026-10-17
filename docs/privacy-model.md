@@ -26,6 +26,7 @@ The web app has no account flow, analytics, telemetry, remote draft database, or
 - One AI toggle controls provider analysis and classifier triage.
 - `Forget keys` clears the provider key and optional classifier key, disables AI, cancels active requests, and clears the AI analysis cache.
 - `Clear local data` removes the versioned workspace, migrated legacy keys, credentials, and local caches.
+- A Settings backup file holds everything needed for a full restore, including provider and classifier API keys. It is written only when the writer exports it, never transmitted anywhere by Draftwise, and should be kept somewhere private.
 - The extension grants site, provider, and classifier origins separately.
 - Extension revocation is live: disabling AI, changing cloud configuration, revoking permissions, excluding a site, or clearing extension data cancels in-flight cloud work and invalidates the extension AI cache.
 - Web and extension analysis caches use bounded text fingerprints in cache identifiers rather than retaining raw draft text inside cache keys.

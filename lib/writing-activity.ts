@@ -155,6 +155,24 @@ function sanitiseDay(value: unknown): ActivityDay | null {
   return { date: record.date, words, activeMs };
 }
 
+/**
+ * Validate an untrusted activity log (storage content, a backup file entry).
+ * Malformed days are dropped; a wholly unreadable value becomes an empty log
+ * rather than a crash. Shared by storage reads and backup restore so both
+ * paths accept exactly the same shapes.
+ */
+export function sanitiseActivityLog(value: unknown): ActivityLog {
+  if (!value || typeof value !== "object") return emptyLog();
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || !Array.isArray(record.days)) return emptyLog();
+  const days = record.days.flatMap((entry): ActivityDay[] => {
+    const day = sanitiseDay(entry);
+    return day ? [day] : [];
+  });
+  days.sort((left, right) => (left.date < right.date ? -1 : 1));
+  return { version: 1, days: days.slice(-MAX_STORED_DAYS) };
+}
+
 export function readActivityLog(storage: ActivityStorage): ActivityLog {
   let raw: string | null = null;
   try {
@@ -164,16 +182,7 @@ export function readActivityLog(storage: ActivityStorage): ActivityLog {
   }
   if (!raw) return emptyLog();
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return emptyLog();
-    const record = parsed as Record<string, unknown>;
-    if (record.version !== 1 || !Array.isArray(record.days)) return emptyLog();
-    const days = record.days.flatMap((entry): ActivityDay[] => {
-      const day = sanitiseDay(entry);
-      return day ? [day] : [];
-    });
-    days.sort((left, right) => (left.date < right.date ? -1 : 1));
-    return { version: 1, days: days.slice(-MAX_STORED_DAYS) };
+    return sanitiseActivityLog(JSON.parse(raw));
   } catch {
     return emptyLog();
   }

@@ -19,7 +19,8 @@ import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
-import { countWords, creditSince } from "@/lib/writing-activity";
+import { ACTIVITY_STORAGE_KEY, countWords, creditSince } from "@/lib/writing-activity";
+import type { RestorableBackup } from "@/lib/backup";
 import { WritingActivityStore } from "@/lib/activity-store";
 import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
 import { useDocuments } from "@/hooks/useDocuments";
@@ -103,7 +104,7 @@ function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onO
 
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(), []);
-  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
+  const { workspace, hydrated, saveStatus, saveError, updateWorkspace, setWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   // Document content lives in exactly one state system: the document store.
   // The editor reads documents.active and writes back through updateActive;
   // workspace holds only global configuration plus activeDocumentId metadata.
@@ -754,6 +755,31 @@ export default function Home() {
     }, 0);
   }, [setSelection]);
 
+  const readBackupActivityRaw = useCallback(() => {
+    try {
+      return window.localStorage.getItem(ACTIVITY_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Backup restore: replace the whole library, then reload so every in-memory
+  // store (dismissals, undo histories, baselines, review signals) rehydrates
+  // from the restored state instead of lingering with pre-restore values.
+  // Nothing reloads unless every persistence surface confirms its writes:
+  // pending lifecycle writes live in memory and a reload would drop them.
+  const restoreBackup = useCallback(async (backup: RestorableBackup) => {
+    cancelRewrite();
+    const replaced = await documents.replaceAll(backup.documents, backup.workspace.activeDocumentId);
+    if (!replaced.ok) return replaced;
+    setWorkspace(backup.workspace);
+    activityStore.replace(backup.activity, window.localStorage);
+    const saved = saveNow();
+    if (!saved.ok) return saved;
+    window.location.reload();
+    return { ok: true as const };
+  }, [activityStore, cancelRewrite, documents, saveNow, setWorkspace]);
+
   const clearLocalData = useCallback(() => {
     cancelRewrite();
     void clearAllLocalData({
@@ -914,7 +940,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
       <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />

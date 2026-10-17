@@ -74,6 +74,7 @@ export function useDocuments(seed: DocumentsSeed, ready = true, preferredActiveI
     restoreSnapshot: useCallback((documentId: string, snapshotId: string) => lifecycle.restoreSnapshot(documentId, snapshotId), [lifecycle]),
     duplicateSnapshot: useCallback((documentId: string, snapshotId: string) => lifecycle.duplicateSnapshot(documentId, snapshotId), [lifecycle]),
     clearAll: useCallback((freshSeed?: DocumentsSeed) => lifecycle.clearAll(freshSeed), [lifecycle]),
+    replaceAll: useCallback((documents: StoredDocument[], activeId?: string) => lifecycle.replaceAll(documents, activeId), [lifecycle]),
     // The live store, so "Clear all local data" reaches the tier that is
     // actually holding the drafts (IndexedDB) rather than a fresh
     // localStorage backend over a key the app no longer writes to.

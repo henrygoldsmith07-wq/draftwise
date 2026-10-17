@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { downloadFile } from "@/lib/import-export";
 import { exportProfile, importProfile } from "@/lib/profile-transfer";
-import type { ClassifierSettings, ProviderSettings, StylePreferences } from "@/packages/types/src";
+import { buildBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
+import type { StoredDocument } from "@/lib/documents";
+import type { ClassifierSettings, DraftwiseWorkspace, ProviderSettings, StylePreferences } from "@/packages/types/src";
 import { DEFAULT_CLASSIFIER_SETTINGS } from "@/packages/types/src";
 
 const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: string; baseUrl: string; modelPlaceholder: string }> = [
@@ -30,7 +32,14 @@ interface ProviderSettingsDialogProps {
   onForgetKeys?: () => void;
   onSave?: () => { ok: true } | { ok: false; error: string };
   onClearData: () => void;
-}
+  /** Full library for the backup export. */
+  backupDocuments: StoredDocument[];
+  /** Current workspace for the backup export. */
+  backupWorkspace: DraftwiseWorkspace;
+  /** Reads the raw activity log for the backup export; unreadable content exports as empty. */
+  readBackupActivityRaw: () => string | null;
+  /** Replace everything with a parsed backup, then reload. Must not reload on failure. */
+  onRestoreBackup: (backup: RestorableBackup) => Promise<{ ok: true } | { ok: false; error: string }>;
 
 export function ProviderSettingsDialog({
   open,
@@ -46,6 +55,10 @@ export function ProviderSettingsDialog({
   onForgetKeys,
   onSave,
   onClearData,
+  backupDocuments,
+  backupWorkspace,
+  readBackupActivityRaw,
+  onRestoreBackup,
 }: ProviderSettingsDialogProps) {
   const patchSettings = (patch: Partial<ProviderSettings>) => onSettingsChange({ ...settings, ...patch });
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
@@ -78,6 +91,56 @@ export function ProviderSettingsDialog({
       if (result.ok && result.merged) patchStyle(result.merged);
     }).catch(() => {
       setTransferMessage("That file could not be read.");
+    });
+  };
+  // Full backup: every document plus settings and activity in one file the
+  // writer owns. Unlike the profile export this necessarily includes API
+  // keys, so both directions say so. Restore is a deliberate two-step:
+  // parse first, then an inline confirmation naming exactly what arrives —
+  // replacing the whole library must never happen as a side effect of
+  // merely picking a file.
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [pendingBackup, setPendingBackup] = useState<{ backup: RestorableBackup; warnings: string[] } | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const exportBackup = () => {
+    const backup = buildBackup({
+      documents: backupDocuments,
+      workspace: backupWorkspace,
+      activity: readRawActivityLog(readBackupActivityRaw()),
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    setPendingBackup(null);
+    setBackupMessage(`Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
+  };
+  const importBackupFile = (file: File) => {
+    const tooLarge = oversizedBackupFile(file);
+    if (tooLarge) {
+      setBackupMessage(tooLarge);
+      return;
+    }
+    void file.text().then((text) => {
+      const result = parseBackup(text);
+      if (!result.ok) {
+        setPendingBackup(null);
+        setBackupMessage(result.error);
+        return;
+      }
+      setBackupMessage(null);
+      setPendingBackup({ backup: result.backup, warnings: result.warnings });
+    }).catch(() => {
+      setPendingBackup(null);
+      setBackupMessage("That file could not be read.");
+    });
+  };
+  const confirmRestore = () => {
+    if (!pendingBackup || restoring) return;
+    setRestoring(true);
+    void onRestoreBackup(pendingBackup.backup).then((result) => {
+      setRestoring(false);
+      if (result.ok) return;
+      setPendingBackup(null);
+      setBackupMessage(result.error);
     });
   };
   const save = () => {
@@ -271,6 +334,31 @@ export function ProviderSettingsDialog({
               </label>
             </div>
             {transferMessage ? <p className="writing-profile-transfer-message" role="status">{transferMessage}</p> : null}
+          </div>
+
+          <div className="writing-profile">
+            <div className="writing-profile-heading">
+              <strong>Backup & restore</strong>
+              <span>Your whole library — every document with its goals and history, settings, and writing activity — as one file. A backup includes your API keys so a restore brings back a working app; keep the file somewhere private.</span>
+            </div>
+            <div className="writing-profile-transfer">
+              <Button size="sm" variant="outline" onClick={exportBackup}><Download size={13} /> Export backup</Button>
+              <label className="writing-profile-import">
+                <Upload size={13} /> Restore backup
+                <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importBackupFile(file); event.target.value = ""; }} />
+              </label>
+            </div>
+            {pendingBackup ? (
+              <div className="writing-profile-transfer-message" role="alert">
+                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}? This replaces every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
+                {pendingBackup.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+                <span>
+                  <Button size="sm" variant="outline" disabled={restoring} onClick={confirmRestore}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
+                  <Button size="sm" variant="ghost" disabled={restoring} onClick={() => setPendingBackup(null)}>Cancel</Button>
+                </span>
+              </div>
+            ) : null}
+            {backupMessage ? <p className="writing-profile-transfer-message" role="status">{backupMessage}</p> : null}
           </div>
 
           <div className="settings-footnote">

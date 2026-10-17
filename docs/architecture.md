@@ -41,6 +41,8 @@ The manifest uses `activeTab`/`scripting` plus optional HTTP(S) host permissions
 
 ## Persistence
 
+A backup (`lib/backup.ts`) serialises every document plus the workspace and activity log as one versioned file. Restore validates the whole file, replaces the library through `DocumentLifecycle.replaceAll`, swaps the workspace and activity, flushes every surface, and reloads so no in-memory store lingers with pre-restore values.
+
 The web app stores one versioned workspace at `draftwise:workspace:v2`. Writing goals live on each document (`StoredDocument.goals`); the workspace copy is the sticky default new documents inherit and the fallback for documents saved before per-document goals existed. The hook also migrates the previous split keys (`draftwise:draft`, `draftwise:goals`, `draftwise:provider`, `draftwise:theme`, and `draftwise:ai-enabled`) without crashing on malformed values. A clear-data action removes both the versioned and legacy keys.
 
 ## Build boundary

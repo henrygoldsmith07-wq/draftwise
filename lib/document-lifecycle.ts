@@ -217,7 +217,7 @@ export class DocumentLifecycle {
     return this.findById(id);
   }
 
-  updateDocument(id: string, patch: Partial<Pick<StoredDocument, "title" | "draft" | "review">>, snapshot?: DocumentSnapshot["reason"]): boolean {
+  updateDocument(id: string, patch: Partial<Pick<StoredDocument, "title" | "draft" | "review" | "goals">>, snapshot?: DocumentSnapshot["reason"]): boolean {
     const current = this.findById(id);
     if (!current) return false;
     const merged: StoredDocument = {
@@ -232,7 +232,7 @@ export class DocumentLifecycle {
     return true;
   }
 
-  updateActive(patch: Partial<Pick<StoredDocument, "title" | "draft" | "review">>, snapshot?: DocumentSnapshot["reason"]): boolean {
+  updateActive(patch: Partial<Pick<StoredDocument, "title" | "draft" | "review" | "goals">>, snapshot?: DocumentSnapshot["reason"]): boolean {
     return this.state.activeId ? this.updateDocument(this.state.activeId, patch, snapshot) : false;
   }
 
@@ -259,8 +259,8 @@ export class DocumentLifecycle {
     return true;
   }
 
-  createNew(title = "Untitled draft", draft = ""): StoredDocument {
-    const document = createDocument(title, draft);
+  createNew(title = "Untitled draft", draft = "", goals?: StoredDocument["goals"]): StoredDocument {
+    const document = createDocument(title, draft, Date.now(), goals);
     this.setState({ documents: [document, ...this.state.documents], activeId: document.id });
     this.queueWrite(document);
     return document;
@@ -269,7 +269,7 @@ export class DocumentLifecycle {
   duplicate(id: string): StoredDocument | null {
     const source = this.findById(id);
     if (!source) return null;
-    const copy = createDocument(`${source.title} (copy)`, source.draft);
+    const copy = createDocument(`${source.title} (copy)`, source.draft, Date.now(), source.goals);
     this.setState({ documents: [copy, ...this.state.documents], activeId: copy.id });
     this.queueWrite(copy);
     return copy;
@@ -358,7 +358,7 @@ export class DocumentLifecycle {
     const document = this.findById(documentId);
     const snapshot = document?.snapshots.find((item) => item.id === snapshotId);
     if (!document || !snapshot) return null;
-    return this.createNew(`${document.title} (restored)`, snapshot.text);
+    return this.createNew(`${document.title} (restored)`, snapshot.text, document.goals);
   }
 
   summaries(query = ""): DocumentSummary[] {

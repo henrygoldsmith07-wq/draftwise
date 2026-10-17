@@ -163,7 +163,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
         </div>
 
         <div className="goal-bar">
-          <div className="goal-bar-label"><Target size={15} /><span>Writing goals</span></div>
+          <div className="goal-bar-label" title="Goals apply to this document only — each draft keeps its own audience, intent and tone."><Target size={15} /><span>Writing goals · this document</span></div>
           <GoalSelect label="Audience" value={props.goals.audience} options={audienceOptions} onChange={(value) => props.onGoalChange({ audience: value as WritingGoals["audience"] })} />
           <GoalSelect label="Intent" value={props.goals.intent} options={intentOptions} onChange={(value) => props.onGoalChange({ intent: value as WritingGoals["intent"] })} />
           <GoalSelect label="Tone" value={props.goals.tone} options={toneOptions} onChange={(value) => props.onGoalChange({ tone: value as WritingGoals["tone"] })} />

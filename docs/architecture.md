@@ -41,7 +41,7 @@ The manifest uses `activeTab`/`scripting` plus optional HTTP(S) host permissions
 
 ## Persistence
 
-The web app stores one versioned workspace at `draftwise:workspace:v2`. The hook also migrates the previous split keys (`draftwise:draft`, `draftwise:goals`, `draftwise:provider`, `draftwise:theme`, and `draftwise:ai-enabled`) without crashing on malformed values. A clear-data action removes both the versioned and legacy keys.
+The web app stores one versioned workspace at `draftwise:workspace:v2`. Writing goals live on each document (`StoredDocument.goals`); the workspace copy is the sticky default new documents inherit and the fallback for documents saved before per-document goals existed. The hook also migrates the previous split keys (`draftwise:draft`, `draftwise:goals`, `draftwise:provider`, `draftwise:theme`, and `draftwise:ai-enabled`) without crashing on malformed values. A clear-data action removes both the versioned and legacy keys.
 
 ## Build boundary
 

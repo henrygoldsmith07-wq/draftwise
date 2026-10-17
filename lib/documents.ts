@@ -9,6 +9,8 @@
  * snapshots, so a writer can duplicate, rename, search and restore without any
  * cloud involvement.
  */
+import type { WritingGoals } from "../packages/types/src/index.ts";
+import { isWritingGoals } from "./workspace-storage.ts";
 
 export interface DocumentSnapshot {
   id: string;
@@ -26,6 +28,13 @@ export interface StoredDocument {
   updatedAt: number;
   wordCount: number;
   snapshots: DocumentSnapshot[];
+  /**
+   * This document's writing goals. Absent on older documents, which inherit
+   * the workspace default: goals used to be global, so an essay and an email
+   * shared one audience, intent and tone. A document with its own goals keeps
+   * them; anything without them falls back to the workspace default.
+   */
+  goals?: WritingGoals;
   /**
    * What the last analysis found, kept so the document list can show it.
    *
@@ -53,6 +62,7 @@ export interface DocumentSummary {
   wordCount: number;
   excerpt: string;
   review?: DocumentReview;
+  goals?: WritingGoals;
 }
 
 export interface DocumentStoreBackend {
@@ -85,7 +95,7 @@ export function createDocumentId() {
   return `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createDocument(title: string, draft = "", now = Date.now()): StoredDocument {
+export function createDocument(title: string, draft = "", now = Date.now(), goals?: WritingGoals): StoredDocument {
   return {
     id: createDocumentId(),
     title: title || "Untitled draft",
@@ -94,6 +104,7 @@ export function createDocument(title: string, draft = "", now = Date.now()): Sto
     updatedAt: now,
     wordCount: countWords(draft),
     snapshots: [],
+    ...(goals ? { goals: { ...goals } } : {}),
   };
 }
 
@@ -106,6 +117,7 @@ function summarise(document: StoredDocument): DocumentSummary {
     wordCount: document.wordCount,
     excerpt: document.draft.trim().replace(/\s+/gu, " ").slice(0, 120),
     ...(document.review ? { review: document.review } : {}),
+    ...(document.goals ? { goals: document.goals } : {}),
   };
 }
 
@@ -164,6 +176,9 @@ export function sanitiseStoredDocument(value: unknown): StoredDocument | null {
     wordCount: typeof record.wordCount === "number" && Number.isFinite(record.wordCount) ? record.wordCount : countWords(draft),
     snapshots,
     ...(isDocumentReview(record.review) ? { review: record.review } : {}),
+    // Stored data is untrusted: malformed goals are dropped and the document
+    // falls back to the workspace default rather than crashing analysis.
+    ...(isWritingGoals(record.goals) ? { goals: record.goals } : {}),
   };
 }
 

@@ -19,7 +19,7 @@ import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
-import { countWords } from "@/lib/writing-activity";
+import { countWords, creditSince } from "@/lib/writing-activity";
 import { WritingActivityStore } from "@/lib/activity-store";
 import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
 import { useDocuments } from "@/hooks/useDocuments";
@@ -283,18 +283,30 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated || !docsReady) return;
     activityStore.hydrate(window.localStorage);
-    const timer = window.setInterval(() => {
+    // Closing the tab between ticks used to discard up to 30 seconds of
+    // typed words: the interval was the only path that ever folded them in.
+    // The fold below runs on the same interval and once on pagehide, so the
+    // week's count survives a closed tab. A second invocation finds no
+    // pending keystrokes and is a no-op, so overlapping handlers are safe.
+    let lastTick = Date.now();
+    const fold = (activeMs: number) => {
+      lastTick = Date.now();
       const tracker = activityRef.current;
       if (!tracker.keystrokeSinceTick) return;
       tracker.keystrokeSinceTick = false;
       const words = countWords(tracker.draft);
       const baseline = tracker.baselines.get(activeId) ?? words;
       tracker.baselines.set(activeId, words);
-      const credited = Math.min(Math.max(0, words - baseline), 500);
+      const credited = creditSince(baseline, words);
       if (credited === 0) return;
-      activityStore.record(window.localStorage, credited, 30_000);
-    }, 30_000);
-    return () => window.clearInterval(timer);
+      activityStore.record(window.localStorage, credited, activeMs);
+    };
+    const timer = window.setInterval(() => fold(30_000), 30_000);
+    // Attribute only time actually spent: the exit fold credits the slice
+    // since the previous fold, never a full extra interval.
+    const onActivityHide = () => fold(Math.min(Math.max(0, Date.now() - lastTick), 30_000));
+    window.addEventListener("pagehide", onActivityHide);
+    return () => { window.clearInterval(timer); window.removeEventListener("pagehide", onActivityHide); };
   }, [hydrated, docsReady, activeId, activityStore]);
 
   const updateDraft = useCallback((next: string, recordHistory = true) => {

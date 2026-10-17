@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  MAX_WORDS_PER_FOLD,
   countWords,
+  creditSince,
   currentStreak,
   dayKey,
   emptyLog,
@@ -127,4 +129,12 @@ test("a log round-trips through storage", () => {
   const log = recordWords(emptyLog(), day(2026, 10, 16), 77, 5000);
   writeActivityLog(log, storage);
   assert.deepEqual(readActivityLog(storage), log);
+});
+
+test("creditSince counts additions, ignores deletions, and caps bulk folds", () => {
+  assert.equal(creditSince(100, 140), 40);
+  assert.equal(creditSince(100, 100), 0);
+  assert.equal(creditSince(140, 100), 0);
+  assert.equal(creditSince(0, 10_000), MAX_WORDS_PER_FOLD);
+  assert.equal(creditSince(Number.NaN, 50), 0);
 });

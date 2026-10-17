@@ -70,6 +70,18 @@ export function countWords(text: string): number {
 }
 
 /**
+ * Words to credit for one fold: additions since the caller's baseline.
+ * Deletions credit nothing, and a single fold is capped at a fast typist's
+ * output so a bulk paste or restore cannot mint a week's worth of words.
+ */
+export const MAX_WORDS_PER_FOLD = 500;
+
+export function creditSince(baselineWords: number, currentWords: number): number {
+  if (!Number.isFinite(baselineWords) || !Number.isFinite(currentWords)) return 0;
+  return Math.min(Math.max(0, Math.floor(currentWords) - Math.floor(baselineWords)), MAX_WORDS_PER_FOLD);
+}
+
+/**
  * Fold one tick into the log. Words are additions since the caller's last
  * snapshot; the caller clamps deletions to zero before calling.
  */

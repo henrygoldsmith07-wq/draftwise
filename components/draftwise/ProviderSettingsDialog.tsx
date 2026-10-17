@@ -40,6 +40,7 @@ interface ProviderSettingsDialogProps {
   readBackupActivityRaw: () => string | null;
   /** Replace everything with a parsed backup, then reload. Must not reload on failure. */
   onRestoreBackup: (backup: RestorableBackup) => Promise<{ ok: true } | { ok: false; error: string }>;
+}
 
 export function ProviderSettingsDialog({
   open,

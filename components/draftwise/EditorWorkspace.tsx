@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
+import { useState } from "react";
 import {
   ArrowDown,
   Check,
@@ -28,6 +29,7 @@ import { hasActionableReplacement } from "@/lib/issue-actions";
 import { rewriteActionsFor } from "@/lib/rewrite-actions";
 import { type CategoryFilter, type SuggestionState, TIER_DESCRIPTIONS, TIER_LABELS, type TierFilter } from "@/lib/suggestions";
 import type { AnalysisResult, Dialect, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
+import { formatTerminologyList, parseTerminologyList } from "@/lib/terminology";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
 
 interface EditorWorkspaceProps {
@@ -138,6 +140,40 @@ const documentTypeOptions = [
   { value: "general", label: "General writing" },
 ];
 
+/**
+ * A comma-separated terminology input that commits on blur/Enter.
+ *
+ * Local state while typing so every keystroke does not rewrite the document
+ * (each commit moves updatedAt and re-queues a save); the parent value is
+ * the source of truth on document switch, via the key the caller passes.
+ */
+function TerminologyField({ label, hint, value, onCommit }: {
+  label: string;
+  hint: string;
+  value: string[] | undefined;
+  onCommit: (terms: string[]) => void;
+}) {
+  const [text, setText] = useState(() => formatTerminologyList(value));
+  const commit = () => {
+    const terms = parseTerminologyList(text);
+    if (terms.join("\0") !== (value ?? []).join("\0")) onCommit(terms);
+    else setText(formatTerminologyList(value));
+  };
+  return (
+    <label className="terminology-field">
+      <span>{label} <em>{hint}</em></span>
+      <Input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+        placeholder="comma, separated, terms"
+        aria-label={label}
+      />
+    </label>
+  );
+}
+
 export function EditorWorkspace(props: EditorWorkspaceProps) {
   const { registerTextarea, registerHighlight } = props;
   const scoreMessage = props.analysis.scores.overall >= 90
@@ -174,6 +210,33 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <GoalSelect label="Length" value={props.goals.targetLength ? String(props.goals.targetLength) : ""} options={[{ value: "", label: "Any" }, { value: "300", label: "~300 words" }, { value: "600", label: "~600 words" }, { value: "1200", label: "~1,200 words" }, { value: "2500", label: "~2,500 words" }]} onChange={(value) => props.onGoalChange({ targetLength: value ? Number(value) : undefined })} />
           <GoalSelect label="English" value={props.dialect} options={[{ value: "en-GB", label: "British" }, { value: "en-US", label: "American" }]} onChange={(value) => props.onDialectChange(value as Dialect)} />
         </div>
+
+        {/* Per-document terminology: terms this draft must use or must avoid.
+            Enforced by the local rules already; this is the editor that was
+            missing, so writers no longer need stored-JSON surgery to use it.
+            Collapsed by default to keep the goal bar a single row. */}
+        <details className="terminology-details">
+          <summary>
+            Terminology · must use {(props.goals.requiredTerminology ?? []).length} · avoid {(props.goals.forbiddenTerminology ?? []).length}
+          </summary>
+          <div className="terminology-fields">
+            <TerminologyField
+              key={`required-${(props.goals.requiredTerminology ?? []).join("|")}`}
+              label="Must use"
+              hint="flagged when missing from the draft"
+              value={props.goals.requiredTerminology}
+              onCommit={(terms) => props.onGoalChange({ requiredTerminology: terms })}
+            />
+            <TerminologyField
+              key={`forbidden-${(props.goals.forbiddenTerminology ?? []).join("|")}`}
+              label="Avoid"
+              hint="flagged on every occurrence"
+              value={props.goals.forbiddenTerminology}
+              onCommit={(terms) => props.onGoalChange({ forbiddenTerminology: terms })}
+            />
+          </div>
+          <p className="terminology-hint">Applies to this document only — each draft keeps its own terms. Separate terms with commas.</p>
+        </details>
 
         {props.selection.end > props.selection.start ? (
           <div className="rewrite-toolbar">

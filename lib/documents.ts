@@ -114,7 +114,17 @@ export function createDocument(title: string, draft = "", now = Date.now(), goal
     updatedAt: now,
     wordCount: countWords(draft),
     snapshots: [],
-    ...(goals ? { goals: { ...goals } } : {}),
+    // Terminology lists are arrays: a shallow copy would share the caller's
+    // array with the stored document, so pushing to one would mutate both.
+    ...(goals
+      ? {
+        goals: {
+          ...goals,
+          ...(goals.requiredTerminology ? { requiredTerminology: [...goals.requiredTerminology] } : {}),
+          ...(goals.forbiddenTerminology ? { forbiddenTerminology: [...goals.forbiddenTerminology] } : {}),
+        },
+      }
+      : {}),
     ...(dialect ? { dialect } : {}),
   };
 }

@@ -126,6 +126,77 @@ test("replaceAll swaps the whole library and persists it", async () => {
   });
 });
 
+test("mergeAll adds alongside current work without touching it", async () => {
+  const backend = new MemoryDocumentBackend();
+  const lifecycle = new DocumentLifecycle(backend, seed);
+  await lifecycle.load();
+  const current = lifecycle.getActive();
+  lifecycle.updateActive({ draft: "My current work." });
+  await lifecycle.flush();
+
+  const incoming = sampleBackup().documents;
+  const result = await lifecycle.mergeAll(incoming);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.merged, { added: 2, skipped: 0, renamed: 0 });
+  // Current work survives untouched and stays the active document.
+  assert.equal(lifecycle.activeId, current.id);
+  assert.equal(lifecycle.getActive()?.draft, "My current work.");
+  assert.equal(lifecycle.documents.length, 3);
+  // Imported history, goals and timestamps arrive intact.
+  assert.deepEqual(lifecycle.getDocument(incoming[0].id)?.goals, {
+    audience: "academic",
+    intent: "explain",
+    tone: "formal",
+  });
+  await lifecycle.flush();
+
+  // A reload over the same backend sees the merged library.
+  const reloaded = new DocumentLifecycle(backend, seed);
+  await reloaded.load();
+  assert.equal(reloaded.documents.length, 3);
+});
+
+test("mergeAll skips identical documents and copies conflicting ones", async () => {
+  const lifecycle = new DocumentLifecycle(new MemoryDocumentBackend(), seed);
+  await lifecycle.load();
+  const current = lifecycle.getActive();
+
+  const identical = { ...current, draft: current.draft };
+  const conflicting = { ...current, draft: "Different text under the same identity." };
+  const fresh = createDocument("Fresh", "New words.");
+  const result = await lifecycle.mergeAll([identical, conflicting, fresh]);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.merged, { added: 1, skipped: 1, renamed: 1 });
+  // The conflicting text is kept as a titled copy under a fresh identity;
+  // the original is never overwritten.
+  const copy = lifecycle.documents.find((document) => document.title === `${current.title} (imported)`);
+  assert.ok(copy);
+  assert.notEqual(copy.id, current.id);
+  assert.equal(copy.draft, "Different text under the same identity.");
+  assert.equal(lifecycle.getDocument(current.id)?.draft, current.draft);
+  assert.equal(lifecycle.documents.length, 3);
+});
+
+test("mergeAll refuses an empty backup and reports storage failure", async () => {
+  const lifecycle = new DocumentLifecycle(new MemoryDocumentBackend(), seed);
+  await lifecycle.load();
+  assert.equal((await lifecycle.mergeAll([])).ok, false);
+
+  const failing = new DocumentLifecycle(
+    {
+      list: async () => [],
+      get: async () => null,
+      put: async () => { throw new Error("disk is full"); },
+      remove: async () => {},
+      clear: async () => {},
+    },
+    seed,
+  );
+  await failing.load();
+  const result = await failing.mergeAll(sampleBackup().documents);
+  assert.equal(result.ok, false);
+});
+
 test("replaceAll refuses an empty library and reports storage failure", async () => {
   const lifecycle = new DocumentLifecycle(new MemoryDocumentBackend(), seed);
   await lifecycle.load();

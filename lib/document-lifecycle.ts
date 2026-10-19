@@ -1,5 +1,6 @@
 import {
   createDocument,
+  createDocumentId,
   countWords,
   recordSnapshot,
   summariseDocuments,
@@ -28,6 +29,16 @@ import {
  */
 
 export type DocumentSaveStatus = "idle" | "saving" | "saved" | "error" | "degraded";
+
+/** Outcome counts for a backup merge; every incoming document lands in exactly one bucket. */
+export interface DocumentMergeResult {
+  /** Imported under their own identity. */
+  added: number;
+  /** Already present with identical title and text; left alone. */
+  skipped: number;
+  /** Same id but different content; kept as a titled copy under a fresh id. */
+  renamed: number;
+}
 
 export interface DocumentLifecycleState {
   documents: StoredDocument[];
@@ -400,6 +411,55 @@ export class DocumentLifecycle {
     this.setState({ documents: [...documents], activeId: nextActive, saveStatus: failed ? "error" : "saved" });
     if (failed) return { ok: false as const, error: "Some restored documents could not be saved. Nothing was reloaded; retry the restore." };
     return { ok: true as const };
+  }
+
+  /**
+   * Merge a backup's documents into the current library (backup merge).
+   *
+   * The counterpart to replaceAll: nothing current is removed, the workspace
+   * settings and activity log are untouched, and no reload is needed — the
+   * merged documents join the live state through the normal notification
+   * path. Identity collisions resolve transparently, because two libraries
+   * that share an id rarely share the text behind it:
+   *
+   * - Unknown id → added as-is, keeping its history, goals and timestamps.
+   * - Known id with identical title and draft → skipped; it is already here.
+   * - Known id with different content → kept as a copy under a fresh id with
+   *   an " (imported)" title, so neither version is silently overwritten.
+   *
+   * Failed writes stay queued for retry and are reported rather than
+   * swallowed, matching replaceAll's contract.
+   */
+  async mergeAll(documents: StoredDocument[]): Promise<{ ok: true; merged: DocumentMergeResult } | { ok: false; error: string }> {
+    if (documents.length === 0) return { ok: false as const, error: "That backup holds no documents to merge." };
+    const merged: DocumentMergeResult = { added: 0, skipped: 0, renamed: 0 };
+    const additions: StoredDocument[] = [];
+    for (const incoming of documents) {
+      const current = this.findById(incoming.id);
+      if (!current) {
+        additions.push(incoming);
+        merged.added += 1;
+      } else if (current.title === incoming.title && current.draft === incoming.draft) {
+        merged.skipped += 1;
+      } else {
+        additions.push({ ...incoming, id: createDocumentId(), title: `${incoming.title} (imported)` });
+        merged.renamed += 1;
+      }
+    }
+    let failed = false;
+    for (const document of additions) {
+      try {
+        await this.backend.put(document);
+      } catch {
+        failed = true;
+        this.pending.set(document.id, document);
+      }
+    }
+    // Imports join the front of the in-memory list; the dashboard sorts by
+    // updatedAt anyway, so this only affects un-sorted consumers.
+    this.setState({ documents: [...additions, ...this.state.documents], saveStatus: failed ? "error" : "saved" });
+    if (failed) return { ok: false as const, error: "Some imported documents could not be saved. They stay queued — retry the merge." };
+    return { ok: true as const, merged };
   }
 
   /** Remove every trace of stored documents and return to a clean first-run state. */

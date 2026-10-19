@@ -784,8 +784,17 @@ export default function Home() {
   // from the restored state instead of lingering with pre-restore values.
   // Nothing reloads unless every persistence surface confirms its writes:
   // pending lifecycle writes live in memory and a reload would drop them.
-  const restoreBackup = useCallback(async (backup: RestorableBackup) => {
+  const restoreBackup = useCallback(async (backup: RestorableBackup, mode: "replace" | "merge") => {
     cancelRewrite();
+    // Merge keeps everything current and only adds: settings, activity and
+    // the open document are untouched, and the merged drafts join the live
+    // state through the normal path — no reload, nothing at risk.
+    if (mode === "merge") {
+      const merged = await documents.mergeAll(backup.documents);
+      if (!merged.ok) return merged;
+      await documents.flush();
+      return { ok: true as const, merged: merged.merged };
+    }
     const replaced = await documents.replaceAll(backup.documents, backup.workspace.activeDocumentId);
     if (!replaced.ok) return replaced;
     setWorkspace(backup.workspace);

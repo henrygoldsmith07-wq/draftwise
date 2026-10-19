@@ -38,8 +38,13 @@ interface ProviderSettingsDialogProps {
   backupWorkspace: DraftwiseWorkspace;
   /** Reads the raw activity log for the backup export; unreadable content exports as empty. */
   readBackupActivityRaw: () => string | null;
-  /** Replace everything with a parsed backup, then reload. Must not reload on failure. */
-  onRestoreBackup: (backup: RestorableBackup) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Restore a parsed backup. Replace swaps the whole library, settings and
+   * activity, then reloads — and must not reload on failure. Merge adds the
+   * backup's documents alongside the current ones, touches nothing else,
+   * and reports per-document counts on success. Merge must not reload at all.
+   */
+  onRestoreBackup: (backup: RestorableBackup, mode: "replace" | "merge") => Promise<{ ok: true; merged?: { added: number; skipped: number; renamed: number } } | { ok: false; error: string }>;
 }
 
 export function ProviderSettingsDialog({
@@ -98,8 +103,8 @@ export function ProviderSettingsDialog({
   // writer owns. Unlike the profile export this necessarily includes API
   // keys, so both directions say so. Restore is a deliberate two-step:
   // parse first, then an inline confirmation naming exactly what arrives —
-  // replacing the whole library must never happen as a side effect of
-  // merely picking a file.
+  // neither replacing the whole library nor merging into it must ever happen
+  // as a side effect of merely picking a file.
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [pendingBackup, setPendingBackup] = useState<{ backup: RestorableBackup; warnings: string[] } | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -134,14 +139,27 @@ export function ProviderSettingsDialog({
       setBackupMessage("That file could not be read.");
     });
   };
-  const confirmRestore = () => {
+  const confirmRestore = (mode: "replace" | "merge") => {
     if (!pendingBackup || restoring) return;
     setRestoring(true);
-    void onRestoreBackup(pendingBackup.backup).then((result) => {
+    void onRestoreBackup(pendingBackup.backup, mode).then((result) => {
       setRestoring(false);
-      if (result.ok) return;
-      setPendingBackup(null);
-      setBackupMessage(result.error);
+      if (!result.ok) {
+        setPendingBackup(null);
+        setBackupMessage(result.error);
+        return;
+      }
+      // A merge leaves the dialog open on the writer's intact library: say
+      // exactly what arrived. A replace reloads the app, so no message needed.
+      if (mode === "merge" && result.merged) {
+        const { added, skipped, renamed } = result.merged;
+        const parts: string[] = [];
+        if (added > 0) parts.push(`${added} added`);
+        if (renamed > 0) parts.push(`${renamed} kept as titled ${renamed === 1 ? "copy" : "copies"} (same identity, different text)`);
+        if (skipped > 0) parts.push(`${skipped} already here`);
+        setPendingBackup(null);
+        setBackupMessage(`Merged into your library: ${parts.join(", ")}. Your current documents, settings and activity were left untouched.`);
+      }
     });
   };
   const save = () => {
@@ -351,10 +369,13 @@ export function ProviderSettingsDialog({
             </div>
             {pendingBackup ? (
               <div className="writing-profile-transfer-message" role="alert">
-                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}? This replaces every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
+                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}?</span>
                 {pendingBackup.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+                <span><strong>Merge into library</strong> adds the documents from the backup alongside your current ones — settings, activity and open draft untouched. Documents already here with identical text are skipped; same identity but different text is kept as a titled copy. Nothing is removed and nothing reloads.</span>
+                <span><strong>Replace everything</strong> swaps every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
                 <span>
-                  <Button size="sm" variant="outline" disabled={restoring} onClick={confirmRestore}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
+                  <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("merge")}>{restoring ? "Merging…" : "Merge into library"}</Button>{' '}
+                  <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("replace")}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
                   <Button size="sm" variant="ghost" disabled={restoring} onClick={() => setPendingBackup(null)}>Cancel</Button>
                 </span>
               </div>

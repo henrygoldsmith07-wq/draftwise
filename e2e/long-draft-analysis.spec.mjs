@@ -89,9 +89,23 @@ test("a long draft is analysed across the whole document, not just near the edit
   const caretAt = () => page.evaluate(() => document.querySelector("textarea.editor-input")?.selectionStart ?? -1);
   await page.keyboard.press("Control+ArrowDown");
   const firstCaret = await caretAt();
-  for (let i = 0; i < 12; i += 1) await page.keyboard.press("Control+ArrowDown");
+
+  // Walk forward by however many findings remain, and no further.
+  //
+  // The review cursor deliberately wraps: on the last finding, "next" returns
+  // to the first, so the writer is never stranded at the end of a draft
+  // (keyboard-review.spec.mjs asserts that wrap). A fixed number of presses
+  // therefore does NOT always move forward — pressing 12 times with 13
+  // findings displayed lands back on the first one, and the caret jumps
+  // backwards. That is correct product behaviour and a wrong test assumption,
+  // and it made this test fail whenever the density cap yielded a shorter
+  // list. Stepping exactly to the last finding proves the same thing — the
+  // cursor walks through the document rather than clustering near the edit —
+  // without depending on where the wrap lands.
+  const stepsToLast = Math.max(1, cards - 2);
+  for (let i = 0; i < stepsToLast; i += 1) await page.keyboard.press("Control+ArrowDown");
   const laterCaret = await caretAt();
-  console.log("LONG carets:", firstCaret, "->", laterCaret);
+  console.log("LONG carets:", firstCaret, "->", laterCaret, `(${cards} shown, ${stepsToLast} steps)`);
 
   // The review loop must be walkable end to end: the first press lands on a
   // real finding and stepping forward advances. Density caps mean the displayed

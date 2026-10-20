@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { BarChart3, CircleHelp, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
+import { BarChart3, CircleHelp, FileText, Flag, Settings2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,6 +11,18 @@ import { VersionHistoryView } from "@/components/draftwise/VersionHistoryView";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
 import { ProviderSettingsDialog } from "@/components/draftwise/ProviderSettingsDialog";
+import { KeyboardShortcutsOverlay } from "@/components/draftwise/dialogs/KeyboardShortcutsOverlay";
+import { NewDraftDialog as NewDraftDialogComponent } from "@/components/draftwise/dialogs/NewDraftDialog";
+import { ClearDataDialog as ClearDataDialogComponent } from "@/components/draftwise/dialogs/ClearDataDialog";
+import { LiveRegionAnnouncer } from "@/components/draftwise/utilities/LiveRegionAnnouncer";
+import { SkipLink } from "@/components/draftwise/utilities/SkipLink";
+import { SplashScreen } from "@/components/draftwise/loading/SplashScreen";
+import { DocumentDashboardSkeleton } from "@/components/draftwise/loading/DocumentDashboardSkeleton";
+import { EditorSkeleton } from "@/components/draftwise/loading/EditorSkeleton";
+import { PageLayout } from "@/components/draftwise/PageLayout";
+import { RailNavigation } from "@/components/draftwise/navigation/RailNavigation";
+import { TopBar } from "@/components/draftwise/topbar/TopBar";
+import { ThemeToggle } from "@/components/draftwise/topbar/ThemeToggle";
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
 import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
@@ -106,6 +118,25 @@ function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onO
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(), []);
   const { workspace, hydrated, saveStatus, saveError, updateWorkspace, setWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
+  
+  // Loading state tracking for progressive UX
+  const [loadingState, setLoadingState] = useState<'splash' | 'documents' | 'editor' | 'ready'>('splash');
+  
+  // Track hydration states progressively
+  useEffect(() => {
+    if (hydrated && !documents.hydrated) {
+      setLoadingState('documents');
+    } else if (hydrated && documents.hydrated) {
+      setLoadingState('ready');
+    }
+  }, [hydrated, documents.hydrated]);
+  
+  // Initial splash for first render
+  useEffect(() => {
+    if (!hydrated) {
+      setLoadingState('splash');
+    }
+  }, [hydrated]);
   // Document content lives in exactly one state system: the document store.
   // The editor reads documents.active and writes back through updateActive;
   // workspace holds only global configuration plus activeDocumentId metadata.
@@ -921,45 +952,71 @@ export default function Home() {
   const providerConfigured = Boolean(workspace.provider.apiKey.trim() && workspace.provider.baseUrl.trim() && workspace.provider.model.trim());
   const analysisStatusLabel = getAiReviewStatus(analysis.aiCoverage, workspace.aiEnabled, providerConfigured, analysisState.status);
 
+  // Determine what to show based on loading state and view
+  const shouldShowSplash = loadingState === 'splash';
+  const shouldShowDashboardSkeleton = loading && view === 'home';
+  const shouldShowEditorSkeleton = loading && view === 'write';
+
   return (
-    <main className={`app-shell ${focusMode ? "focus-mode" : ""}`} data-theme={darkMode ? "dark" : "light"}>
-      <header className="topbar">
-        <div className="brand-lockup"><div className="brand-mark" aria-hidden="true"><span /></div><span className="brand-name">draftwise</span><Badge className="private-badge"><ShieldCheck size={12} /> private</Badge></div>
-        <div className="document-name"><FileText size={15} /><input aria-label="Document title" value={draftTitle} onChange={(event) => {
-          // The stored document is authoritative for the title: every rename
-          // writes through the lifecycle so dashboard, exports, history and
-          // reload all see the same name.
-          documents.updateActive({ title: event.target.value });
-        }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span className="saved-dot" title={savedLabel} /></div>
-        <div className="topbar-actions"><div className="privacy-pill"><span className="privacy-dot" /> Local-first, cloud opt-in</div><Button variant="ghost" size="icon" aria-label={darkMode ? "Use light theme" : "Use dark theme"} onClick={() => updateWorkspace({ theme: darkMode ? "light" : "dark" })}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</Button><Button variant="ghost" size="icon" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></Button></div>
-      </header>
-
-      <div className="app-body">
-        <aside className="left-rail" aria-label="Draftwise sections">
-          <div className="rail-nav"><button className={view === "home" ? "rail-button active" : "rail-button"} onClick={() => setView("home")} type="button" aria-label="Documents"><FileText size={18} aria-hidden="true" /><span>Documents</span></button><button className={view === "write" ? "rail-button active" : "rail-button"} onClick={() => setView("write")} type="button" aria-label="Write"><PenLine size={18} aria-hidden="true" /><span>Write</span></button>{/* The "new" badge is decorative, but its text still contributes to the
-    button's computed visible text. axe's label-content-name-mismatch wants the
-    accessible name to CONTAIN that text, so the label keeps the full string
-    ("Insights new") rather than just "Insights" — a screen reader announces
-    the whole thing, which is accurate: the item is marked new. */}
-<button className={view === "insights" ? "rail-button active" : "rail-button"} onClick={() => setView("insights")} type="button" aria-label="Insights new"><BarChart3 size={18} aria-hidden="true" /><span>Insights</span><span className="rail-new" aria-hidden="true"> new</span></button><button className={view === "extension" ? "rail-button active" : "rail-button"} onClick={() => setView("extension")} type="button" aria-label="Extension new"><Puzzle size={18} aria-hidden="true" /><span>Extension</span><span className="rail-new" aria-hidden="true"> new</span></button></div>
-          <div className="rail-divider" />
-          <div className="rail-context"><span className="rail-eyebrow">Writing goals · this document</span><div className="rail-goal"><Target size={15} /><span>{activeGoals.audience}</span></div><div className="rail-goal"><Flag size={15} /><span>{activeGoals.intent}</span></div><div className="rail-goal"><Sparkles size={15} /><span>{activeGoals.tone}</span></div><button className="rail-edit" onClick={() => setView("write")} type="button">Edit goals <Target size={13} /></button></div>
-          <div className="rail-bottom"><button className="rail-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings2 size={17} aria-hidden="true" /><span>Settings</span></button><button className="rail-button" type="button" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts"><CircleHelp size={17} aria-hidden="true" /><span>Shortcuts</span><kbd aria-hidden="true">?</kbd></button></div>
-        </aside>
-
-        <div className="app-content">
-          {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
-          {view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={activeGoals} style={activeStyle} dialect={activeStyle.dialect} onDialectChange={updateDialect} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
-          {view === "insights" ? <InsightsView analysis={analysis} goals={activeGoals} style={activeStyle} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
-          {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
-          {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
+    <PageLayout 
+      focusMode={focusMode} 
+      onFocusModeChange={setFocusMode}
+      theme={darkMode ? "dark" : "light"}
+      setTheme={(theme) => updateWorkspace({ theme })}
+    >
+      {/* Skip link for keyboard accessibility */}
+      <SkipLink />
+      
+      {/* Live region for screen reader announcements */}
+      <LiveRegionAnnouncer message={reviewAnnouncement} />
+      
+      {/* Progressive loading states */}
+      {shouldShowSplash ? (
+        <SplashScreen />
+      ) : (
+        <>
+        <TopBar 
+          draftTitle={draftTitle}
+          savedLabel={savedLabel}
+          saveError={saveError}
+          onSaveTitle={(title) => documents.updateActive({ title })}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        
+        <div className="app-body">
+          <RailNavigation 
+            currentView={view}
+            onViewChange={setView}
+            goals={activeGoals}
+            onOpenShortcuts={() => setShortcutsOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+  
+          <main id="main-content" tabIndex={-1}>
+            {shouldShowDashboardSkeleton ? (
+              <DocumentDashboardSkeleton />
+            ) : (
+              view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null
+            )}
+            
+            {shouldShowEditorSkeleton ? (
+              <EditorSkeleton />
+            ) : (
+              view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={activeGoals} style={activeStyle} dialect={activeStyle.dialect} onDialectChange={updateDialect} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null
+            )}
+            
+            {view === "insights" ? <InsightsView analysis={analysis} goals={activeGoals} style={activeStyle} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
+            {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
+            {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
+          </main>
         </div>
-      </div>
-
+        </>
+      )}
+      
       <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
-      <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
-      <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
-    </main>
+      <KeyboardShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <NewDraftDialogComponent open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
+      <ClearDataDialogComponent open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
+    </PageLayout>
   );
 }

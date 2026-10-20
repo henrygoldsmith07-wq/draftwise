@@ -7,6 +7,8 @@
  * is rejected before it reaches the editor.
  */
 
+import { exportAsPDF } from "./export-pdf";
+
 /**
  * Two bounds, and the character one is usually tighter: 500,000 ASCII
  * characters are roughly 0.5 MB, well under the 2 MB byte bound, so Latin
@@ -75,6 +77,19 @@ export function exportAsText(title: string, draft: string) {
 export function exportAsMarkdown(title: string, draft: string) {
   const body = draft.trimStart().startsWith("#") ? draft : `# ${title}\n\n${draft}`;
   return { filename: `${safeFilename(title)}.md`, content: body, type: "text/markdown;charset=utf-8" };
+}
+
+/**
+ * Export as PDF using browser print-to-PDF capability
+ */
+export async function exportAsPDFWrapper(title: string, draft: string) {
+  try {
+    await exportAsPDF(title, draft);
+    return { success: true };
+  } catch (error) {
+    console.error('PDF export failed:', error);
+    return { success: false, error: 'Failed to generate PDF' };
+  }
 }
 
 export function safeFilename(title: string) {

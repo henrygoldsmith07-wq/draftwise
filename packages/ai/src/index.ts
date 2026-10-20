@@ -447,9 +447,17 @@ export function buildGoalsContext(goals: WritingGoals, preferences?: StylePrefer
   const forbidden = (goals.forbiddenTerminology ?? []).map((term) => term.trim()).filter(Boolean);
   if (forbidden.length) lines.push(`Never use: ${forbidden.map((term) => `"${term}"`).join(", ")}.`);
 
+  // Per-document swaps are stated first and win over the global map: the
+  // local rules enforce the document's value for an overlapping "from", so
+  // the provider must agree rather than reintroduce the global one.
+  const documentSwaps = Object.entries(goals.preferredReplacements ?? {}).filter(([from, to]) => from && to);
+  const documentFroms = new Set(documentSwaps.map(([from]) => from.toLocaleLowerCase()));
+  if (documentSwaps.length) {
+    lines.push(`This document uses these exact terms (they overrule the general style guide): ${documentSwaps.slice(0, 12).map(([from, to]) => `"${from}" -> "${to}"`).join(", ")}.`);
+  }
   if (preferences) {
     const preferred = Object.entries(preferences.preferredTerminology ?? {})
-      .filter(([from, to]) => from && to)
+      .filter(([from, to]) => from && to && !documentFroms.has(from.toLocaleLowerCase()))
       .slice(0, 12);
     if (preferred.length) {
       lines.push(`Use these exact terms: ${preferred.map(([from, to]) => `"${from}" -> "${to}"`).join(", ")}.`);

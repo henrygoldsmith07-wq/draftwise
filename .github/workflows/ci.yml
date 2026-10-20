@@ -54,3 +54,35 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - run: git diff --exit-code
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm run install:ci
+      - run: npx playwright install --with-deps chromium
+      # The browser suite is the only check that exercises the shipped UI:
+      # hydration races and ambiguous locators have broken it before while
+      # every other gate stayed green. The dev server boots itself through
+      # the Playwright webServer config; no credentials or network needed.
+      - name: Run browser tests
+        id: e2e
+        shell: bash
+        run: |
+          set -o pipefail
+          npx playwright test 2>&1 | tee e2e-output.log
+      - name: Upload browser diagnostics
+        if: failure() && steps.e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: |
+            e2e-output.log
+            test-results/
+          if-no-files-found: error
+          retention-days: 7

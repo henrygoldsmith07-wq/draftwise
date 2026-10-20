@@ -29,7 +29,7 @@ import { hasActionableReplacement } from "@/lib/issue-actions";
 import { rewriteActionsFor } from "@/lib/rewrite-actions";
 import { type CategoryFilter, type SuggestionState, TIER_DESCRIPTIONS, TIER_LABELS, type TierFilter } from "@/lib/suggestions";
 import type { AnalysisResult, Dialect, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
-import { formatTerminologyList, parseTerminologyList } from "@/lib/terminology";
+import { formatPreferredReplacements, formatTerminologyList, parsePreferredReplacements, parseTerminologyList } from "@/lib/terminology";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
 
 interface EditorWorkspaceProps {
@@ -174,6 +174,41 @@ function TerminologyField({ label, hint, value, onCommit }: {
   );
 }
 
+/**
+ * A comma-separated word-swap input that commits on blur/Enter.
+ *
+ * Same commit-on-blur contract as TerminologyField: local text while typing
+ * so keystrokes do not rewrite the document, and the parent value is the
+ * source of truth on document switch via the key the caller passes. An
+ * explicit commit that parses to an empty map still calls back when the
+ * document previously held swaps, so clearing the field removes them.
+ */
+function SwapsField({ value, onCommit }: {
+  value: Record<string, string> | undefined;
+  onCommit: (swaps: Record<string, string>) => void;
+}) {
+  const [text, setText] = useState(() => formatPreferredReplacements(value));
+  const commit = () => {
+    const swaps = parsePreferredReplacements(text);
+    const same = Object.entries(swaps).join("\0") === Object.entries(value ?? {}).join("\0");
+    if (!same) onCommit(swaps);
+    else setText(formatPreferredReplacements(value));
+  };
+  return (
+    <label className="terminology-field">
+      <span>Word swaps <em>flagged with this document&apos;s replacement</em></span>
+      <Input
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
+        placeholder="login -> sign in, utilise -> use"
+        aria-label="Word swaps"
+      />
+    </label>
+  );
+}
+
 export function EditorWorkspace(props: EditorWorkspaceProps) {
   const { registerTextarea, registerHighlight } = props;
   const scoreMessage = props.analysis.scores.overall >= 90
@@ -211,13 +246,15 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <GoalSelect label="English" value={props.dialect} options={[{ value: "en-GB", label: "British" }, { value: "en-US", label: "American" }]} onChange={(value) => props.onDialectChange(value as Dialect)} />
         </div>
 
-        {/* Per-document terminology: terms this draft must use or must avoid.
-            Enforced by the local rules already; this is the editor that was
-            missing, so writers no longer need stored-JSON surgery to use it.
-            Collapsed by default to keep the goal bar a single row. */}
+        {/* Per-document terminology: terms this draft must use or must avoid,
+            plus word swaps it enforces ("login -> sign in"). The swaps are
+            the per-document counterpart to the global style guide: a client
+            draft can prefer one form while another draft prefers the opposite,
+            and the document's own map wins for that draft only. Collapsed by
+            default to keep the goal bar a single row. */}
         <details className="terminology-details">
           <summary>
-            Terminology · must use {(props.goals.requiredTerminology ?? []).length} · avoid {(props.goals.forbiddenTerminology ?? []).length}
+            Terminology · must use {(props.goals.requiredTerminology ?? []).length} · avoid {(props.goals.forbiddenTerminology ?? []).length} · swaps {Object.keys(props.goals.preferredReplacements ?? {}).length}
           </summary>
           <div className="terminology-fields">
             <TerminologyField
@@ -234,8 +271,13 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               value={props.goals.forbiddenTerminology}
               onCommit={(terms) => props.onGoalChange({ forbiddenTerminology: terms })}
             />
+            <SwapsField
+              key={`swaps-${Object.entries(props.goals.preferredReplacements ?? {}).map(([from, to]) => `${from}=${to}`).join("|")}`}
+              value={props.goals.preferredReplacements}
+              onCommit={(swaps) => props.onGoalChange({ preferredReplacements: swaps })}
+            />
           </div>
-          <p className="terminology-hint">Applies to this document only — each draft keeps its own terms. Separate terms with commas.</p>
+          <p className="terminology-hint">Applies to this document only — each draft keeps its own terms. Separate terms with commas; write swaps as “login -&gt; sign in”.</p>
         </details>
 
         {props.selection.end > props.selection.start ? (

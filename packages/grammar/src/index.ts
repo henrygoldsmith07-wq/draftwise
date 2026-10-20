@@ -73,7 +73,7 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
     ...findPunctuation(text, preferences),
     ...findCapitalization(text, preferences),
     ...findRepeatedWordsAndPhrases(text, preferences, document),
-    ...findStyleIssues(text, preferences, document),
+    ...findStyleIssues(text, preferences, document, goals),
     ...findStickySentences(document, preferences),
     ...findStructureIssues(text, preferences, document),
     ...findDocumentStructure(text, preferences, goals, document),

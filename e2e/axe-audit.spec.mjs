@@ -55,11 +55,21 @@ async function openApp(page) {
 const CONTENT_WITH_ISSUES =
   "This is repeatd wording and the numbers is wrong, so the analysis has something to show.";
 
-async function runAxe(page, label) {
-  await page.evaluate(async (source) => {
+async function runAxe(page, label, withinSelector = null) {
+  await page.evaluate(async ({ source, selector }) => {
     const initialise = new Function(source);
     initialise();
-    await window.axe.run(document, {
+    // A selector scopes the audit to part of the page. Auditing through an
+    // open modal measures the background dimmed by the overlay, which no
+    // writer ever reads as content — the dialog audit scopes to the dialog
+    // itself. The selector must resolve to a rendered element: auditing a
+    // hidden node would pass vacuously, so a miss throws loudly instead of
+    // falling back to the whole document.
+    const root = selector
+      ? [...document.querySelectorAll(selector)].find((node) => node.getClientRects().length > 0)
+      : document;
+    if (!root) throw new Error(`axe audit scope not found: ${selector}`);
+    await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
       resultTypes: ["violations"],
     }).then((results) => {
@@ -77,7 +87,7 @@ async function runAxe(page, label) {
         targets: v.nodes.map((n) => n.target.join(" ")),
       }));
     });
-  }, await axeSource());
+  }, { source: await axeSource(), selector: withinSelector });
   const violations = await page.evaluate(() => window.__axeViolations);
   if (violations?.length) {
     console.log(`axe violations in ${label}:\n${violations
@@ -127,9 +137,13 @@ test.describe("axe-core audit", () => {
 
   test("settings dialog passes axe", async ({ page }) => {
     await openApp(page);
-    await page.getByRole("button", { name: "Open settings" }).click();
+    // The workspace carries its own settings shortcut, so the bare name is ambiguous — the header gear opens the dialog this audit means.
+    await page.locator("header").getByRole("button", { name: "Open settings" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    expect(await runAxe(page, "settings dialog")).toEqual([]);
+    // Scoped to the dialog: the goal bar behind the modal is covered by the
+    // editor-view audits at full opacity, and measuring it through the
+    // overlay's dimming would flag colours no one can see.
+    expect(await runAxe(page, "settings dialog", "[role=\"dialog\"]")).toEqual([]);
   });
 
   test("editor passes axe at mobile width", async ({ page }) => {

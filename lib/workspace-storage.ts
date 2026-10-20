@@ -9,6 +9,7 @@
  * and reused anywhere.
  */
 
+import { cleanPreferredReplacements } from "./terminology.ts";
 import {
   DEFAULT_CLASSIFIER_SETTINGS,
   DEFAULT_GOALS,
@@ -85,7 +86,8 @@ export function isWritingGoals(value: unknown): value is WritingGoals {
     && (value.documentType === undefined || isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]))
     && (value.targetLength === undefined || (typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0))
     && (value.requiredTerminology === undefined || isStringArray(value.requiredTerminology))
-    && (value.forbiddenTerminology === undefined || isStringArray(value.forbiddenTerminology));
+    && (value.forbiddenTerminology === undefined || isStringArray(value.forbiddenTerminology))
+    && (value.preferredReplacements === undefined || isStringMap(value.preferredReplacements));
 }
 
 export function isStylePreferences(value: unknown): value is StylePreferences {
@@ -186,6 +188,15 @@ function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
       : {}),
     ...(value.forbiddenTerminology !== undefined || fallback.forbiddenTerminology !== undefined
       ? { forbiddenTerminology: isStringArray(value.forbiddenTerminology) ? value.forbiddenTerminology : fallback.forbiddenTerminology ?? [] }
+      : {}),
+    // A valid-but-hostile swap map is cleaned rather than trusted verbatim:
+    // the writer keeps their other goals and the prompt never carries an
+    // unbounded map from stored data.
+    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
+      ? { preferredReplacements: cleanPreferredReplacements(isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {}) }
+      : {}),
+    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
+      ? { preferredReplacements: isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {} }
       : {}),
   };
 }

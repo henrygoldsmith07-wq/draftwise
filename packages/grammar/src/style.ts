@@ -1,5 +1,6 @@
 import type {
   StylePreferences,
+  WritingGoals,
   WritingIssue,
 } from "../../types/src/index.js";
 import {
@@ -78,7 +79,7 @@ export function findRepeatedWordsAndPhrases(text: string, preferences: StylePref
 }
 
 
-export function findStyleIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
+export function findStyleIssues(text: string, preferences: StylePreferences, document = parseDocument(text), goals?: WritingGoals) {
   const issues: WritingIssue[] = [];
   for (const [phrase, replacement] of WORDINESS) {
     const pattern = new RegExp(`\\b${phrase.replace(/ /g, "\\s+")}\\b`, "gi");
@@ -99,12 +100,31 @@ export function findStyleIssues(text: string, preferences: StylePreferences, doc
     if (VAGUE_WORDS.has(token.lower)) pushIssue(issues, makeIssue("clarity-vague-word", token.start, token.end, token.value, "", "clarity", "low", "Vague wording", "A more specific noun may help the reader understand exactly what you mean.", 0.68, preferences));
     if (INTENSIFIERS.has(token.lower)) pushIssue(issues, makeIssue("style-intensifier", token.start, token.end, token.value, "", "tone", "low", "Check the intensifier", "This intensifier may add emphasis without adding much meaning.", 0.72, preferences));
   }
+  // Per-document swaps win over the global style guide: a "login" entry in
+  // the document's own map replaces the global one instead of firing
+  // alongside it, so one word never produces two competing suggestions.
+  // Matching stays case-insensitive, mirroring the regex below.
+  const documentSwaps = goals?.preferredReplacements ?? {};
+  const documentFroms = new Set(
+    Object.keys(documentSwaps).map((from) => from.toLocaleLowerCase()),
+  );
+  const entries: Array<{ blocked: string; preferred: string; documentScoped: boolean }> = [];
+  for (const [blocked, preferred] of Object.entries(documentSwaps)) {
+    if (!blocked || !preferred) continue;
+    entries.push({ blocked, preferred, documentScoped: true });
+  }
   for (const [blocked, preferred] of Object.entries(preferences.preferredTerminology)) {
     if (!blocked || !preferred) continue;
+    if (documentFroms.has(blocked.toLocaleLowerCase())) continue;
+    entries.push({ blocked, preferred, documentScoped: false });
+  }
+  for (const { blocked, preferred, documentScoped } of entries) {
     const pattern = new RegExp(`\\b${blocked.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
-      pushIssue(issues, makeIssue("consistency-preferred-term", start, start + match[0].length, match[0], preserveCase(match[0], preferred), "consistency", "medium", "Use your preferred term", `Your style guide prefers “${preferred}” for consistent terminology.`, 0.95, preferences));
+      pushIssue(issues, makeIssue("consistency-preferred-term", start, start + match[0].length, match[0], preserveCase(match[0], preferred), "consistency", "medium", "Use your preferred term", documentScoped
+        ? `This document prefers “${preferred}” — its own wording overrules the global style guide.`
+        : `Your style guide prefers “${preferred}” for consistent terminology.`, 0.95, preferences));
     }
   }
   if (!preferences.allowContractions) {

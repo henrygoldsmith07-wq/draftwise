@@ -231,6 +231,16 @@ export interface WritingGoals {
   requiredTerminology?: string[];
   /** Terms the writer never wants to see. */
   forbiddenTerminology?: string[];
+  /**
+   * Word swaps this document enforces ("login" -> "sign in").
+   *
+   * The global style profile already carries preferredTerminology for the
+   * whole library; this is the per-document counterpart for team style
+   * guides — a client draft can prefer "sign in" while another draft in the
+   * same library prefers "log in", without either polluting the other.
+   * Entries here win over the global map for this document only.
+   */
+  preferredReplacements?: Record<string, string>;
 }
 
 /** A transparent entry in the local Writing Profile; every one is user-removable. */

@@ -1444,7 +1444,7 @@ function findRepeatedWordsAndPhrases(text, preferences, document = parseDocument
     }
     return issues;
 }
-function findStyleIssues(text, preferences, document = parseDocument(text)) {
+function findStyleIssues(text, preferences, document = parseDocument(text), goals) {
     const issues = [];
     for (const [phrase, replacement] of WORDINESS) {
         const pattern = new RegExp(`\\b${phrase.replace(/ /g, "\\s+")}\\b`, "gi");
@@ -1468,13 +1468,32 @@ function findStyleIssues(text, preferences, document = parseDocument(text)) {
         if (INTENSIFIERS.has(token.lower))
             pushIssue(issues, makeIssue("style-intensifier", token.start, token.end, token.value, "", "tone", "low", "Check the intensifier", "This intensifier may add emphasis without adding much meaning.", 0.72, preferences));
     }
+    // Per-document swaps win over the global style guide: a "login" entry in
+    // the document's own map replaces the global one instead of firing
+    // alongside it, so one word never produces two competing suggestions.
+    // Matching stays case-insensitive, mirroring the regex below.
+    const documentSwaps = goals?.preferredReplacements ?? {};
+    const documentFroms = new Set(Object.keys(documentSwaps).map((from) => from.toLocaleLowerCase()));
+    const entries = [];
+    for (const [blocked, preferred] of Object.entries(documentSwaps)) {
+        if (!blocked || !preferred)
+            continue;
+        entries.push({ blocked, preferred, documentScoped: true });
+    }
     for (const [blocked, preferred] of Object.entries(preferences.preferredTerminology)) {
         if (!blocked || !preferred)
             continue;
+        if (documentFroms.has(blocked.toLocaleLowerCase()))
+            continue;
+        entries.push({ blocked, preferred, documentScoped: false });
+    }
+    for (const { blocked, preferred, documentScoped } of entries) {
         const pattern = new RegExp(`\\b${blocked.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
         for (const match of text.matchAll(pattern)) {
             const start = match.index ?? 0;
-            pushIssue(issues, makeIssue("consistency-preferred-term", start, start + match[0].length, match[0], preserveCase(match[0], preferred), "consistency", "medium", "Use your preferred term", `Your style guide prefers “${preferred}” for consistent terminology.`, 0.95, preferences));
+            pushIssue(issues, makeIssue("consistency-preferred-term", start, start + match[0].length, match[0], preserveCase(match[0], preferred), "consistency", "medium", "Use your preferred term", documentScoped
+                ? `This document prefers “${preferred}” — its own wording overrules the global style guide.`
+                : `Your style guide prefers “${preferred}” for consistent terminology.`, 0.95, preferences));
         }
     }
     if (!preferences.allowContractions) {
@@ -3731,7 +3750,7 @@ function analyzeLocally(text, options = {}, goals) {
         ...findPunctuation(text, preferences),
         ...findCapitalization(text, preferences),
         ...findRepeatedWordsAndPhrases(text, preferences, document),
-        ...findStyleIssues(text, preferences, document),
+        ...findStyleIssues(text, preferences, document, goals),
         ...findStickySentences(document, preferences),
         ...findStructureIssues(text, preferences, document),
         ...findDocumentStructure(text, preferences, goals, document),
@@ -4246,9 +4265,17 @@ function buildGoalsContext(goals, preferences) {
     const forbidden = (goals.forbiddenTerminology ?? []).map((term) => term.trim()).filter(Boolean);
     if (forbidden.length)
         lines.push(`Never use: ${forbidden.map((term) => `"${term}"`).join(", ")}.`);
+    // Per-document swaps are stated first and win over the global map: the
+    // local rules enforce the document's value for an overlapping "from", so
+    // the provider must agree rather than reintroduce the global one.
+    const documentSwaps = Object.entries(goals.preferredReplacements ?? {}).filter(([from, to]) => from && to);
+    const documentFroms = new Set(documentSwaps.map(([from]) => from.toLocaleLowerCase()));
+    if (documentSwaps.length) {
+        lines.push(`This document uses these exact terms (they overrule the general style guide): ${documentSwaps.slice(0, 12).map(([from, to]) => `"${from}" -> "${to}"`).join(", ")}.`);
+    }
     if (preferences) {
         const preferred = Object.entries(preferences.preferredTerminology ?? {})
-            .filter(([from, to]) => from && to)
+            .filter(([from, to]) => from && to && !documentFroms.has(from.toLocaleLowerCase()))
             .slice(0, 12);
         if (preferred.length) {
             lines.push(`Use these exact terms: ${preferred.map(([from, to]) => `"${from}" -> "${to}"`).join(", ")}.`);

@@ -10,6 +10,7 @@
  * cloud involvement.
  */
 import type { Dialect, StylePreferences, WritingGoals } from "../packages/types/src/index.ts";
+import { cleanPreferredReplacements } from "./terminology.ts";
 import { isWritingGoals } from "./workspace-storage.ts";
 
 export interface DocumentSnapshot {
@@ -116,12 +117,15 @@ export function createDocument(title: string, draft = "", now = Date.now(), goal
     snapshots: [],
     // Terminology lists are arrays: a shallow copy would share the caller's
     // array with the stored document, so pushing to one would mutate both.
+    // The swap map gets the same treatment via a clean copy: sharing the
+    // caller's object would let later edits to one leak into the other.
     ...(goals
       ? {
         goals: {
           ...goals,
           ...(goals.requiredTerminology ? { requiredTerminology: [...goals.requiredTerminology] } : {}),
           ...(goals.forbiddenTerminology ? { forbiddenTerminology: [...goals.forbiddenTerminology] } : {}),
+          ...(goals.preferredReplacements ? { preferredReplacements: cleanPreferredReplacements(goals.preferredReplacements) } : {}),
         },
       }
       : {}),
@@ -200,7 +204,16 @@ export function sanitiseStoredDocument(value: unknown): StoredDocument | null {
     ...(isDocumentReview(record.review) ? { review: record.review } : {}),
     // Stored data is untrusted: malformed goals are dropped and the document
     // falls back to the workspace default rather than crashing analysis.
-    ...(isWritingGoals(record.goals) ? { goals: record.goals } : {}),
+    // A valid-but-hostile swap map (hundreds of entries, overlong terms) is
+    // cleaned rather than dropped: the document keeps its other goals and
+    // analysis never builds an unbounded set of regexes from stored data.
+    ...(isWritingGoals(record.goals)
+      ? {
+        goals: record.goals.preferredReplacements
+          ? { ...record.goals, preferredReplacements: cleanPreferredReplacements(record.goals.preferredReplacements) }
+          : record.goals,
+      }
+      : {}),
     ...(record.dialect === "en-GB" || record.dialect === "en-US" ? { dialect: record.dialect } : {}),
   };
 }

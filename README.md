@@ -12,7 +12,7 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 
 ## What is included
 
-- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing.
+- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing. The app is installable (web manifest, maskable icon, Apple touch icon, theme colors).
 - Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
@@ -60,7 +60,7 @@ npx vercel --prod   # production
 
 `vercel.json` sets `framework: nextjs` and points the build at `npm run build:vercel`, which regenerates the extension bundles and then runs `next build`. There is nothing else to configure: no environment variables, no database, no server code. Analysis runs in the browser and drafts are stored locally, so the deployment serves the interface and nothing else.
 
-The web app is fully client-side, which is why the only output is two static pages. The Cloudflare Workers build (`npm run build` via vinext) is unaffected and remains the default for local preview.
+Analysis runs in the browser and drafts are stored locally, so the server only serves the interface. The Cloudflare Workers build (`npm run build` via vinext) is unaffected and remains the default for `npm start` local preview.
 
 To check a deployment before trusting it, run the browser suite against the same production build a deployment serves:
 
@@ -68,7 +68,7 @@ To check a deployment before trusting it, run the browser suite against the same
 npm run test:e2e:production
 ```
 
-`npm run test:e2e` runs the same 13 tests against the vinext dev server. The production config exists because passing against the dev server does not tell you the deployed artifact works; this one does.
+`npm run test:e2e` runs the same browser suite against the vinext dev server. The production config exists because passing against the dev server does not tell you the deployed artifact works; this one does.
 
 ## Install the extension
 

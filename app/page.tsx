@@ -41,7 +41,7 @@ The result is a calmer writing loop: notice one useful change, accept it when it
 
 type WorkspaceView = "home" | "write" | "insights" | "extension" | "history";
 
-function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function ShortcutDialog({ open, onOpenChange, theme }: { open: boolean; onOpenChange: (open: boolean) => void; theme: "dark" | "light" }) {
   const shortcuts = [
     ["Save locally", "⌘ / Ctrl + S"],
     ["Next suggestion", "⌘ / Ctrl + ↓"],
@@ -54,7 +54,7 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>Keep your hands on the draft while you review suggestions.</DialogDescription>
@@ -65,10 +65,10 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   );
 }
 
-function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+function NewDraftDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Start a new draft?</DialogTitle>
           <DialogDescription>
@@ -84,10 +84,10 @@ function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
   );
 }
 
-function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+function ClearDataDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Clear all local Draftwise data?</DialogTitle>
           <DialogDescription>
@@ -908,6 +908,9 @@ export default function Home() {
   }, [acceptAll, acceptIssue, cancelRewrite, clearDataOpen, currentActiveIssueId, dismissIssue, documents, newDraftOpen, redo, rewritePreview, saveAll, settingsOpen, shortcutsOpen, undo, view, visibleIssues]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
+  // Radix dialogs portal to document.body, outside .app-shell, so the theme
+  // has to ride on the dialog itself for the dark palette to reach it.
+  const themeName = darkMode ? "dark" : "light";
   // Truthful save state: combines workspace-settings persistence and the
   // document store's own confirmed writes. "Saved locally" appears only after
   // both persisted; degraded storage tiers are named rather than hidden.
@@ -965,10 +968,10 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
-      <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
-      <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} theme={themeName} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
+      <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} theme={themeName} />
+      <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} theme={themeName} />
+      <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} theme={themeName} />
     </main>
   );
 }

@@ -21,6 +21,8 @@ const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: stri
 interface ProviderSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** App theme: the dialog portals outside .app-shell, so it carries its own scope for the dark palette. */
+  theme: "dark" | "light";
   settings: ProviderSettings;
   style: StylePreferences;
   aiEnabled: boolean;
@@ -50,6 +52,7 @@ interface ProviderSettingsDialogProps {
 export function ProviderSettingsDialog({
   open,
   onOpenChange,
+  theme,
   settings,
   style,
   aiEnabled,
@@ -180,7 +183,7 @@ export function ProviderSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="settings-dialog">
+      <DialogContent className="settings-dialog" data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Provider & privacy</DialogTitle>
           <DialogDescription>

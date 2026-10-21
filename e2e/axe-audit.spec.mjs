@@ -69,6 +69,14 @@ async function runAxe(page, label, withinSelector = null) {
       ? [...document.querySelectorAll(selector)].find((node) => node.getClientRects().length > 0)
       : document;
     if (!root) throw new Error(`axe audit scope not found: ${selector}`);
+    // Dialogs fade and zoom in. Measured mid-animation, a white surface at
+    // partial opacity over the overlay reads as grey and drags contrast below
+    // threshold, so let finite entry animations settle before auditing.
+    if (root !== document) {
+      await Promise.all(root.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)));
+    }
     await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
       resultTypes: ["violations"],

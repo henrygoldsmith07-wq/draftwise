@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BACKUP_KIND,
-  BACKUP_VERSION,
   MAX_BACKUP_DOCUMENTS,
   buildBackup,
   oversizedBackupFile,

@@ -28,6 +28,7 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { DocumentHistoryStore } from "@/lib/document-history";
+import { THEME_COLORS } from "@/lib/theme-colors";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
@@ -499,10 +500,10 @@ export default function Home() {
 
   const undo = useCallback(() => {
     applyHistory(historyStore.undo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
   const redo = useCallback(() => {
     applyHistory(historyStore.redo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
 
   const runRewrite = useCallback((label: string, instruction: string) => {
     if (!selectedText.trim()) return;
@@ -554,7 +555,7 @@ export default function Home() {
     // A new document means the writer is writing: land them in the editor.
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const newDocument = useCallback(() => {
     if (!(documents.active?.draft ?? "").trim()) {
@@ -610,7 +611,7 @@ export default function Home() {
     setActiveIssueId(null);
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
@@ -631,7 +632,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [cancelRewrite, documents, setSelection]);
+  }, [cancelRewrite, documents, setSelection, historyStore]);
 
   const importFromFile = useCallback((file: File) => {
     // Refuse an oversized file before reading it. `file.text()` loads the whole
@@ -656,7 +657,7 @@ export default function Home() {
       setView("write");
       resetUnhidden(result.text);
     });
-  }, [defaultDialect, defaultGoals, documents, resetUnhidden]);
+  }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -674,7 +675,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   const deleteDocument = useCallback((id: string) => {
     const wasActive = id === documents.activeId;
@@ -686,7 +687,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setSelection({ start: 0, end: 0 });
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   // Document content lives in exactly one state system (the document store),
   // so no mirror or repair effect is needed: the editor reads documents.active
@@ -822,7 +823,7 @@ export default function Home() {
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, clearPersistedData, documents, setSelection, updateWorkspace]);
+  }, [cancelRewrite, clearPersistedData, documents, setSelection, historyStore]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -911,6 +912,13 @@ export default function Home() {
   // Radix dialogs portal to document.body, outside .app-shell, so the theme
   // has to ride on the dialog itself for the dark palette to reach it.
   const themeName = darkMode ? "dark" : "light";
+  // The theme-color metadata only knows the OS preference. Repoint it at the
+  // resolved app theme so an explicit toggle also recolours the browser chrome.
+  useEffect(() => {
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute("content", THEME_COLORS[themeName]);
+    }
+  }, [themeName]);
   // Truthful save state: combines workspace-settings persistence and the
   // document store's own confirmed writes. "Saved locally" appears only after
   // both persisted; degraded storage tiers are named rather than hidden.

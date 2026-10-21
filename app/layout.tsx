@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { THEME_COLORS } from "@/lib/theme-colors";
 import "./globals.css";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_PATH, SITE_TITLE, siteUrl } from "@/lib/site";
 
@@ -80,8 +81,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f8f6" },
-    { media: "(prefers-color-scheme: dark)", color: "#10221f" },
+    { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
   ],
   /**
    * Declares both schemes so the browser does not paint a white flash before

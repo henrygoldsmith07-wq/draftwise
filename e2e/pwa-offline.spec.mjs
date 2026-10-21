@@ -19,6 +19,20 @@ import { test, expect } from "@playwright/test";
  * their analysis lives on their servers.
  */
 
+// These tests only mean anything against a production build.
+//
+// The service worker is deliberately not registered in development: the dev
+// server's module URLs change on every edit, and a worker that cached them
+// would serve stale modules to the next person who opened the page. A
+// production build is the only thing that has a worker to test, so the
+// dev-server project skips this file rather than failing it.
+test.beforeEach(({}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "chromium-production",
+    "the service worker only exists in a production build",
+  );
+});
+
 test("the app registers a service worker", async ({ page }) => {
   await page.goto("/");
   // The worker is registered after load, so give it a moment to appear.

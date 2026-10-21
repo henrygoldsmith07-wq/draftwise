@@ -48,3 +48,14 @@ The web app stores one versioned workspace at `draftwise:workspace:v2`. Writing 
 ## Build boundary
 
 The site build uses the repository’s framework runner. `scripts/build-extension.mjs` transpiles the pure shared packages with TypeScript and wraps them as browser globals, so the extension does not need runtime imports or a bundler. `npm run build` runs both steps and keeps the generated bundles in source control for “Load unpacked” users. CI regenerates them and fails if the checked-in output changes.
+
+## Deployment
+
+Two builds, two targets. `npm run build` produces the Cloudflare Workers artifact; `npm run build:vercel` produces the Next.js production build that Vercel serves. The browser suite runs against both: the `e2e` job uses the dev server, and the `e2e-production` job builds and serves the production artifact. The second one exists because a Content-Security-Policy, the service worker and the Open Graph routes are production-only behaviour that a dev-server run cannot exercise.
+
+The service worker (`public/sw.js`) caches the app shell so the deployed app opens and keeps checking a draft with the network switched off. It only ever handles its own origin and only `GET` requests: provider and classifier calls are never intercepted, never cached and never replayed.
+
+**The Vercel project currently has Deployment Protection enabled**, so both the production alias and the preview deployments answer `401 Protected deployment` to anyone who is not signed in to Vercel. Verified against `draftwise-henry-107b.vercel.app` on 2026-10-21.
+
+That matters more than it looks, because it is the opposite of this product’s promise. Draftwise is sold on “no account, no server, no sign-up” — a visitor currently needs a Vercel account to open the page at all. It also makes the rest of the deployment work unreachable: `/robots.txt`, `/sitemap.xml` and the Open Graph image are all behind the same gate, so no crawler or social card can see them, and the installable PWA can be neither installed nor used by anyone else. Turning off Deployment Protection (Vercel → Settings → Deployment Protection) is what makes the public surface real; until then, the metadata, the manifest and the service worker describe an app nobody outside the team can reach.
+

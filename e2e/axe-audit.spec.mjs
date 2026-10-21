@@ -146,6 +146,23 @@ test.describe("axe-core audit", () => {
     expect(await runAxe(page, "settings dialog", "[role=\"dialog\"]")).toEqual([]);
   });
 
+  test("dialogs pass axe in dark theme", async ({ page }) => {
+    // Dialogs portal to document.body, outside .app-shell, so they carry the
+    // theme themselves. Text that inherited body's light-theme colour once
+    // rendered near-black on the dark dialog surface.
+    await openApp(page);
+    await page.getByRole("button", { name: /Use dark theme/u }).click();
+    await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "shortcuts dialog / dark", "[role=\"dialog\"]")).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.locator("header").getByRole("button", { name: "Open settings" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "settings dialog / dark", "[role=\"dialog\"]")).toEqual([]);
+  });
+
   test("editor passes axe at mobile width", async ({ page }) => {
     // The nav rail collapses to icons here, which is exactly where the
     // button-name violations were: every rail button lost its accessible text.

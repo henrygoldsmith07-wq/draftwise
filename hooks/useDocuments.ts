@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createDocumentBackend, summariseDocuments, type DocumentSummary, type DocumentReview, type StoredDocument } from "@/lib/documents";
 import { DocumentLifecycle, type DocumentSaveStatus, type DocumentsSeed } from "@/lib/document-lifecycle";
 

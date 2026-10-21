@@ -73,12 +73,16 @@ async function runAxe(page, label, withinSelector = null) {
     // a dialog fading in reads grey over its overlay, and the theme toggle and
     // hover transitions blend foreground into background. Let every finite
     // animation and transition settle before auditing. A re-render can cancel
-    // a transition and start another, so loop until none is left running.
+    // a transition and start another, so loop until none is left running. The
+    // loop is bounded by a deadline and polls on timers: an animation whose
+    // finished promise never settles must delay the audit, not hang the test.
     const running = () => (root === document ? document.getAnimations() : root.getAnimations({ subtree: true }))
       .filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().endTime !== Infinity);
-    for (let pass = 0; pass < 20 && running().length; pass += 1) {
-      await Promise.all(running().map((animation) => animation.finished.catch(() => undefined)));
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const deadline = performance.now() + 3_000;
+    while (running().length && performance.now() < deadline) {
+      await Promise.race([Promise.all(running().map((animation) => animation.finished.catch(() => undefined))), sleep(250)]);
+      await sleep(50);
     }
     await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },

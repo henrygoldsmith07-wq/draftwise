@@ -59,7 +59,29 @@ test("a long draft is analysed across the whole document, not just near the edit
   await expect(page.getByLabel("Draft editor")).not.toHaveValue("");
 
   await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 45_000 });
-  await page.waitForTimeout(1500);
+
+  // Wait for the card count to stop changing before counting or stepping.
+  //
+  // The first card appears while the sweep is still running, and the list
+  // keeps moving as later chunks land: findings that repeat across sections
+  // get grouped into one card, so the displayed count can go DOWN as well as
+  // up. A fixed wait for the sweep to finish is a guess. The status label
+  // always reads "Local analysis only" with AI off, so it says nothing about
+  // whether the sweep finished either. Waiting for the count itself to settle
+  // is the only signal that does.
+  //
+  // This matters because the review cursor deliberately wraps: on the last
+  // finding, "next" returns to the first, so the writer is never stranded at
+  // the end of a draft (keyboard-review.spec.mjs asserts that wrap). Walking
+  // a list that is still shrinking overshoots the end and lands back on the
+  // first finding, which is correct product behaviour and a wrong test
+  // assumption.
+  await expect(async () => {
+    const first = await page.locator(".suggestion-card").count();
+    await page.waitForTimeout(700);
+    const second = await page.locator(".suggestion-card").count();
+    expect(second).toBe(first);
+  }).toPass({ timeout: 45_000 });
 
   // The sidebar deliberately caps displayed findings per tier
   // (SUGGESTION_DENSITY_CAPS) so a long draft cannot flood the writer, so this
@@ -97,22 +119,34 @@ test("a long draft is analysed across the whole document, not just near the edit
   // (keyboard-review.spec.mjs asserts that wrap). A fixed number of presses
   // therefore does NOT always move forward — pressing 12 times with 13
   // findings displayed lands back on the first one, and the caret jumps
-  // backwards. That is correct product behaviour and a wrong test assumption,
-  // and it made this test fail whenever the density cap yielded a shorter
-  // list. Stepping exactly to the last finding proves the same thing — the
-  // cursor walks through the document rather than clustering near the edit —
+  // backwards. That is correct product behaviour and a wrong test assumption.
+  // Stepping exactly to the last finding proves the same thing — the cursor
+  // walks through the document rather than clustering near the edit —
   // without depending on where the wrap lands.
   const stepsToLast = Math.max(1, cards - 2);
-  for (let i = 0; i < stepsToLast; i += 1) await page.keyboard.press("Control+ArrowDown");
+  let furthestCaret = firstCaret;
+  for (let i = 0; i < stepsToLast; i += 1) {
+    await page.keyboard.press("Control+ArrowDown");
+    furthestCaret = Math.max(furthestCaret, await caretAt());
+  }
   const laterCaret = await caretAt();
   console.log("LONG carets:", firstCaret, "->", laterCaret, `(${cards} shown, ${stepsToLast} steps)`);
 
-  // The review loop must be walkable end to end: the first press lands on a
-  // real finding and stepping forward advances. Density caps mean the displayed
-  // set is bounded by design, so this asserts the loop advances rather than
-  // how far across the document the capped set reaches.
+  // The review loop must be walkable end to end. The strongest statement is
+  // that the cursor ended on the LAST displayed finding: it proves the whole
+  // list was walked, and unlike a caret comparison it does not depend on
+  // where in the document each finding happens to sit.
+  const activeIndex = await page.evaluate(() => {
+    const all = [...document.querySelectorAll(".suggestion-card")];
+    return all.findIndex((card) => card.className.includes("is-active"));
+  });
+  expect(activeIndex).toBe(cards - 1);
+
+  // And the caret must have moved forward into the document at some point
+  // along the way, so the findings are not all clustered near the edit that
+  // triggered the analysis.
   expect(firstCaret).toBeGreaterThan(0);
-  expect(laterCaret).toBeGreaterThan(firstCaret);
+  expect(furthestCaret).toBeGreaterThan(firstCaret);
 
   // Suppressed findings are still accounted for, so the writer is told the
   // difference between "clean" and "more than we are showing you".

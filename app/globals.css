@@ -359,6 +359,20 @@ button { cursor: pointer; }
 .writing-profile-transfer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; }
 .writing-profile-import { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 12px; font-weight: 550; cursor: pointer; }
 .writing-profile-import:hover { border-color: color-mix(in srgb, var(--mint-deep) 45%, var(--border)); }
+
+/* The app's own install and offline status.
+   It reads as a fact rather than a feature: a small pill that says whether
+   the app is ready, in the same language as the rest of the panel. The
+   "ready" tone uses the same green the writing profile uses, because it is
+   the same kind of reassurance — the app is telling the truth about itself. */
+.app-install { border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px; display: grid; gap: 10px; }
+.app-install-status { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-soft); }
+.app-install-status svg { flex: 0 0 auto; }
+.app-install-status[data-state="ready"] { color: var(--mint-deep); }
+.app-install-status[data-state="ready"] svg { color: var(--mint-deep); }
+.app-install-status[data-state="pending"] { color: var(--ink-soft); }
+.app-install-status[data-state="unavailable"] { color: var(--ink-soft); }
+.app-install .writing-profile-transfer { border-top: 0; padding-top: 0; }
 .writing-profile-import:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
 .writing-profile-import input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .writing-profile-transfer-message { font-size: 10.5px; color: var(--ink-soft); line-height: 1.5; margin: 0; }

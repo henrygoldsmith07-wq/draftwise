@@ -6,13 +6,14 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 
 - Local analysis is useful without an account, network, or API key.
 - AI is opt-in and uses a single canonical toggle in the web app and extension.
-- Drafts are persisted only in the browser’s local storage in this build.
+- Drafts are persisted only in the browser, in IndexedDB; settings and the learned profile stay in local storage. Nothing is sent anywhere unless AI is enabled and the writer asks for it.
 - Provider output is treated as untrusted input: ranges, categories, replacements, URLs, numbers, and markup are validated before anything is shown or applied.
 - Every rewrite is preview-first. Nothing changes the draft until the writer chooses Replace or Insert.
 
 ## What is included
 
-- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing. The app is installable (web manifest, maskable icon, Apple touch icon, theme colors).
+- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing.
+- A real installable PWA. The service worker caches the app shell, so the deployed site opens and keeps checking a draft with the network switched off — which is the one thing the cloud competitors in this category cannot offer, because their analysis lives on their servers. The writer is told when they are offline and what still works.
 - Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { DocumentDashboard } from "@/components/draftwise/DocumentDashboard";
+import { OfflineNotice } from "@/components/draftwise/OfflineNotice";
 import { VersionHistoryView } from "@/components/draftwise/VersionHistoryView";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
@@ -31,6 +32,8 @@ import { DocumentHistoryStore } from "@/lib/document-history";
 import { THEME_COLORS } from "@/lib/theme-colors";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
 
@@ -291,6 +294,30 @@ export default function Home() {
   const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
   const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
   const docsReady = documents.hydrated;
+
+  // Register the service worker so the deployed app is a real PWA: Chrome
+  // only offers to install an app that has one, and without it the app needs
+  // the network just to open. Every check Draftwise makes already runs in the
+  // browser, so the only thing standing between the writer and a working
+  // editor on a train was the page itself.
+  //
+  // Registration is best-effort and never blocks the first paint. In
+  // development it is skipped entirely, because the dev server's module URLs
+  // change on every edit and a worker that cached them would serve stale
+  // modules to the next person who opened the page.
+  useEffect(() => {
+    if (!shouldRegisterServiceWorker({
+      production: process.env.NODE_ENV === "production",
+      hasServiceWorker: typeof navigator !== "undefined" && "serviceWorker" in navigator,
+      secureContext: typeof window !== "undefined" && window.isSecureContext,
+    })) return;
+    void registerServiceWorker();
+  }, []);
+
+  // Whether the browser believes it has a network, so the writer is told
+  // plainly that the local checks are still running.
+  const online = useOnlineStatus();
+
   useEffect(() => {
     if (!hydrated || !docsReady) return;
     activityStore.hydrate(window.localStorage);
@@ -953,6 +980,8 @@ export default function Home() {
         }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span className="saved-dot" title={savedLabel} /></div>
         <div className="topbar-actions"><div className="privacy-pill"><span className="privacy-dot" /> Local-first, cloud opt-in</div><Button variant="ghost" size="icon" aria-label={darkMode ? "Use light theme" : "Use dark theme"} onClick={() => updateWorkspace({ theme: darkMode ? "light" : "dark" })}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</Button><Button variant="ghost" size="icon" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></Button></div>
       </header>
+
+      <OfflineNotice online={online} />
 
       <div className="app-body">
         <aside className="left-rail" aria-label="Draftwise sections">

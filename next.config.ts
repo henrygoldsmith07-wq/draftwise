@@ -52,6 +52,15 @@ const nextConfig: NextConfig = {
     return [{
       source: "/:path*",
       headers: [...securityHeaders],
+    }, {
+      // The service worker is not a hashed build file, so it is served from a
+      // stable URL. It must not be cached by the browser for long, or a
+      // corrected worker would keep being served from the old copy and the
+      // writer would be stuck with the previous behaviour.
+      source: "/sw.js",
+      headers: [
+        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+      ],
     }];
   },
 };

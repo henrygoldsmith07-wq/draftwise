@@ -228,6 +228,17 @@ button { cursor: pointer; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .settings-callout strong { color: #c3e3cd; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .settings-callout span { color: #9dbca8; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .analysis-error { border-color: color-mix(in srgb, #e0b155 40%, var(--border)); background: color-mix(in srgb, #e0b155 14%, var(--card)); color: #e6c98f; }
+
+/* The offline notice.
+   A slim strip under the topbar, so it reads as a status rather than an
+   error: nothing has gone wrong with the draft, the network is simply gone.
+   It uses the same amber the analysis error strip uses, because the two
+   answer the same question — "why is the AI quiet?" — and the writer should
+   not have to learn two different colours to understand the answer. */
+.offline-notice { display: flex; align-items: center; gap: 9px; padding: 9px 28px; border-bottom: 1px solid color-mix(in srgb, var(--amber) 32%, var(--shell-border)); background: color-mix(in srgb, var(--amber) 11%, var(--card)); color: color-mix(in srgb, var(--amber) 76%, var(--ink)); font-size: 12.5px; line-height: 1.4; }
+.offline-notice svg { flex: 0 0 auto; color: var(--amber); }
+.offline-notice span { min-width: 0; }
+.app-shell[data-theme="dark"] .offline-notice { border-bottom-color: color-mix(in srgb, #e0b155 32%, var(--border)); background: color-mix(in srgb, #e0b155 12%, var(--card)); color: #e6c98f; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .import-error { border-color: color-mix(in srgb, var(--destructive) 45%, var(--border)); background: color-mix(in srgb, var(--destructive) 16%, var(--card)); color: #f0b3ba; }
 .app-shell[data-theme="dark"] .document-card-review.has-work { color: #d8b46a; }
 .app-shell[data-theme="dark"] .document-name svg { color: #7f948b; }

@@ -69,13 +69,16 @@ async function runAxe(page, label, withinSelector = null) {
       ? [...document.querySelectorAll(selector)].find((node) => node.getClientRects().length > 0)
       : document;
     if (!root) throw new Error(`axe audit scope not found: ${selector}`);
-    // Dialogs fade and zoom in. Measured mid-animation, a white surface at
-    // partial opacity over the overlay reads as grey and drags contrast below
-    // threshold, so let finite entry animations settle before auditing.
-    if (root !== document) {
-      await Promise.all(root.getAnimations({ subtree: true })
-        .filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity)
-        .map((animation) => animation.finished.catch(() => undefined)));
+    // Colours measured mid-animation are neither the old nor the new state:
+    // a dialog fading in reads grey over its overlay, and the theme toggle and
+    // hover transitions blend foreground into background. Let every finite
+    // animation and transition settle before auditing. A re-render can cancel
+    // a transition and start another, so loop until none is left running.
+    const running = () => (root === document ? document.getAnimations() : root.getAnimations({ subtree: true }))
+      .filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().endTime !== Infinity);
+    for (let pass = 0; pass < 20 && running().length; pass += 1) {
+      await Promise.all(running().map((animation) => animation.finished.catch(() => undefined)));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     }
     await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },

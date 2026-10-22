@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRight, Download, Info, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppInstallSection } from "@/components/draftwise/AppInstallSection";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -412,6 +413,8 @@ export function ProviderSettingsDialog({
             ) : null}
             {backupMessage ? <p className="writing-profile-transfer-message" role="status">{backupMessage}</p> : null}
           </div>
+
+          <AppInstallSection />
 
           <div className="settings-footnote">
             <Info size={14} />

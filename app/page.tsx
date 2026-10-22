@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { DocumentDashboard } from "@/components/draftwise/DocumentDashboard";
+import { OfflineNotice } from "@/components/draftwise/OfflineNotice";
 import { VersionHistoryView } from "@/components/draftwise/VersionHistoryView";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
@@ -29,8 +30,11 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { DocumentHistoryStore } from "@/lib/document-history";
+import { THEME_COLORS } from "@/lib/theme-colors";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { noteServiceWorkerUnavailable, registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
 
@@ -304,6 +308,33 @@ export default function Home() {
   const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
   const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
   const docsReady = documents.hydrated;
+
+  // Register the service worker so the deployed app is a real PWA: Chrome
+  // only offers to install an app that has one, and without it the app needs
+  // the network just to open. Every check Draftwise makes already runs in the
+  // browser, so the only thing standing between the writer and a working
+  // editor on a train was the page itself.
+  //
+  // Registration is best-effort and never blocks the first paint. In
+  // development it is skipped entirely, because the dev server's module URLs
+  // change on every edit and a worker that cached them would serve stale
+  // modules to the next person who opened the page.
+  useEffect(() => {
+    if (!shouldRegisterServiceWorker({
+      production: process.env.NODE_ENV === "production",
+      hasServiceWorker: typeof navigator !== "undefined" && "serviceWorker" in navigator,
+      secureContext: typeof window !== "undefined" && window.isSecureContext,
+    })) {
+      noteServiceWorkerUnavailable();
+      return;
+    }
+    void registerServiceWorker();
+  }, []);
+
+  // Whether the browser believes it has a network, so the writer is told
+  // plainly that the local checks are still running.
+  const online = useOnlineStatus();
+
   useEffect(() => {
     if (!hydrated || !docsReady) return;
     activityStore.hydrate(window.localStorage);
@@ -513,10 +544,10 @@ export default function Home() {
 
   const undo = useCallback(() => {
     applyHistory(historyStore.undo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
   const redo = useCallback(() => {
     applyHistory(historyStore.redo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
 
   const runRewrite = useCallback((label: string, instruction: string) => {
     if (!selectedText.trim()) return;
@@ -568,7 +599,7 @@ export default function Home() {
     // A new document means the writer is writing: land them in the editor.
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const newDocument = useCallback(() => {
     if (!(documents.active?.draft ?? "").trim()) {
@@ -624,7 +655,7 @@ export default function Home() {
     setActiveIssueId(null);
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
@@ -645,7 +676,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [cancelRewrite, documents, setSelection]);
+  }, [cancelRewrite, documents, setSelection, historyStore]);
 
   const importFromFile = useCallback((file: File) => {
     // Refuse an oversized file before reading it. `file.text()` loads the whole
@@ -670,7 +701,7 @@ export default function Home() {
       setView("write");
       resetUnhidden(result.text);
     });
-  }, [defaultDialect, defaultGoals, documents, resetUnhidden]);
+  }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -712,7 +743,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   const deleteDocument = useCallback((id: string) => {
     const wasActive = id === documents.activeId;
@@ -724,7 +755,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setSelection({ start: 0, end: 0 });
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   // Document content lives in exactly one state system (the document store),
   // so no mirror or repair effect is needed: the editor reads documents.active
@@ -874,7 +905,7 @@ export default function Home() {
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, clearPersistedData, documents, setSelection, updateWorkspace]);
+  }, [cancelRewrite, clearPersistedData, documents, setSelection, historyStore]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -963,6 +994,13 @@ export default function Home() {
   // Radix dialogs portal to document.body, outside .app-shell, so the theme
   // has to ride on the dialog itself for the dark palette to reach it.
   const themeName = darkMode ? "dark" : "light";
+  // The theme-color metadata only knows the OS preference. Repoint it at the
+  // resolved app theme so an explicit toggle also recolours the browser chrome.
+  useEffect(() => {
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute("content", THEME_COLORS[themeName]);
+    }
+  }, [themeName]);
   // Truthful save state: combines workspace-settings persistence and the
   // document store's own confirmed writes. "Saved locally" appears only after
   // both persisted; degraded storage tiers are named rather than hidden.
@@ -997,6 +1035,8 @@ export default function Home() {
         }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span className="saved-dot" title={savedLabel} /></div>
         <div className="topbar-actions"><div className="privacy-pill"><span className="privacy-dot" /> Local-first, cloud opt-in</div><Button variant="ghost" size="icon" aria-label={darkMode ? "Use light theme" : "Use dark theme"} onClick={() => updateWorkspace({ theme: darkMode ? "light" : "dark" })}>{darkMode ? <Sun size={17} /> : <Moon size={17} />}</Button><Button variant="ghost" size="icon" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></Button></div>
       </header>
+
+      <OfflineNotice online={online} />
 
       <div className="app-body">
         <aside className="left-rail" aria-label="Draftwise sections">

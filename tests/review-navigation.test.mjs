@@ -43,6 +43,32 @@ test("stepping wraps at both ends instead of dead-ending", () => {
   assert.equal(stepReviewIndex(1, 3, "next"), 2);
 });
 
+test("walking to the last finding never wraps back to the first", () => {
+  // The cursor wraps on purpose, so the number of presses it takes to reach the
+  // end of a list depends on how long that list is. A caller that wants to
+  // step through the whole list has to count the findings rather than press a
+  // fixed number of times: with 12 or 13 findings, twelve presses from the
+  // second card land back on the first, which reads as the cursor moving
+  // backwards.
+  //
+  // The long-draft e2e asserted "the caret advanced" after twelve presses,
+  // which held only when the density cap happened to yield fourteen or more
+  // findings. The rule below is the one that actually matters: stepping
+  // (total - 2) times from the second card lands exactly on the last card.
+  for (let total = 2; total <= 40; total += 1) {
+    const first = stepReviewIndex(null, total, "next");
+    const second = stepReviewIndex(first, total, "next");
+    let index = second;
+    const steps = total - 2;
+    for (let step = 0; step < steps; step += 1) index = stepReviewIndex(index, total, "next");
+    assert.equal(index, total - 1, `total=${total} should land on the last finding`);
+    assert.ok(index >= second, `total=${total} must never move backwards`);
+    // With more than two findings there is somewhere further to go, and
+    // reaching it must be a forward step rather than a wrap.
+    if (total > 2) assert.ok(index > second, `total=${total} must move forward`);
+  }
+});
+
 test("stepping on an empty list yields no target", () => {
   assert.equal(stepReviewIndex(null, 0, "next"), -1);
   assert.equal(issueForReviewAction([], 0), null);

@@ -56,6 +56,21 @@ async function runAxe(page, label, withinSelector = null) {
       ? [...document.querySelectorAll(selector)].find((node) => node.getClientRects().length > 0)
       : document;
     if (!root) throw new Error(`axe audit scope not found: ${selector}`);
+    // Colours measured mid-animation are neither the old nor the new state:
+    // a dialog fading in reads grey over its overlay, and the theme toggle and
+    // hover transitions blend foreground into background. Let every finite
+    // animation and transition settle before auditing. A re-render can cancel
+    // a transition and start another, so loop until none is left running. The
+    // loop is bounded by a deadline and polls on timers: an animation whose
+    // finished promise never settles must delay the audit, not hang the test.
+    const running = () => (root === document ? document.getAnimations() : root.getAnimations({ subtree: true }))
+      .filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().endTime !== Infinity);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const deadline = performance.now() + 3_000;
+    while (running().length && performance.now() < deadline) {
+      await Promise.race([Promise.all(running().map((animation) => animation.finished.catch(() => undefined))), sleep(250)]);
+      await sleep(50);
+    }
     await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
       resultTypes: ["violations"],
@@ -131,6 +146,23 @@ test.describe("axe-core audit", () => {
     // editor-view audits at full opacity, and measuring it through the
     // overlay's dimming would flag colours no one can see.
     expect(await runAxe(page, "settings dialog", "[role=\"dialog\"]")).toEqual([]);
+  });
+
+  test("dialogs pass axe in dark theme", async ({ page }) => {
+    // Dialogs portal to document.body, outside .app-shell, so they carry the
+    // theme themselves. Text that inherited body's light-theme colour once
+    // rendered near-black on the dark dialog surface.
+    await openApp(page);
+    await page.getByRole("button", { name: /Use dark theme/u }).click();
+    await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "shortcuts dialog / dark", "[role=\"dialog\"]")).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.locator("header").getByRole("button", { name: "Open settings" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "settings dialog / dark", "[role=\"dialog\"]")).toEqual([]);
   });
 
   test("editor passes axe at mobile width", async ({ page }) => {

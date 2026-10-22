@@ -100,13 +100,14 @@ button { cursor: pointer; }
    The previous #667771 measured 4.73:1 on white but only 4.42:1 on the shell
    background #f5f8f6, which is where most of it actually sits — axe-core
    flagged it on .eyebrow, .workspace-footnote and .suggestions-header. #5c6b65
-   clears 4.5:1 on both surfaces (5.24 shell / 5.61 white). */
-.app-shell { --ink-soft: #5c6b65; }
+   clears 4.5:1 on both surfaces (5.24 shell / 5.61 white). Dialogs portal to
+   document.body, outside .app-shell, so they take the override too. */
+.app-shell, [data-slot="dialog-content"] { --ink-soft: #5c6b65; }
 /* Dialogs portal to document.body, outside .app-shell, so the dark palette
    is scoped to both: the shell for the app and [data-theme] on the dialog
    content for every portal dialog. The two selectors carry equal specificity
    (class+attribute vs attribute+attribute), so the cascade is unchanged for
-   the app itself. Light dialogs keep the :root values they always had. */
+   the app itself. Light dialogs otherwise keep the :root values. */
 .app-shell[data-theme="dark"], [data-slot="dialog-content"][data-theme="dark"] { --background: #10221f; --foreground: #e7f1eb; --card: #19312c; --card-foreground: #e7f1eb; --popover: #19312c; --popover-foreground: #e7f1eb; --primary: #d8f26b; --primary-foreground: #10221f; --secondary: #203d35; --secondary-foreground: #e7f1eb; --muted: #1b3530; --muted-foreground: #9bb1a8; --accent: #21433a; --accent-foreground: #e7f1eb; --border: #2e4b43; --input: #31564b; --ring: #b5d675; --ink: #e7f1eb; --ink-soft: #9bb1a8; --editor-ink: #e6f2eb; --paper: #152a26; --shell-border: rgba(232, 245, 235, 0.1); --on-primary: #4a5f2e; --text-green: #6f9f83; --text-rose: #e08a93;
   /* --mint-deep is a very dark green (#163b36) used as an accent for text and
      borders on the light shell. It was never overridden here, so on the dark
@@ -166,7 +167,7 @@ button { cursor: pointer; }
 
 .workspace-grid { width: min(1460px, 100%); margin: 0 auto; padding: 42px 42px 34px; display: grid; grid-template-columns: minmax(0, 1fr) 362px; gap: 42px; }
 .editor-column { min-width: 0; }.workspace-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 24px; }.workspace-heading h1, .full-view-heading h1, .extension-hero h1 { color: var(--ink); font-size: clamp(26px, 3vw, 37px); line-height: 1.08; letter-spacing: -0.045em; margin: 8px 0 0; font-weight: 720; }.heading-actions { gap: 8px; }
-.goal-bar { flex-wrap: wrap; row-gap: 10px; gap: 12px; padding: 9px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 6px 18px rgba(29, 70, 55, 0.035); }.goal-bar-label { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--ink); font-size: 12px; font-weight: 700; padding: 0 8px 0 2px; margin-right: 3px; }.goal-bar-label svg { color: #86a99a; }.goal-select { position: relative; display: grid; gap: 3px; min-width: 118px; padding: 3px 22px 3px 10px; border-left: 1px solid var(--border); }.goal-select span { color: var(--ink-soft); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }.goal-select select, .field-label select { appearance: none; border: 0; padding: 0; background: transparent; color: var(--ink); font-size: 12px; font-weight: 650; cursor: pointer; }.goal-select svg { position: absolute; right: 5px; bottom: 4px; color: var(--ink-soft); pointer-events: none; }
+.goal-bar { flex-wrap: wrap; gap: 10px 12px; padding: 9px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 6px 18px rgba(29, 70, 55, 0.035); }.goal-bar-label { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--ink); font-size: 12px; font-weight: 700; padding: 0 8px 0 2px; margin-right: 3px; }.goal-bar-label svg { color: #86a99a; }.goal-select { position: relative; display: grid; gap: 3px; min-width: 118px; padding: 3px 22px 3px 10px; border-left: 1px solid var(--border); }.goal-select span { color: var(--ink-soft); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }.goal-select select, .field-label select { appearance: none; border: 0; padding: 0; background: transparent; color: var(--ink); font-size: 12px; font-weight: 650; cursor: pointer; }.goal-select svg { position: absolute; right: 5px; bottom: 4px; color: var(--ink-soft); pointer-events: none; }
 .terminology-details { margin-top: 8px; padding: 4px 12px 8px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }.terminology-details summary { cursor: pointer; color: var(--ink-soft); font-size: 11px; font-weight: 700; padding: 6px 0; }.terminology-details summary:hover { color: var(--ink); }.terminology-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; padding: 4px 0 2px; }.terminology-field { display: grid; gap: 4px; }.terminology-field span { color: var(--ink-soft); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }.terminology-field span em { text-transform: none; letter-spacing: 0; font-weight: 400; font-style: normal; opacity: .8; }.terminology-hint { margin: 6px 0 2px; color: var(--ink-soft); font-size: 10.5px; }
 @media (max-width: 640px) { .terminology-fields { grid-template-columns: 1fr; } }
 .rewrite-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 12px 0 -2px; padding: 7px; border: 1px solid #d7e9a5; background: color-mix(in srgb, var(--mint) 13%, var(--card)); border-radius: 10px; box-shadow: 0 5px 18px rgba(63, 86, 33, 0.08); }.rewrite-toolbar-label { display: inline-flex; align-items: center; gap: 6px; color: var(--primary); font-size: 11px; font-weight: 750; padding: 0 7px; }.rewrite-toolbar button { border: 0; background: transparent; color: var(--primary); border-radius: 6px; padding: 6px 8px; font-size: 11px; font-weight: 650; }.rewrite-toolbar button:hover { background: rgba(255,255,255,.65); }.custom-rewrite { display: flex; align-items: center; margin-left: auto; min-width: 170px; max-width: 230px; }.custom-rewrite input { height: 28px; border-color: rgba(22, 59, 54, .16); background: rgba(255,255,255,.64); font-size: 11px; }.custom-rewrite button { padding: 5px; margin-left: -29px; z-index: 2; }
@@ -228,6 +229,17 @@ button { cursor: pointer; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .settings-callout strong { color: #c3e3cd; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .settings-callout span { color: #9dbca8; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .analysis-error { border-color: color-mix(in srgb, #e0b155 40%, var(--border)); background: color-mix(in srgb, #e0b155 14%, var(--card)); color: #e6c98f; }
+
+/* The offline notice.
+   A slim strip under the topbar, so it reads as a status rather than an
+   error: nothing has gone wrong with the draft, the network is simply gone.
+   It uses the same amber the analysis error strip uses, because the two
+   answer the same question — "why is the AI quiet?" — and the writer should
+   not have to learn two different colours to understand the answer. */
+.offline-notice { display: flex; align-items: center; gap: 9px; padding: 9px 28px; border-bottom: 1px solid color-mix(in srgb, var(--amber) 32%, var(--shell-border)); background: color-mix(in srgb, var(--amber) 11%, var(--card)); color: color-mix(in srgb, var(--amber) 76%, var(--ink)); font-size: 12.5px; line-height: 1.4; }
+.offline-notice svg { flex: 0 0 auto; color: var(--amber); }
+.offline-notice span { min-width: 0; }
+.app-shell[data-theme="dark"] .offline-notice { border-bottom-color: color-mix(in srgb, #e0b155 32%, var(--border)); background: color-mix(in srgb, #e0b155 12%, var(--card)); color: #e6c98f; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .import-error { border-color: color-mix(in srgb, var(--destructive) 45%, var(--border)); background: color-mix(in srgb, var(--destructive) 16%, var(--card)); color: #f0b3ba; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .connection-ok { color: #a8d4b6; }
 :is(.app-shell, [data-slot="dialog-content"])[data-theme="dark"] .connection-error { color: #f0b3ba; }
@@ -389,6 +401,20 @@ button { cursor: pointer; }
 .writing-profile-transfer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; }
 .writing-profile-import { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 12px; font-weight: 550; cursor: pointer; }
 .writing-profile-import:hover { border-color: color-mix(in srgb, var(--mint-deep) 45%, var(--border)); }
+
+/* The app's own install and offline status.
+   It reads as a fact rather than a feature: a small pill that says whether
+   the app is ready, in the same language as the rest of the panel. The
+   "ready" tone uses the same green the writing profile uses, because it is
+   the same kind of reassurance — the app is telling the truth about itself. */
+.app-install { border: 1px solid var(--border); border-radius: 11px; padding: 13px 15px; display: grid; gap: 10px; }
+.app-install-status { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink-soft); }
+.app-install-status svg { flex: 0 0 auto; }
+.app-install-status[data-state="ready"] { color: var(--mint-deep); }
+.app-install-status[data-state="ready"] svg { color: var(--mint-deep); }
+.app-install-status[data-state="pending"] { color: var(--ink-soft); }
+.app-install-status[data-state="unavailable"] { color: var(--ink-soft); }
+.app-install .writing-profile-transfer { border-top: 0; padding-top: 0; }
 .writing-profile-import:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
 .writing-profile-import input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .writing-profile-transfer-message { font-size: 10.5px; color: var(--ink-soft); line-height: 1.5; margin: 0; }

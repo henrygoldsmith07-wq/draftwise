@@ -40,3 +40,23 @@ test("pwa manifest and install icons are served", async ({ page }) => {
     expect(color).toMatch(/^#[0-9a-f]{6}$/i);
   }
 });
+
+// theme-color metadata defaults to the OS preference; an explicit in-app
+// theme must recolour the browser chrome too.
+test("theme-color follows the in-app theme toggle", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/");
+  // Wait for hydration: the save indicator only gains a title once the app is live.
+  await expect(page.locator(".saved-dot")).toHaveAttribute("title", /Saved|Unsaved|Storage|Could not|Saving/u, { timeout: 30_000 });
+  const themeColors = () => page.$$eval('meta[name="theme-color"]', (elements) =>
+    [...new Set(elements.map((element) => element.getAttribute("content")))],
+  );
+
+  await page.getByRole("button", { name: "Use dark theme" }).click();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "dark");
+  await expect.poll(themeColors).toEqual(["#10221f"]);
+
+  await page.getByRole("button", { name: "Use light theme" }).click();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "light");
+  await expect.poll(themeColors).toEqual(["#f5f8f6"]);
+});

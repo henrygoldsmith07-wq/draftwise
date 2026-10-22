@@ -11,15 +11,35 @@ import path from "node:path";
 // provider still works) plus localhost, which is the documented escape hatch
 // for local models. Plain-HTTP exfiltration to any other host is blocked.
 //
-// script-src/style-src are deliberately left out rather than guessed at: Next
-// emits inline bootstrap scripts, and a wrong 'unsafe-inline' here breaks a
-// deployed app in ways no unit test would catch.
+// script-src and style-src were previously left out rather than guessed at,
+// because Next emits inline bootstrap scripts and a wrong 'unsafe-inline'
+// there breaks a deployed app in ways no unit test would catch.
+//
+// That reason is now answered rather than ignored. e2e/deployment-headers.spec.mjs
+// takes this exact policy out of this file, attaches it to a real page, drives
+// the app through it, and fails on any refusal the browser reports — so a
+// wrong guess here is a failing test, not a blank page in production.
+//
+// 'unsafe-inline' is still a narrowing, not a loosening: with no script-src
+// and no default-src (the previous state) a script could be loaded from ANY
+// origin. Now scripts are same-origin or inline, and everything else falls
+// back to 'self'.
+//
+// The ws://localhost exceptions exist for the dev server's hot-reload channel,
+// which is the same machine and the same trust boundary as the http://localhost
+// exceptions the app already needs for local models. The deployed app opens no
+// WebSocket at all — there is no WebSocket or EventSource anywhere in the
+// source.
+//
+// This policy is duplicated verbatim in vercel.json, and a test compares the
+// two, because two copies of a security policy otherwise drift silently.
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: "base-uri 'self'; frame-ancestors 'none'; object-src 'none'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*" },
+  { key: "Content-Security-Policy", value: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self' blob:; connect-src 'self' https: ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*" },
   { key: "Referrer-Policy", value: "no-referrer" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ] as const;
 
 const nextConfig: NextConfig = {
@@ -32,6 +52,15 @@ const nextConfig: NextConfig = {
     return [{
       source: "/:path*",
       headers: [...securityHeaders],
+    }, {
+      // The service worker is not a hashed build file, so it is served from a
+      // stable URL. It must not be cached by the browser for long, or a
+      // corrected worker would keep being served from the old copy and the
+      // writer would be stuck with the previous behaviour.
+      source: "/sw.js",
+      headers: [
+        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+      ],
     }];
   },
 };

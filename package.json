@@ -13,7 +13,7 @@
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "start:vercel": "next start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "type-check": "tsc --noEmit",
+    "type-check": "next typegen && tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "test:extension": "node --test tests/extension.test.mjs",
     "test:e2e": "playwright test",

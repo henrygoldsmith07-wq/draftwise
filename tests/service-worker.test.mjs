@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { shouldRegisterServiceWorker } from "../lib/service-worker.ts";
+import { describeOfflineReadiness, shouldRegisterServiceWorker } from "../lib/service-worker.ts";
 
 /**
  * The service worker.
@@ -132,4 +132,57 @@ test("the manifest declares what an installable app needs", () => {
   assert.ok(sizes.includes("192x192"), "Chrome requires a 192x192 icon");
   assert.ok(sizes.includes("512x512"), "Chrome requires a 512x512 icon");
   assert.ok(manifest.icons.some((icon) => icon.purpose === "maskable"), "a maskable icon is needed for Android");
+});
+
+test("the app tells the writer whether it is actually ready to work offline", () => {
+  // A writer told "ready to work offline" and then met a blank page would
+  // trust the app less than one that was never told anything. So every
+  // state has to have its own honest sentence, and the ones that say no
+  // have to say it plainly rather than staying silent.
+  const ready = describeOfflineReadiness("ready", false);
+  assert.equal(ready.tone, "ready");
+  assert.match(ready.label, /Ready to work offline/u);
+  assert.match(ready.detail, /no network/u);
+
+  const installed = describeOfflineReadiness("ready", true);
+  assert.equal(installed.tone, "ready");
+  assert.match(installed.label, /Installed/u);
+
+  const pending = describeOfflineReadiness("registering", false);
+  assert.equal(pending.tone, "pending");
+  assert.match(pending.label, /Preparing/u);
+
+  for (const state of ["unavailable", "unsupported"]) {
+    const unavailable = describeOfflineReadiness(state, false);
+    assert.equal(unavailable.tone, "unavailable");
+    assert.match(unavailable.label, /not available/u);
+    // It must still say that the rest of the app works, so a writer does not
+    // think their drafts are at risk.
+    assert.match(unavailable.detail, /still saved in this browser/u);
+  }
+});
+
+test("the settings dialog offers the install and reports the offline state", () => {
+  // An installable app nobody knows about is not installed. The browser
+  // fires beforeinstallprompt and waits to be called, so the app has to
+  // offer the install itself.
+  const section = read("components/draftwise/AppInstallSection.tsx");
+  assert.match(section, /Install Draftwise/u);
+  assert.match(section, /useInstallPrompt/u);
+  assert.match(section, /subscribeServiceWorker/u);
+
+  const hook = read("hooks/useInstallPrompt.ts");
+  assert.match(hook, /beforeinstallprompt/u);
+  // The event's default is suppressed so the browser's own mini-infobar
+  // does not appear as well.
+  assert.match(hook, /preventDefault\(\)/u);
+  // The installed state is read from the display mode, not guessed.
+  assert.match(hook, /display-mode: standalone/u);
+});
+
+test("the settings dialog says the app is ready to work offline", () => {
+  // The section has to be in the dialog, not just in a component nobody
+  // renders.
+  const dialog = read("components/draftwise/ProviderSettingsDialog.tsx");
+  assert.match(dialog, /AppInstallSection/u);
 });

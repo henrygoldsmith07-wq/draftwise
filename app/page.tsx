@@ -33,7 +33,7 @@ import { THEME_COLORS } from "@/lib/theme-colors";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
+import { noteServiceWorkerUnavailable, registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
 
@@ -310,7 +310,10 @@ export default function Home() {
       production: process.env.NODE_ENV === "production",
       hasServiceWorker: typeof navigator !== "undefined" && "serviceWorker" in navigator,
       secureContext: typeof window !== "undefined" && window.isSecureContext,
-    })) return;
+    })) {
+      noteServiceWorkerUnavailable();
+      return;
+    }
     void registerServiceWorker();
   }, []);
 

@@ -44,6 +44,30 @@ test("the app registers a service worker", async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
+test("the settings say the app is ready to work offline", async ({ page }) => {
+  await page.goto("/");
+  // Wait for the worker to be active, because that is what makes the app
+  // ready. Reporting "ready" before then would be a promise the app cannot
+  // keep.
+  await expect
+    .poll(async () => page.evaluate(async () => {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      return registrations.some((registration) => registration.active);
+    }), { timeout: 30_000 })
+    .toBe(true);
+
+  await page.locator("header").getByRole("button", { name: "Open settings" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  // The section has to say the truth: the app is stored on this device, so
+  // it opens with no network. A writer who was told "ready" and then met a
+  // blank page would trust the app less than one told nothing.
+  await expect(dialog.getByText("Ready to work offline")).toBeVisible({ timeout: 30_000 });
+  // And it has to say what still needs a connection, so the sentence is not
+  // read as "everything works offline".
+  await expect(dialog.getByText(/only AI suggestions need a connection/i)).toBeVisible();
+});
+
 test("the app still loads with the network switched off", async ({ page, context }) => {
   await page.goto("/");
   // Wait for the worker to be installed and controlling the page, otherwise

@@ -86,6 +86,35 @@ const storageGet = (keys) => chromeCall(chrome.storage.local.get.bind(chrome.sto
 const storageSet = (value) => chromeCall(chrome.storage.local.set.bind(chrome.storage.local), [value]);
 const permissionsContains = (value) => chromeCall(chrome.permissions.contains.bind(chrome.permissions), [value]);
 
+// The toolbar badge.
+//
+// It is set per tab, never globally: the count describes the field the
+// writer is in on that page, so it has to disappear when they navigate
+// away rather than follow them to the next document. The background colour
+// is the extension's own, so the badge reads as part of Draftwise rather
+// as another tool shouting for attention.
+const BADGE_COLOUR = "#173f38";
+
+function setTabBadge(tabId, count) {
+  if (typeof tabId !== "number") return;
+  // Not every browser exposes the badge APIs. The extension has to work
+  // without them: a missing badge is a missing nicety, not a broken
+  // feature.
+  if (!chrome.action || typeof chrome.action.setBadgeText !== "function") return;
+  const total = Number.isFinite(count) ? count : 0;
+  const text = total > 0 ? String(Math.min(total, 99)) : "";
+  chromeCall(chrome.action.setBadgeText.bind(chrome.action), [{ tabId, text }]).catch(() => undefined);
+  if (text && typeof chrome.action.setBadgeBackgroundColor === "function") {
+    chromeCall(chrome.action.setBadgeBackgroundColor.bind(chrome.action), [{ tabId, color: BADGE_COLOUR }]).catch(() => undefined);
+  }
+  const title = total > 0
+    ? `Draftwise — ${total} suggestion${total === 1 ? "" : "s"} in this field`
+    : "Draftwise settings";
+  if (typeof chrome.action.setTitle === "function") {
+    chromeCall(chrome.action.setTitle.bind(chrome.action), [{ tabId, title }]).catch(() => undefined);
+  }
+}
+
 async function reconcileSiteAccessWithPermissions() {
   const stored = await storageGet(["siteAccess"]);
   const sites = Array.isArray(stored.siteAccess) ? stored.siteAccess : [];
@@ -205,6 +234,20 @@ chrome.permissions.onRemoved.addListener(() => {
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 
+// A badge belongs to the page that produced it. When the writer navigates,
+// the count they were looking at is about a document they have left, so it
+// is cleared rather than carried over to the next one.
+//
+// This listens to tab updates without asking for the "tabs" permission: the
+// event carries the tab id and the load status, which is all this needs, and
+// asking for more would give the extension a view of every URL the writer
+// visits. It has no such view, and this is the line that keeps it that way.
+if (chrome.tabs && chrome.tabs.onUpdated) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo && changeInfo.status === "loading") setTabBadge(tabId, 0);
+  });
+}
+
 // Messages that change what the extension may read, or hand back the user's
 // allow-list. A content script runs on every page the user has granted, so
 // these are reserved to the options page; otherwise any granted page could
@@ -231,6 +274,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "list-permissions") {
     chrome.permissions.getAll((permissions) => sendResponse({ ok: true, origins: permissions.origins || [] }));
+    return true;
+  }
+  if (message?.type === "draftwise-badge") {
+    // A count from a content script, for the tab it is running in. Nothing
+    // else about the field is sent, and nothing is stored: the badge is
+    // rebuilt from scratch on every navigation.
+    setTabBadge(sender.tab?.id, Number(message.count));
+    sendResponse({ ok: true });
     return true;
   }
   if (message?.type !== "analyse") return false;

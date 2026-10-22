@@ -29,6 +29,23 @@ test("passive voice does not report stative adjectives ending in -ed", () => {
   assert.ok(real.length > 0, "a genuine passive construction must still be reported");
 });
 
+test("held/kept-constant result states are not reported as passive", () => {
+  // "The variables were held constant" is standard scientific register: the
+  // focus on the result is deliberate and no actor is missing. But the
+  // exemption needs the result adjective right after — "was held by the
+  // committee" still hides an actor and must still be reported.
+  for (const text of [
+    "The authors identify the variables that were held constant.",
+    "The samples were kept stable throughout the trial.",
+    "Conditions were held steady overnight.",
+  ]) {
+    const passive = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "style-passive-voice");
+    assert.deepEqual(passive.map((issue) => issue.original), [], `"${text}" states a result, not an evasion`);
+  }
+  const real = analyzeLocally("The decision was held by the committee until spring.", style).issues.filter((issue) => issue.ruleId === "style-passive-voice");
+  assert.ok(real.length > 0, "a held-passive with an explicit actor context must still be reported");
+});
+
 test("capitalization does not fire after an abbreviation", () => {
   for (const text of ["Mr. smith wrote it.", "Dr. jones will call.", "St. mary parish.", "etc. the rest is fine.", "vs. the other option.", "i.e. this is the plan."]) {
     const found = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "capitalization-sentence-start");
@@ -116,4 +133,71 @@ test("hedging words are only a problem when stacked in formal registers", () => 
   assert.deepEqual(analyzeLocally(single, style).issues.filter((issue) => issue.ruleId === "structure-note-hedging"), []);
   const stacked = "This might perhaps possibly deliver results and could seemingly help the region over the coming decade according to projections presented here.";
   assert.ok(analyzeLocally(stacked, style, goals("academic", "persuade", "formal")).issues.some((issue) => issue.ruleId === "structure-note-hedging"));
+});
+
+// A message typed entirely in lower case is a register, not a run of errors.
+// Every sentence of one is a false positive under the letter-case rules, which
+// made a single chat-sized note the noisiest draft the checker could see — and
+// the extension exists to check exactly those notes in web forms.
+const CHAT = "sounds good to me, ill grab some stuff on the way. do we need anything else for the evening? i can pop out at lunch if it helps";
+
+const caseRules = (text) => analyzeLocally(text, style).issues
+  .filter((issue) => issue.ruleId === "capitalization-sentence-start"
+    || issue.ruleId === "capitalization-pronoun-i"
+    || issue.ruleId === "punctuation-missing-terminal")
+  .map((issue) => `${issue.ruleId}:${issue.original}`);
+
+test("an uncased message is not a list of capitalisation errors", () => {
+  assert.deepEqual(caseRules(CHAT), [], "a deliberately lower-case message gets no case advice");
+});
+
+test("one capital letter anywhere puts casing back in play", () => {
+  // The exemption is about consistency, not about being unnoticed. As soon as
+  // the writer capitalises something, a lower-case sentence opening becomes a
+  // genuine inconsistency and the rules must report it again.
+  const mixed = CHAT.replace("the evening", "the Evening");
+  assert.ok(caseRules(mixed).length > 0, "mixed casing is the error the rules exist to catch");
+  const named = CHAT.replace("lunch", "Friday lunch");
+  assert.ok(caseRules(named).length > 0, "a capitalised name proves casing is in play");
+});
+
+test("a caseless fragment still gets its capital reported", () => {
+  // Below the register threshold there is no body of text to establish a voice,
+  // so a missing capital is a slip. evaluation/corpus.json pins this case.
+  assert.deepEqual(caseRules("this draft is ready."), ["capitalization-sentence-start:t"]);
+  assert.deepEqual(caseRules("i review the draft."), ["capitalization-pronoun-i:i"]);
+});
+
+test("agreement is not judged from a noun a preposition governs", () => {
+  // "the restructuring were met" is not an agreement error: the subject is
+  // "Costs", and "the restructuring" is what the costs are attributable to.
+  for (const text of [
+    "Costs attributable to the restructuring were met from the existing contingency.",
+    "Requests beyond the cap are queued in order, and each is retried.",
+  ]) {
+    const found = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement");
+    assert.deepEqual(found.map((issue) => issue.original), [], `"${text}" has a different subject`);
+  }
+  const real = analyzeLocally("The result were clear.", style).issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement");
+  assert.deepEqual(real.map((issue) => issue.original), ["were"], "a determiner-led subject at clause start is still checked");
+  // "As" and "since" can open a clause, so the phrase after them is a subject,
+  // not a prepositional object. The guard must not swallow these.
+  for (const text of ["As the results is clear, we should publish.", "Since the findings is clear, we can proceed."]) {
+    const found = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement");
+    assert.deepEqual(found.map((issue) => issue.original), ["is"], `"${text}" still has a real agreement error`);
+  }
+});
+
+test("the subjunctive after 'if' is not a plural-verb error", () => {
+  // "If the aggregate were published" is correct: after "if", "were" applies to
+  // every person. Reporting it as disagreement flagged correct writing.
+  for (const text of [
+    "If the aggregate were published, the comparison would still hold.",
+    "I wish the plan were simpler for everyone involved.",
+  ]) {
+    const found = analyzeLocally(text, style).issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement");
+    assert.deepEqual(found.map((issue) => issue.original), [], `"${text}" is correct English`);
+  }
+  const real = analyzeLocally("The plan were clear to everyone in the room.", style).issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement");
+  assert.deepEqual(real.map((issue) => issue.original), ["were"], "a genuine disagreement without 'if' is still reported");
 });

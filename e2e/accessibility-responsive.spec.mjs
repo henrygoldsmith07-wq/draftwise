@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart, waitForAppReady } from "./helpers.mjs";
 
 /**
  * Browser-level verification for the accessibility and responsive fixes.
@@ -13,22 +14,8 @@ import { test, expect } from "@playwright/test";
  * document-lifecycle.spec.mjs.
  */
 
-async function waitForAppReady(page) {
-  await expect(page.locator(".saved-dot")).toHaveAttribute(
-    "title",
-    /Saved|Unsaved|Storage|Could not|Saving/u,
-    { timeout: 30_000 },
-  );
-}
-
 async function openApp(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await waitForAppReady(page);
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();
@@ -191,4 +178,32 @@ test("sticky-sentence findings appear in the review list with an explanation", a
   // no aria-label on purpose: a label that does not contain the visible text
   // violates label-content-name-mismatch, which axe-core reports as serious.
   await expect(card.getByRole("button", { name: /^Ignore this$/u })).toBeVisible();
+});
+
+test("rail new badges clear on first visit and stay cleared", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (event) => errors.push(event.message));
+  // beforeEach opened a fresh app: both views are unvisited.
+  await expect(page.getByRole("button", { name: "Insights new" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Extension new" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Insights new" }).click();
+  await expect(page.getByRole("heading", { name: "See what makes the draft work." })).toBeVisible();
+  await page.getByRole("button", { name: "Documents" }).click();
+  await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Extension new" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Extension new" }).click();
+  await expect(page.getByRole("heading", { name: "Helpful, wherever you write." })).toBeVisible();
+  await page.getByRole("button", { name: "Documents" }).click();
+  await expect(page.getByRole("button", { name: "Extension", exact: true })).toBeVisible();
+
+  // The cleared state is persisted, not session-only.
+  await page.reload();
+  await waitForAppReady(page);
+  await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Extension", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: / new$/u })).toHaveCount(0);
+
+  expect(errors).toEqual([]);
 });

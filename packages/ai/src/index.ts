@@ -167,6 +167,92 @@ function endpointFor(baseUrl: string) {
   return parsed.toString();
 }
 
+export interface ProviderConnectionResult {
+  ok: boolean;
+  /** One-line verdict for the settings screen; never includes the key. */
+  message: string;
+  /** Round-trip time in ms, present only on success. */
+  latencyMs?: number;
+}
+
+/**
+ * Checks a provider configuration without touching any draft text.
+ *
+ * BYOK setup fails silently today: a typo'd URL or revoked key only
+ * surfaces later as a vague analysis error mid-draft. This lists models
+ * (GET {base}/models with the key) so settings can say "connected" before
+ * the writer depends on it. It sends the key in the Authorization header
+ * and nothing else — no draft text, no goals, no usage beyond the check.
+ */
+export async function testProviderConnection(
+  settings: Pick<ProviderSettings, "baseUrl" | "apiKey" | "customHeaders">,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<ProviderConnectionResult> {
+  if (!settings.apiKey.trim()) {
+    return { ok: false, message: "Add an API key first, then test the connection." };
+  }
+  let modelsUrl: string;
+  try {
+    const parsed = validateProviderUrl(settings.baseUrl);
+    const path = parsed.pathname.replace(/\/$/u, "");
+    parsed.pathname = path.endsWith("/models") ? path : `${path}/models`;
+    modelsUrl = parsed.toString();
+  } catch (error) {
+    if (error instanceof ProviderError) return { ok: false, message: error.message };
+    throw error;
+  }
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), Math.max(1_000, options.timeoutMs ?? 15_000));
+  const cancel = () => timeoutController.abort();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(modelsUrl, {
+      method: "GET",
+      signal: timeoutController.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: "Bearer " + settings.apiKey.trim(),
+        ...parseCustomHeaders(settings.customHeaders),
+      },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, message: "The endpoint rejected the API key. Check the key and try again." };
+    }
+    if (response.status === 404) {
+      return { ok: false, message: "Connected, but there is no /models endpoint here. Check the base URL." };
+    }
+    if (!response.ok) {
+      return { ok: false, message: `The endpoint answered ${response.status}. Check the base URL and try again.` };
+    }
+    let modelCount = 0;
+    try {
+      const payload: unknown = await response.json();
+      if (isRecord(payload) && Array.isArray(payload.data)) modelCount = payload.data.length;
+    } catch {
+      // A 2xx without a models body still proves URL + key work.
+    }
+    return {
+      ok: true,
+      message: modelCount > 0
+        ? `Connected — ${modelCount} ${modelCount === 1 ? "model" : "models"} listed.`
+        : "Connected — the endpoint accepted the API key.",
+      latencyMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    if (options.signal?.aborted || isAbortError(error)) {
+      return { ok: false, message: timeoutController.signal.aborted && !options.signal?.aborted ? "The endpoint did not answer in time. Check the URL and try again." : "The connection test was cancelled." };
+    }
+    if (error instanceof TypeError) {
+      return { ok: false, message: "Could not reach the endpoint. Check the URL, the network, and that it allows browser requests." };
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", cancel);
+  }
+}
+
 function parseJsonContent(value: unknown): unknown {
   if (typeof value !== "string") return value;
   const cleaned = value.trim().replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "");

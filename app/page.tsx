@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { BarChart3, CircleHelp, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
+import { BarChart3, CircleHelp, Download, FileText, Flag, Moon, PenLine, Puzzle, Settings2, ShieldCheck, Sparkles, Sun, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,7 +20,8 @@ import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writ
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
 import { ACTIVITY_STORAGE_KEY, countWords, creditSince } from "@/lib/writing-activity";
-import type { RestorableBackup } from "@/lib/backup";
+import { buildBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
+import { shouldShowBackupReminder } from "@/lib/backup-reminder";
 import { resolveDocumentStyle } from "@/lib/documents";
 import { WritingActivityStore } from "@/lib/activity-store";
 import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
@@ -158,6 +159,19 @@ export default function Home() {
   // seeded sample; the dashboard is the honest default, and opening any
   // document still lands in the editor from there.
   const [view, setView] = useState<WorkspaceView>("home");
+  // Rail "new" badges clear on first visit and stay cleared: the stamp lives
+  // in the persisted workspace, and each opener writes exactly once — the
+  // guard keeps later visits from dirtying state and queuing pointless saves.
+  const showInsightsNew = workspace.seenInsightsAt == null;
+  const showExtensionNew = workspace.seenExtensionAt == null;
+  const openInsights = useCallback(() => {
+    setView("insights");
+    if (workspace.seenInsightsAt == null) updateWorkspace({ seenInsightsAt: Date.now() });
+  }, [updateWorkspace, workspace.seenInsightsAt]);
+  const openExtensionGuide = useCallback(() => {
+    setView("extension");
+    if (workspace.seenExtensionAt == null) updateWorkspace({ seenExtensionAt: Date.now() });
+  }, [updateWorkspace, workspace.seenExtensionAt]);
   // Returning writers resume where they left off: once both stores hydrate,
   // a single render-phase adoption moves to the editor when real words exist.
   // A fresh install owns no words (the seed is empty by design), so it stays
@@ -665,6 +679,30 @@ export default function Home() {
     downloadFile(file);
   }, [documents.documents]);
 
+  /**
+   * Backup reminder: drafts live only in this browser, so writers with real
+   * work get one calm nudge to export a backup they own. "Later" snoozes for
+   * a week; any completed export (here or in settings) stamps lastBackupAt
+   * and silences the nudge for a month.
+   */
+  const totalLibraryWords = useMemo(
+    () => documents.summaries.reduce((sum, document) => sum + (document.wordCount || 0), 0),
+    [documents.summaries],
+  );
+  const showBackupReminder = !loading && view === "home" && shouldShowBackupReminder({
+    totalWords: totalLibraryWords,
+    lastBackupAt: workspace.lastBackupAt,
+    snoozedAt: workspace.backupReminderSnoozedAt,
+  });
+  const markBackupExported = useCallback(() => {
+    updateWorkspace({ lastBackupAt: Date.now(), backupReminderSnoozedAt: undefined });
+  }, [updateWorkspace]);
+  // Declared next to readBackupActivityRaw below (which it needs):
+  // exportBackupFromReminder. See below.
+  const snoozeBackupReminder = useCallback(() => {
+    updateWorkspace({ backupReminderSnoozedAt: Date.now() });
+  }, [updateWorkspace]);
+
   const duplicateDocument = useCallback((id: string) => {
     const copy = documents.duplicate(id);
     if (!copy) return;
@@ -778,6 +816,20 @@ export default function Home() {
       return null;
     }
   }, []);
+
+  // Reminder export lives here (not with the banner state above) because it
+  // needs the activity reader. Same file and message as the settings export,
+  // plus the reminder stamp so the nudge goes quiet afterwards.
+  const exportBackupFromReminder = useCallback(() => {
+    const backup = buildBackup({
+      documents: documents.documents,
+      workspace,
+      activity: readRawActivityLog(readBackupActivityRaw()),
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    markBackupExported();
+  }, [documents.documents, markBackupExported, readBackupActivityRaw, workspace]);
 
   // Backup restore: replace the whole library, then reload so every in-memory
   // store (dismissals, undo histories, baselines, review signals) rehydrates
@@ -950,17 +1002,18 @@ export default function Home() {
         <aside className="left-rail" aria-label="Draftwise sections">
           <div className="rail-nav"><button className={view === "home" ? "rail-button active" : "rail-button"} onClick={() => setView("home")} type="button" aria-label="Documents"><FileText size={18} aria-hidden="true" /><span>Documents</span></button><button className={view === "write" ? "rail-button active" : "rail-button"} onClick={() => setView("write")} type="button" aria-label="Write"><PenLine size={18} aria-hidden="true" /><span>Write</span></button>{/* The "new" badge is decorative, but its text still contributes to the
     button's computed visible text. axe's label-content-name-mismatch wants the
-    accessible name to CONTAIN that text, so the label keeps the full string
-    ("Insights new") rather than just "Insights" — a screen reader announces
-    the whole thing, which is accurate: the item is marked new. */}
-<button className={view === "insights" ? "rail-button active" : "rail-button"} onClick={() => setView("insights")} type="button" aria-label="Insights new"><BarChart3 size={18} aria-hidden="true" /><span>Insights</span><span className="rail-new" aria-hidden="true"> new</span></button><button className={view === "extension" ? "rail-button active" : "rail-button"} onClick={() => setView("extension")} type="button" aria-label="Extension new"><Puzzle size={18} aria-hidden="true" /><span>Extension</span><span className="rail-new" aria-hidden="true"> new</span></button></div>
+    accessible name to CONTAIN that text while the badge shows, so the label
+    keeps the full string ("Insights new") — and drops back to "Insights"
+    once the first visit stamps the badge away. A badge that never clears
+    teaches writers to ignore badges. */}
+<button className={view === "insights" ? "rail-button active" : "rail-button"} onClick={openInsights} type="button" aria-label={showInsightsNew ? "Insights new" : "Insights"}><BarChart3 size={18} aria-hidden="true" /><span>Insights</span>{showInsightsNew ? <span className="rail-new" aria-hidden="true"> new</span> : null}</button><button className={view === "extension" ? "rail-button active" : "rail-button"} onClick={openExtensionGuide} type="button" aria-label={showExtensionNew ? "Extension new" : "Extension"}><Puzzle size={18} aria-hidden="true" /><span>Extension</span>{showExtensionNew ? <span className="rail-new" aria-hidden="true"> new</span> : null}</button></div>
           <div className="rail-divider" />
           <div className="rail-context"><span className="rail-eyebrow">Writing goals · this document</span><div className="rail-goal"><Target size={15} /><span>{activeGoals.audience}</span></div><div className="rail-goal"><Flag size={15} /><span>{activeGoals.intent}</span></div><div className="rail-goal"><Sparkles size={15} /><span>{activeGoals.tone}</span></div><button className="rail-edit" onClick={() => setView("write")} type="button">Edit goals <Target size={13} /></button></div>
           <div className="rail-bottom"><button className="rail-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings2 size={17} aria-hidden="true" /><span>Settings</span></button><button className="rail-button" type="button" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts"><CircleHelp size={17} aria-hidden="true" /><span>Shortcuts</span><kbd aria-hidden="true">?</kbd></button></div>
         </aside>
 
         <div className="app-content">
-          {view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null}
+          {view === "home" ? <>{showBackupReminder ? <section className="backup-banner" aria-label="Back up your drafts"><ShieldCheck size={17} /><div><strong>Your {totalLibraryWords.toLocaleString("en-GB")} words live only in this browser.</strong><span>Export a backup file you own — a cleared profile or a lost device can&apos;t take it.</span></div><div className="backup-banner-actions"><Button size="sm" onClick={exportBackupFromReminder}><Download size={13} /> Export backup</Button><Button size="sm" variant="ghost" onClick={snoozeBackupReminder}>Later</Button></div></section> : null}<DocumentDashboard summaries={documents.summaries} documents={documents.documents} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /></> : null}
           {view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={activeGoals} style={activeStyle} dialect={activeStyle.dialect} onDialectChange={updateDialect} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} reviewAnnouncement={reviewAnnouncement} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={() => setSettingsOpen(true)} onSelectRange={onSelectRange} /> : null}
           {view === "insights" ? <InsightsView analysis={analysis} goals={activeGoals} style={activeStyle} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
           {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
@@ -968,7 +1021,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} theme={themeName} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} theme={themeName} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} onBackupExported={markBackupExported} />
       <ShortcutDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} theme={themeName} />
       <NewDraftDialog open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} theme={themeName} />
       <ClearDataDialog open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} theme={themeName} />

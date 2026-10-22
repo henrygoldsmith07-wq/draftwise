@@ -23,6 +23,7 @@ export {
   parseCustomHeaders,
   ProviderError,
   rewriteWithProvider,
+  testProviderConnection,
   validateProviderUrl,
   CLASSIFIER_MAX_BATCH_CHUNKS,
   CLASSIFIER_BATCH_SIZES,

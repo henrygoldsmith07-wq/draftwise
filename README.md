@@ -12,12 +12,15 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 
 ## What is included
 
-- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing. The app is installable (web manifest, maskable icon, Apple touch icon, theme colors).
+- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals with a live length-goal progress meter, a document library whose search covers the whole draft (not just the opening excerpt, and it highlights the matched passage), dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing. The app is installable (web manifest, maskable icon, Apple touch icon, theme colors).
+- Version history with a word-level comparison: opening a checkpoint shows what changed between it and the current draft, with added and removed passages marked, a plain summary ("2 changes · +12 words · −6 words"), and side-by-side still one click away. Very long drafts fall back to a paragraph comparison and say so.
+- Read aloud through the browser's own speech engine, with the passage being spoken marked in the editor and a voice chosen to match the draft's British or American dialect. It never touches the network or the configured provider, and the control disables itself with an explanation when the browser has no voices installed. Editing the draft stops the reading rather than leaving the highlight behind.
 - Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
+- Register awareness: a draft written entirely in lower case (a chat message, a quick note) is treated as a deliberate voice rather than as a page of capitalisation errors, and sentence-case advice returns the moment any capital letter appears. The same signal silences terminal-punctuation advice on those messages. A short all-lower-case fragment is still reported, because there is not enough text to establish a register.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
 - Preview-first rewrites with local fallback, protected URLs, emails, dates, currencies, identifiers, filenames, quoted text, and stale-selection checks. AI alternatives remain previews until chosen.
-- Full backup and restore: every document with its goals and history, settings, and writing activity as one versioned JSON file from Settings. A backup includes API keys so a restore brings back a working app — keep the file private.
+- Full backup and restore: every document with its goals and history, settings, and writing activity as one versioned JSON file from Settings. A backup includes API keys so a restore brings back a working app — keep the file private. Once the library holds real work, a dismissible reminder nudges writers with no recent backup to export one.
 - Dependency-light Manifest V3 extension. Dynamic content-script registration runs only on explicitly granted sites; provider-origin access is separately granted to the service worker, and the content script never receives the API key.
 
 ## Run locally
@@ -29,7 +32,7 @@ npm install
 npm run dev
 ```
 
-The web editor works without environment variables. To enable AI, open Settings, enable AI, and configure an HTTPS OpenAI-compatible endpoint, model, and API key. Localhost HTTP endpoints are allowed for development only.
+The web editor works without environment variables. To enable AI, open Settings, enable AI, and configure an HTTPS OpenAI-compatible endpoint, model, and API key. Localhost HTTP endpoints are allowed for development only. Use Test connection to verify the URL and key against the provider's model list before depending on it — the check sends the key in the header and no draft text.
 
 Useful checks:
 

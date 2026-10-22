@@ -68,6 +68,14 @@ test("extension manifest keeps host access optional and includes generated share
   assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*", "http://*/*"]);
   assert.equal(manifest.content_scripts, undefined);
+  // Store readiness: the toolbar, the extension list, and the web store all
+  // need declared icons, and every declared file must actually ship.
+  assert.deepEqual(manifest.icons, { 16: "icon-16.png", 32: "icon-32.png", 48: "icon-48.png", 128: "icon-128.png" });
+  assert.deepEqual(manifest.action.default_icon, { 16: "icon-16.png", 32: "icon-32.png" });
+  for (const icon of Object.values(manifest.icons)) {
+    const bytes = await readFile(file(`extension/${icon}`));
+    assert.ok(bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47, `${icon} is a real PNG`);
+  }
   await readFile(file("extension/shared-analysis.js"), "utf8");
   await readFile(file("extension/shared-provider.js"), "utf8");
   await readFile(file("extension/field-classification.js"), "utf8");

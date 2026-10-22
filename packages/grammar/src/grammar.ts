@@ -62,6 +62,86 @@ function nounLooksPlural(word: string) {
   return !/(?:analysis|basis|business|class|gas|glass|is|mathematics|news|physics|series|species|status|ss|us)$/u.test(lower);
 }
 
+/**
+ * Whether the whole draft is written without letter case.
+ *
+ * Chat messages, quick notes and semi-formal messages are routinely typed
+ * entirely in lower case. In that register the missing capital is not a slip:
+ * there is no capital to be missing anywhere in the draft, so the choice is
+ * consistent, and consistency is what tells a deliberate voice from an error.
+ * Reporting every sentence of such a message (a four-sentence note produced
+ * four findings, plus one for each "i") is the single noisiest class of false
+ * positive we had on ordinary text, and it landed hardest in the extension,
+ * whose main job is short messages on web forms.
+ *
+ * Two conditions keep this from becoming a blanket exemption.
+ *
+ * 1. A draft that contains *any* capital letter has casing in play, so a
+ *    lower-case sentence in it is still a genuine inconsistency worth
+ *    reporting. One capital word anywhere — a name, an acronym — switches the
+ *    rules back on for the whole draft.
+ *
+ * 2. A register needs a body of text to exist. The calibration corpus pins the
+ *    reported side: a four-word caseless fragment ("this draft is ready.") must
+ *    still be flagged. Ten words leaves a deliberate margin above that — at
+ *    ten words the writer has written a message, not an unfinished sentence —
+ *    and the margin is what keeps this a rule about a body of text rather than
+ *    a rule about one sentence.
+ */
+const UNCASED_REGISTER_MIN_WORDS = 10;
+
+export function isUncasedDraft(text: string) {
+  if (!text.trim()) return false;
+  // The cheap test first: any capital letter in the draft makes it cased, which
+  // is the common case and skips the word count entirely.
+  if (/\p{Lu}/u.test(text)) return false;
+  // Count only as far as the threshold. Splitting a long draft into words on
+  // every keystroke was measurable work in the analysis loop, and the answer is
+  // decided by the tenth word either way.
+  const words = /\S+/gu;
+  let count = 0;
+  while (words.exec(text)) {
+    count += 1;
+    if (count >= UNCASED_REGISTER_MIN_WORDS) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a determiner phrase starting at `position` is the object of a
+ * preposition rather than the subject of its clause.
+ *
+ * "Costs attributable to the restructuring were met" was reported as an
+ * agreement error because the pattern saw "the restructuring were". The real
+ * subject is "Costs"; "the restructuring" is what the costs are attributable
+ * to. Agreement cannot be judged from a noun that a preposition governs, so the
+ * determiner patterns must skip those phrases.
+ *
+ * Words that can also open a clause — "as", "since", "until", "after" — are
+ * deliberately absent: in "as the results are clear" the determiner phrase *is*
+ * the subject, and skipping it would hide the agreement error the rule exists
+ * to catch.
+ */
+const PREPOSITION_BEFORE = /(?:^|[^\p{L}])(?:about|above|across|against|along|among|around|at|behind|below|beneath|beside|between|beyond|by|despite|during|except|for|from|in|inside|into|near|of|off|on|onto|outside|over|past|per|through|throughout|to|toward|towards|under|upon|via|with|within|without)\s+$/iu;
+
+function isPrepositionalObject(text: string, position: number) {
+  return position > 0 && PREPOSITION_BEFORE.test(text.slice(0, position));
+}
+
+/**
+ * Whether a verb sits in a hypothetical clause that takes the subjunctive.
+ *
+ * "If the aggregate were published" is correct English: after "if", "were"
+ * applies to every person. Treating it as a plural verb disagreeing with a
+ * singular subject reported a grammar error on correct writing, so the "were"
+ * agreement fix is withheld inside those clauses.
+ */
+function inHypotheticalClause(text: string, position: number) {
+  const boundaries = [".", "!", "?", "\n"].map((mark) => text.lastIndexOf(mark, position - 1));
+  const clauseStart = Math.max(...boundaries) + 1;
+  return /\b(?:if|wish|as though|as if|suppose|supposing)\b/iu.test(text.slice(clauseStart, position));
+}
+
 export function findPrecisionGrammarIssues(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
   for (const match of text.matchAll(/\b(the|a|an|this|that|my|your)\s+\1\b/giu)) {
@@ -93,13 +173,21 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
       const singularVerb = ["is", "was", "has", "does"].includes(verb.toLocaleLowerCase());
       if ((pluralVerb && subjectIsPlural) || (singularVerb && !subjectIsPlural && !["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase()))) continue;
       const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+      // Only the determiner patterns can be thrown off by sentence structure;
+      // "he/she/it" and "they/we/you" are unambiguous subjects.
+      const determinerLed = /^(?:the|this|that|these|those|my|your|our|their)\b/iu.test(match[0]);
+      if (determinerLed && isPrepositionalObject(text, match.index ?? 0)) continue;
+      if (verb.toLocaleLowerCase() === "were" && inHypotheticalClause(text, start)) continue;
       pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, replacements[verb.toLocaleLowerCase()] ?? verb), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.94, preferences));
     }
   }
   const trimmed = text.trim();
   const lastSentence = document.sentences[document.sentences.length - 1];
   const lastToken = document.tokens[document.tokens.length - 1];
-  if (trimmed && lastSentence && lastToken && lastSentence.tokens.length >= 4 && /[\p{L}\p{N})\]]$/u.test(trimmed) && /\s/u.test(lastSentence.text)) {
+  // A message with no letter case has no convention for terminal stops either,
+  // and its last line is usually a sign-off rather than a forgotten full stop.
+  const uncased = isUncasedDraft(text);
+  if (!uncased && trimmed && lastSentence && lastToken && lastSentence.tokens.length >= 4 && /[\p{L}\p{N})\]]$/u.test(trimmed) && /\s/u.test(lastSentence.text)) {
     const lastLower = lastToken.lower.split(/[’']/u)[0];
     const hasVerb = VERB_HINTS.has(lastLower) || lastSentence.tokens.some((token) => /(?:ed|ing|s)$/u.test(token.lower));
     if (hasVerb) pushIssue(issues, makeIssue("punctuation-missing-terminal", lastToken.start, lastToken.end, lastToken.value, `${lastToken.value}.`, "punctuation", "low", "Add terminal punctuation", "A complete sentence usually ends with punctuation.", 0.82, preferences));
@@ -166,6 +254,8 @@ function isAbbreviationWord(word: string) {
 
 export function findCapitalization(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
+  // Uncased drafts get no capitalisation advice at all: see isUncasedDraft.
+  if (isUncasedDraft(text)) return issues;
   for (const match of text.matchAll(/(^|[.!?]\s+)([a-z])/g)) {
     const prefix = match[1] ?? "";
     const start = (match.index ?? 0) + prefix.length;

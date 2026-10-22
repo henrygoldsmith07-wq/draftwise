@@ -21,6 +21,14 @@ Then:
 
 The generated `shared-analysis.js` and `shared-provider.js` bundles are checked in so the folder can be loaded directly. They are generated artifacts: do not edit them manually. Rebuild them after changing `packages/grammar`, `packages/analysis`, or `packages/ai`; CI fails when the committed bundles are stale.
 
+## Store packaging
+
+```bash
+npm run extension:package
+```
+
+This rebuilds the bundles, validates the manifest (version matches `package.json`, every referenced file ships, no `<all_urls>`), stages a clean directory at `dist/extension/`, and zips it as `dist/draftwise-extension-<version>.zip` when a zip tool exists (`zip`, or the bsdtar that ships with Windows/macOS). The zip is what a web-store upload takes; developer installs still use **Load unpacked** on this folder.
+
 ## Security boundary
 
 - Local rules run in `content.js` through `shared-analysis.js`.

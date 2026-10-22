@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HighlightLayer, GoalSelect, ScoreRing, SuggestionCard, type SuggestionCardControls } from "@/components/draftwise/EditorPrimitives";
+import { ReadAloudControls } from "@/components/draftwise/ReadAloudControls";
 import { DocumentOverview, SuppressedFindings } from "@/components/draftwise/DocumentOverview";
 import { RewritePreview } from "@/components/draftwise/RewritePreview";
 import { hasActionableReplacement } from "@/lib/issue-actions";
@@ -30,7 +31,9 @@ import { rewriteActionsFor } from "@/lib/rewrite-actions";
 import { type CategoryFilter, type SuggestionState, TIER_DESCRIPTIONS, TIER_LABELS, type TierFilter } from "@/lib/suggestions";
 import type { AnalysisResult, Dialect, PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 import { formatPreferredReplacements, formatTerminologyList, parsePreferredReplacements, parseTerminologyList } from "@/lib/terminology";
+import { lengthProgress, lengthProgressLabel } from "@/lib/goal-progress";
 import type { RewritePreviewState } from "@/hooks/useRewrite";
+import { useReadAloud } from "@/hooks/useReadAloud";
 
 interface EditorWorkspaceProps {
   draft: string;
@@ -211,6 +214,15 @@ function SwapsField({ value, onCommit }: {
 
 export function EditorWorkspace(props: EditorWorkspaceProps) {
   const { registerTextarea, registerHighlight } = props;
+  // Live length-goal progress. The goal bar sets the target; this answers
+  // "how far along am I" next to it, from the same word count the analysis
+  // already computes — no extra counting pass over the draft.
+  const goalProgress = lengthProgress(props.analysis.stats.words, props.goals.targetLength);
+  const goalProgressLabel = lengthProgressLabel(goalProgress);
+  // Read-aloud is owned here because the draft, the dialect and the highlight
+  // layer all live in this component: no page-level state is needed, and the
+  // text that is spoken cannot drift from the text on screen.
+  const readAloud = useReadAloud({ text: props.draft, dialect: props.dialect });
   const scoreMessage = props.analysis.scores.overall >= 90
     ? "Polished draft"
     : props.analysis.scores.overall >= 75
@@ -245,6 +257,12 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           <GoalSelect label="Length" value={props.goals.targetLength ? String(props.goals.targetLength) : ""} options={[{ value: "", label: "Any" }, { value: "300", label: "~300 words" }, { value: "600", label: "~600 words" }, { value: "1200", label: "~1,200 words" }, { value: "2500", label: "~2,500 words" }]} onChange={(value) => props.onGoalChange({ targetLength: value ? Number(value) : undefined })} />
           <GoalSelect label="English" value={props.dialect} options={[{ value: "en-GB", label: "British" }, { value: "en-US", label: "American" }]} onChange={(value) => props.onDialectChange(value as Dialect)} />
         </div>
+        {goalProgressLabel !== null ? (
+          <div className="goal-progress" role="progressbar" aria-label="Length goal progress" aria-valuenow={goalProgress.percent} aria-valuemin={0} aria-valuemax={100} aria-valuetext={goalProgressLabel}>
+            <div className="goal-progress-track" aria-hidden="true"><i style={{ width: `${goalProgress.percent}%` }} /></div>
+            <span>{goalProgressLabel}</span>
+          </div>
+        ) : null}
 
         {/* Per-document terminology: terms this draft must use or must avoid,
             plus word swaps it enforces ("login -> sign in"). The swaps are
@@ -304,6 +322,8 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               <Button size="icon-xs" variant="ghost" aria-label="Redo" disabled={!props.canRedo} onClick={props.onRedo}><RotateCw size={15} /></Button>
               <span className="toolbar-separator" />
               <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode} aria-label={props.focusMode ? "Exit focus mode" : "Check as I write mode"}><Highlighter size={14} aria-hidden="true" /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
+              <span className="toolbar-separator" />
+              <ReadAloudControls controller={readAloud} hasText={props.draft.trim().length > 0} disabled={props.loading} />
             </div>
             <div className="editor-toolbar-right">
               <span className={`analysis-status ${props.analyzing ? "is-working" : ""}`} role="status" aria-live="polite">
@@ -317,7 +337,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
             </div>
           </div>
           <div className="editor-scroll-wrap">
-            <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.openIssues} activeIssueId={props.activeIssueId} /></div>
+            <div ref={registerHighlight} className="editor-highlight-scroll"><HighlightLayer text={props.draft} issues={props.openIssues} activeIssueId={props.activeIssueId} spokenRange={readAloud.range} /></div>
             <textarea ref={registerTextarea} className="editor-input" value={props.draft} onChange={props.onDraftChange} onSelect={props.onSelectionChange} onKeyUp={props.onSelectionChange} onScroll={props.onScroll} spellCheck={false} data-review-guard aria-label="Draft editor" disabled={props.loading} placeholder="Start writing…" />
           </div>
           <div className="editor-footer">

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart } from "./helpers.mjs";
 
 const MISSES = [
   "seperate", "occured", "definately", "accomodate", "untill", "wich",
@@ -8,11 +9,7 @@ const MISSES = [
 ];
 
 async function openWorkspace(page) {
-  await page.goto("/");
-  await page.evaluate(() => { indexedDB.deleteDatabase("draftwise-documents"); localStorage.clear(); });
-  await page.reload();
-  // The dot ships in the server-rendered shell, so its presence proves nothing. Its status text appears only once the client store hydrates — clicking Write before that hits a dead button and strands the run on the dashboard.
-  await expect(page.locator(".saved-dot")).toHaveAttribute("title", /Saved|Unsaved|Storage|Could not|Saving/u, { timeout: 30_000 });
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();

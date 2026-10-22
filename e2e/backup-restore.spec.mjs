@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
+import { freshStart, waitForAppReady } from "./helpers.mjs";
 
 /**
  * Backup & restore, driven through the real Settings dialog.
@@ -14,24 +15,6 @@ import { writeFile } from "node:fs/promises";
 
 const editor = (page) => page.getByLabel("Draft editor");
 const titleInput = (page) => page.getByLabel("Document title");
-
-async function waitForAppReady(page) {
-  await expect(page.locator(".saved-dot")).toHaveAttribute(
-    "title",
-    /Saved|Unsaved|Storage|Could not|Saving/u,
-    { timeout: 30_000 },
-  );
-}
-
-async function freshStart(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await waitForAppReady(page);
-}
 
 async function openEditor(page) {
   // Fresh installs open on the documents dashboard, so step into the editor.
@@ -196,6 +179,53 @@ test("a corrupt backup is refused without touching the library", async ({ page }
   await expect(page.locator(".document-card-main", { hasText: "Keep me" })).toHaveCount(1);
   await page.locator(".document-card-main", { hasText: "Keep me" }).first().click();
   await expect(editor(page)).toHaveValue(/Nothing about this may change/u);
+
+  expect(errors).toEqual([]);
+});
+
+test("backup reminder appears for real work and respects snooze and export", async ({ page }, testInfo) => {
+  const errors = [];
+  page.on("pageerror", (event) => errors.push(event.message));
+  const longText = "word ".repeat(250).trim();
+
+  await freshStart(page);
+  // An empty library never nags.
+  await expect(page.locator(".backup-banner")).toHaveCount(0);
+
+  await openEditor(page);
+  await createDocument(page, "Long draft", longText);
+  // A plain click, not forced: it retries across the re-renders analysis
+  // causes, where a forced single-shot click can land on a detached node
+  // and silently navigate nowhere.
+  await page.getByRole("button", { name: "Documents" }).click();
+  const banner = page.locator(".backup-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(/words live only in this browser/u);
+
+  // "Later" snoozes: gone now, and still gone after a reload.
+  await banner.getByRole("button", { name: "Later" }).click();
+  await expect(banner).toHaveCount(0);
+  await page.reload();
+  await waitForAppReady(page);
+  await expect(page.locator(".backup-banner")).toHaveCount(0);
+
+  // A fresh profile holding the same real work shows the banner again, and
+  // exporting from it silences the nudge across a reload.
+  await freshStart(page);
+  await openEditor(page);
+  await createDocument(page, "Long draft", longText);
+  await page.getByRole("button", { name: "Documents" }).click();
+  const bannerAgain = page.locator(".backup-banner");
+  await expect(bannerAgain).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await bannerAgain.getByRole("button", { name: "Export backup" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/draftwise-backup-.*\.json/u);
+  await download.saveAs(testInfo.outputPath("reminder-backup.json"));
+  await expect(page.locator(".backup-banner")).toHaveCount(0);
+  await page.reload();
+  await waitForAppReady(page);
+  await expect(page.locator(".backup-banner")).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

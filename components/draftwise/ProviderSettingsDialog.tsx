@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { downloadFile } from "@/lib/import-export";
+import { testProviderConnection } from "@/lib/ai-provider";
+import { formatRelativeTime } from "@/lib/time";
 import { exportProfile, importProfile } from "@/lib/profile-transfer";
 import { buildBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
 import type { StoredDocument } from "@/lib/documents";
@@ -47,6 +49,8 @@ interface ProviderSettingsDialogProps {
    * and reports per-document counts on success. Merge must not reload at all.
    */
   onRestoreBackup: (backup: RestorableBackup, mode: "replace" | "merge") => Promise<{ ok: true; merged?: { added: number; skipped: number; renamed: number } } | { ok: false; error: string }>;
+  /** Stamps the backup reminder's last-export time after a settings export. */
+  onBackupExported?: () => void;
 }
 
 export function ProviderSettingsDialog({
@@ -68,6 +72,7 @@ export function ProviderSettingsDialog({
   backupWorkspace,
   readBackupActivityRaw,
   onRestoreBackup,
+  onBackupExported,
 }: ProviderSettingsDialogProps) {
   const patchSettings = (patch: Partial<ProviderSettings>) => onSettingsChange({ ...settings, ...patch });
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
@@ -79,6 +84,21 @@ export function ProviderSettingsDialog({
   // document store returns one when local storage is unavailable), so it is now
   // shown with a next action instead of silently discarded.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // BYOK setup fails silently today: a typo'd URL or revoked key only
+  // surfaces later as a vague mid-draft analysis error. The test lists
+  // models (key in the header, nothing else sent) so settings can say
+  // "connected" before the writer depends on it.
+  const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const runConnectionTest = () => {
+    if (testingConnection) return;
+    setTestingConnection(true);
+    setConnectionTest(null);
+    void testProviderConnection({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, customHeaders: settings.customHeaders })
+      .then((result) => setConnectionTest(result))
+      .catch(() => setConnectionTest({ ok: false, message: "The test failed unexpectedly. Check the URL and try again." }))
+      .finally(() => setTestingConnection(false));
+  };
   // Profile portability: the writer's learned language data as a file they
   // own. Export downloads it; import merges a file additively and reports
   // exactly what changed. Secrets never enter the file (see profile-transfer).
@@ -119,6 +139,7 @@ export function ProviderSettingsDialog({
     });
     const stamp = new Date().toISOString().slice(0, 10);
     downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    onBackupExported?.();
     setPendingBackup(null);
     setBackupMessage(`Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
   };
@@ -221,6 +242,11 @@ export function ProviderSettingsDialog({
             <span>Model</span>
             <Input value={settings.model} onChange={(event) => patchSettings({ model: event.target.value })} placeholder={PROVIDER_PRESETS.find((item) => item.value === settings.provider)?.modelPlaceholder ?? "gpt-4o-mini"} />
           </label>
+
+          <div className="settings-connection">
+            <Button size="sm" variant="outline" onClick={runConnectionTest} disabled={testingConnection}>{testingConnection ? "Testing…" : "Test connection"}</Button>
+            {connectionTest ? <span role="status" className={connectionTest.ok ? "connection-ok" : "connection-error"}>{connectionTest.message}</span> : <span className="connection-hint">Checks the URL and key against the provider&apos;s model list. No draft text is sent.</span>}
+          </div>
 
           <details className="settings-advanced">
             <summary><ChevronRight size={14} className="settings-advanced-chevron" /> Advanced</summary>
@@ -370,6 +396,7 @@ export function ProviderSettingsDialog({
                 <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importBackupFile(file); event.target.value = ""; }} />
               </label>
             </div>
+            <p className="backup-age">{backupWorkspace.lastBackupAt ? `Last exported ${formatRelativeTime(backupWorkspace.lastBackupAt)}.` : "Never exported yet — your words live only in this browser."}</p>
             {pendingBackup ? (
               <div className="writing-profile-transfer-message" role="alert">
                 <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}?</span>

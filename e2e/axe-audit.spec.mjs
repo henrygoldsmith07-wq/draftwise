@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart, waitForAppReady } from "./helpers.mjs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -30,22 +31,8 @@ function axeSource() {
   return readFile(require.resolve("axe-core/axe.min.js"), "utf8");
 }
 
-async function waitForAppReady(page) {
-  await expect(page.locator(".saved-dot")).toHaveAttribute(
-    "title",
-    /Saved|Unsaved|Storage|Could not|Saving/u,
-    { timeout: 30_000 },
-  );
-}
-
 async function openApp(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await waitForAppReady(page);
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();

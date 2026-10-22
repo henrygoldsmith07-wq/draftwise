@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:e2e:production": "playwright test --config playwright.vercel.config.mjs",
     "extension:build": "node scripts/build-extension.mjs",
+    "extension:package": "npm run extension:build && node scripts/package-extension.mjs",
     "benchmark": "node --experimental-strip-types scripts/benchmark.mjs",
     "benchmark:triage": "node --experimental-strip-types scripts/benchmark-triage.mjs",
     "evaluate:blind": "node --experimental-strip-types scripts/evaluate-blind.mjs",

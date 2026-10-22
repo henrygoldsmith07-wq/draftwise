@@ -180,11 +180,24 @@ const GLUE_WORDS = new Set([
  * the evidence, and the reason for each choice." Ordinary English is more
  * glue-heavy than 40% suggests, so that number does not transfer.
  *
- * Sentences under 12 words are exempt: at that length the ratio is noise,
- * because "It was good" is 50% glue and perfectly clear.
+ * ProWritingAid uses 40% for the same concept, which on this corpus would flag
+ * 52 correct sentences out of 170 — including "The paper explains the method,
+ * the evidence, and the reason for each choice." Ordinary English is more
+ * glue-heavy than 40% suggests, so that number does not transfer.
+ *
+ * The ratio alone cannot separate clear from dense: evaluation/corpus.json
+ * holds two correct 15-word sentences at 67% glue ("We can send the draft
+ * when you are ready, and we can review it together" in general and casual
+ * voice) while the motivating dense example measures 68% — no threshold
+ * fits between them without knife-edge overfitting. What separates them is
+ * length: connective tissue the reader must hold across 30 words is a
+ * burden; the same share across 15 words parses fine. So the ratio test
+ * applies from 20 words up (the FPs sit at 15, the dense example at 30),
+ * and shorter sentences are exempt entirely — at that length the ratio is
+ * noise, because "It was good" is 50% glue and perfectly clear.
  */
 const STICKY_SENTENCE_RATIO = 0.55;
-const STICKY_SENTENCE_MIN_WORDS = 12;
+const STICKY_SENTENCE_MIN_WORDS = 20;
 
 /**
  * Sentences made mostly of connecting words.
@@ -263,6 +276,18 @@ export function findStructureIssues(text: string, preferences: StylePreferences,
       // "The walls are red" and "He was tired" are not passive constructions.
       const participle = /(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))/iu.exec(match[0].replace(/^\S+\s+/u, ""));
       if (participle && staticEdAdjectives.includes(` ${participle[0].toLowerCase()} `)) continue;
+      // "The variables were held constant" is standard scientific register,
+      // not an evasive passive: held/kept plus a result adjective (constant,
+      // stable, steady, unchanged) states a result the writer owns, and no
+      // actor is missing — rewriting it as "we held the variables constant"
+      // changes the emphasis for no reader benefit. "Was held by" still
+      // fires: the exemption needs the result adjective right after.
+      if (participle && /^(?:held|kept)$/iu.test(participle[0])) {
+        // Horizontal whitespace only: the adjective must be in the same
+        // clause, not the start of the next paragraph.
+        const after = text.slice(start + match[0].length);
+        if (/^[ \t]+(?:constant|constantly|stable|steady|unchanged)\b/iu.test(after)) continue;
+      }
       // Only offer the change where an actor is plausibly missing. Reporting
       // what happened ("the backlog was cleared") is correct, deliberate prose.
       const sentence = document.sentences.find((span) => start >= span.start && start < span.end);

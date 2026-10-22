@@ -147,11 +147,45 @@ function summarise(document: StoredDocument): DocumentSummary {
   };
 }
 
-export function summariseDocuments(documents: StoredDocument[], query = "") {
+/**
+ * Whether a document matches the library search.
+ *
+ * The whole draft is searched, not the excerpt shown on the card. The dashboard
+ * used to filter on title and excerpt while the label promised "titles and
+ * text", so a phrase in the middle of a long draft was invisible to search —
+ * exactly the draft you most need search to find.
+ */
+export function documentMatchesQuery(document: Pick<StoredDocument, "title" | "draft">, query: string) {
   const needle = query.trim().toLocaleLowerCase();
-  const matches = needle
-    ? documents.filter((document) => document.title.toLocaleLowerCase().includes(needle) || document.draft.toLocaleLowerCase().includes(needle))
-    : documents;
+  if (!needle) return true;
+  return document.title.toLocaleLowerCase().includes(needle)
+    || document.draft.toLocaleLowerCase().includes(needle);
+}
+
+const EXCERPT_RADIUS = 70;
+
+/**
+ * The passage around the first match, so the card shows why the draft matched
+ * instead of the opening line the writer has already read.
+ *
+ * Returns null when the query is empty or appears only in the title; the card
+ * keeps its normal opening excerpt in that case.
+ */
+export function matchingExcerpt(document: Pick<StoredDocument, "title" | "draft">, query: string, radius = EXCERPT_RADIUS) {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return null;
+  const haystack = document.draft.toLocaleLowerCase();
+  const index = haystack.indexOf(needle);
+  if (index < 0) return null;
+  const from = Math.max(0, index - radius);
+  const to = Math.min(document.draft.length, index + needle.length + radius);
+  const before = from > 0 ? "…" : "";
+  const after = to < document.draft.length ? "…" : "";
+  return `${before}${document.draft.slice(from, to).replace(/\s+/gu, " ").trim()}${after}`;
+}
+
+export function summariseDocuments(documents: StoredDocument[], query = "") {
+  const matches = documents.filter((document) => documentMatchesQuery(document, query));
   return matches
     .map(summarise)
     .sort((left, right) => right.updatedAt - left.updatedAt);

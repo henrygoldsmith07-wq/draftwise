@@ -1262,6 +1262,84 @@ function nounLooksPlural(word) {
         return false;
     return !/(?:analysis|basis|business|class|gas|glass|is|mathematics|news|physics|series|species|status|ss|us)$/u.test(lower);
 }
+/**
+ * Whether the whole draft is written without letter case.
+ *
+ * Chat messages, quick notes and semi-formal messages are routinely typed
+ * entirely in lower case. In that register the missing capital is not a slip:
+ * there is no capital to be missing anywhere in the draft, so the choice is
+ * consistent, and consistency is what tells a deliberate voice from an error.
+ * Reporting every sentence of such a message (a four-sentence note produced
+ * four findings, plus one for each "i") is the single noisiest class of false
+ * positive we had on ordinary text, and it landed hardest in the extension,
+ * whose main job is short messages on web forms.
+ *
+ * Two conditions keep this from becoming a blanket exemption.
+ *
+ * 1. A draft that contains *any* capital letter has casing in play, so a
+ *    lower-case sentence in it is still a genuine inconsistency worth
+ *    reporting. One capital word anywhere — a name, an acronym — switches the
+ *    rules back on for the whole draft.
+ *
+ * 2. A register needs a body of text to exist. The calibration corpus pins the
+ *    reported side: a four-word caseless fragment ("this draft is ready.") must
+ *    still be flagged. Ten words leaves a deliberate margin above that — at
+ *    ten words the writer has written a message, not an unfinished sentence —
+ *    and the margin is what keeps this a rule about a body of text rather than
+ *    a rule about one sentence.
+ */
+const UNCASED_REGISTER_MIN_WORDS = 10;
+function isUncasedDraft(text) {
+    if (!text.trim())
+        return false;
+    // The cheap test first: any capital letter in the draft makes it cased, which
+    // is the common case and skips the word count entirely.
+    if (/\p{Lu}/u.test(text))
+        return false;
+    // Count only as far as the threshold. Splitting a long draft into words on
+    // every keystroke was measurable work in the analysis loop, and the answer is
+    // decided by the tenth word either way.
+    const words = /\S+/gu;
+    let count = 0;
+    while (words.exec(text)) {
+        count += 1;
+        if (count >= UNCASED_REGISTER_MIN_WORDS)
+            return true;
+    }
+    return false;
+}
+/**
+ * Whether a determiner phrase starting at `position` is the object of a
+ * preposition rather than the subject of its clause.
+ *
+ * "Costs attributable to the restructuring were met" was reported as an
+ * agreement error because the pattern saw "the restructuring were". The real
+ * subject is "Costs"; "the restructuring" is what the costs are attributable
+ * to. Agreement cannot be judged from a noun that a preposition governs, so the
+ * determiner patterns must skip those phrases.
+ *
+ * Words that can also open a clause — "as", "since", "until", "after" — are
+ * deliberately absent: in "as the results are clear" the determiner phrase *is*
+ * the subject, and skipping it would hide the agreement error the rule exists
+ * to catch.
+ */
+const PREPOSITION_BEFORE = /(?:^|[^\p{L}])(?:about|above|across|against|along|among|around|at|behind|below|beneath|beside|between|beyond|by|despite|during|except|for|from|in|inside|into|near|of|off|on|onto|outside|over|past|per|through|throughout|to|toward|towards|under|upon|via|with|within|without)\s+$/iu;
+function isPrepositionalObject(text, position) {
+    return position > 0 && PREPOSITION_BEFORE.test(text.slice(0, position));
+}
+/**
+ * Whether a verb sits in a hypothetical clause that takes the subjunctive.
+ *
+ * "If the aggregate were published" is correct English: after "if", "were"
+ * applies to every person. Treating it as a plural verb disagreeing with a
+ * singular subject reported a grammar error on correct writing, so the "were"
+ * agreement fix is withheld inside those clauses.
+ */
+function inHypotheticalClause(text, position) {
+    const boundaries = [".", "!", "?", "\n"].map((mark) => text.lastIndexOf(mark, position - 1));
+    const clauseStart = Math.max(...boundaries) + 1;
+    return /\b(?:if|wish|as though|as if|suppose|supposing)\b/iu.test(text.slice(clauseStart, position));
+}
 function findPrecisionGrammarIssues(text, preferences, document = parseDocument(text)) {
     const issues = [];
     for (const match of text.matchAll(/\b(the|a|an|this|that|my|your)\s+\1\b/giu)) {
@@ -1295,13 +1373,23 @@ function findPrecisionGrammarIssues(text, preferences, document = parseDocument(
             if ((pluralVerb && subjectIsPlural) || (singularVerb && !subjectIsPlural && !["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase())))
                 continue;
             const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+            // Only the determiner patterns can be thrown off by sentence structure;
+            // "he/she/it" and "they/we/you" are unambiguous subjects.
+            const determinerLed = /^(?:the|this|that|these|those|my|your|our|their)\b/iu.test(match[0]);
+            if (determinerLed && isPrepositionalObject(text, match.index ?? 0))
+                continue;
+            if (verb.toLocaleLowerCase() === "were" && inHypotheticalClause(text, start))
+                continue;
             pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, replacements[verb.toLocaleLowerCase()] ?? verb), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.94, preferences));
         }
     }
     const trimmed = text.trim();
     const lastSentence = document.sentences[document.sentences.length - 1];
     const lastToken = document.tokens[document.tokens.length - 1];
-    if (trimmed && lastSentence && lastToken && lastSentence.tokens.length >= 4 && /[\p{L}\p{N})\]]$/u.test(trimmed) && /\s/u.test(lastSentence.text)) {
+    // A message with no letter case has no convention for terminal stops either,
+    // and its last line is usually a sign-off rather than a forgotten full stop.
+    const uncased = isUncasedDraft(text);
+    if (!uncased && trimmed && lastSentence && lastToken && lastSentence.tokens.length >= 4 && /[\p{L}\p{N})\]]$/u.test(trimmed) && /\s/u.test(lastSentence.text)) {
         const lastLower = lastToken.lower.split(/[’']/u)[0];
         const hasVerb = VERB_HINTS.has(lastLower) || lastSentence.tokens.some((token) => /(?:ed|ing|s)$/u.test(token.lower));
         if (hasVerb)
@@ -1366,6 +1454,9 @@ function isAbbreviationWord(word) {
 }
 function findCapitalization(text, preferences) {
     const issues = [];
+    // Uncased drafts get no capitalisation advice at all: see isUncasedDraft.
+    if (isUncasedDraft(text))
+        return issues;
     for (const match of text.matchAll(/(^|[.!?]\s+)([a-z])/g)) {
         const prefix = match[1] ?? "";
         const start = (match.index ?? 0) + prefix.length;
@@ -1548,11 +1639,24 @@ const GLUE_WORDS = new Set([
  * the evidence, and the reason for each choice." Ordinary English is more
  * glue-heavy than 40% suggests, so that number does not transfer.
  *
- * Sentences under 12 words are exempt: at that length the ratio is noise,
- * because "It was good" is 50% glue and perfectly clear.
+ * ProWritingAid uses 40% for the same concept, which on this corpus would flag
+ * 52 correct sentences out of 170 — including "The paper explains the method,
+ * the evidence, and the reason for each choice." Ordinary English is more
+ * glue-heavy than 40% suggests, so that number does not transfer.
+ *
+ * The ratio alone cannot separate clear from dense: evaluation/corpus.json
+ * holds two correct 15-word sentences at 67% glue ("We can send the draft
+ * when you are ready, and we can review it together" in general and casual
+ * voice) while the motivating dense example measures 68% — no threshold
+ * fits between them without knife-edge overfitting. What separates them is
+ * length: connective tissue the reader must hold across 30 words is a
+ * burden; the same share across 15 words parses fine. So the ratio test
+ * applies from 20 words up (the FPs sit at 15, the dense example at 30),
+ * and shorter sentences are exempt entirely — at that length the ratio is
+ * noise, because "It was good" is 50% glue and perfectly clear.
  */
 const STICKY_SENTENCE_RATIO = 0.55;
-const STICKY_SENTENCE_MIN_WORDS = 12;
+const STICKY_SENTENCE_MIN_WORDS = 20;
 /**
  * Sentences made mostly of connecting words.
  *
@@ -1621,6 +1725,19 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
             const participle = /(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))/iu.exec(match[0].replace(/^\S+\s+/u, ""));
             if (participle && staticEdAdjectives.includes(` ${participle[0].toLowerCase()} `))
                 continue;
+            // "The variables were held constant" is standard scientific register,
+            // not an evasive passive: held/kept plus a result adjective (constant,
+            // stable, steady, unchanged) states a result the writer owns, and no
+            // actor is missing — rewriting it as "we held the variables constant"
+            // changes the emphasis for no reader benefit. "Was held by" still
+            // fires: the exemption needs the result adjective right after.
+            if (participle && /^(?:held|kept)$/iu.test(participle[0])) {
+                // Horizontal whitespace only: the adjective must be in the same
+                // clause, not the start of the next paragraph.
+                const after = text.slice(start + match[0].length);
+                if (/^[ \t]+(?:constant|constantly|stable|steady|unchanged)\b/iu.test(after))
+                    continue;
+            }
             // Only offer the change where an actor is plausibly missing. Reporting
             // what happened ("the backlog was cleared") is correct, deliberate prose.
             const sentence = document.sentences.find((span) => start >= span.start && start < span.end);
@@ -3987,6 +4104,86 @@ function endpointFor(baseUrl) {
     const path = parsed.pathname.replace(/\/$/u, "");
     parsed.pathname = path.endsWith("/chat/completions") ? path : `${path}/chat/completions`;
     return parsed.toString();
+}
+/**
+ * Checks a provider configuration without touching any draft text.
+ *
+ * BYOK setup fails silently today: a typo'd URL or revoked key only
+ * surfaces later as a vague analysis error mid-draft. This lists models
+ * (GET {base}/models with the key) so settings can say "connected" before
+ * the writer depends on it. It sends the key in the Authorization header
+ * and nothing else — no draft text, no goals, no usage beyond the check.
+ */
+async function testProviderConnection(settings, options = {}) {
+    if (!settings.apiKey.trim()) {
+        return { ok: false, message: "Add an API key first, then test the connection." };
+    }
+    let modelsUrl;
+    try {
+        const parsed = validateProviderUrl(settings.baseUrl);
+        const path = parsed.pathname.replace(/\/$/u, "");
+        parsed.pathname = path.endsWith("/models") ? path : `${path}/models`;
+        modelsUrl = parsed.toString();
+    }
+    catch (error) {
+        if (error instanceof ProviderError)
+            return { ok: false, message: error.message };
+        throw error;
+    }
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), Math.max(1_000, options.timeoutMs ?? 15_000));
+    const cancel = () => timeoutController.abort();
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    const startedAt = Date.now();
+    try {
+        const response = await fetch(modelsUrl, {
+            method: "GET",
+            signal: timeoutController.signal,
+            headers: {
+                Accept: "application/json",
+                Authorization: "Bearer " + settings.apiKey.trim(),
+                ...parseCustomHeaders(settings.customHeaders),
+            },
+        });
+        if (response.status === 401 || response.status === 403) {
+            return { ok: false, message: "The endpoint rejected the API key. Check the key and try again." };
+        }
+        if (response.status === 404) {
+            return { ok: false, message: "Connected, but there is no /models endpoint here. Check the base URL." };
+        }
+        if (!response.ok) {
+            return { ok: false, message: `The endpoint answered ${response.status}. Check the base URL and try again.` };
+        }
+        let modelCount = 0;
+        try {
+            const payload = await response.json();
+            if (isRecord(payload) && Array.isArray(payload.data))
+                modelCount = payload.data.length;
+        }
+        catch {
+            // A 2xx without a models body still proves URL + key work.
+        }
+        return {
+            ok: true,
+            message: modelCount > 0
+                ? `Connected — ${modelCount} ${modelCount === 1 ? "model" : "models"} listed.`
+                : "Connected — the endpoint accepted the API key.",
+            latencyMs: Date.now() - startedAt,
+        };
+    }
+    catch (error) {
+        if (options.signal?.aborted || isAbortError(error)) {
+            return { ok: false, message: timeoutController.signal.aborted && !options.signal?.aborted ? "The endpoint did not answer in time. Check the URL and try again." : "The connection test was cancelled." };
+        }
+        if (error instanceof TypeError) {
+            return { ok: false, message: "Could not reach the endpoint. Check the URL, the network, and that it allows browser requests." };
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", cancel);
+    }
 }
 function parseJsonContent(value) {
     if (typeof value !== "string")

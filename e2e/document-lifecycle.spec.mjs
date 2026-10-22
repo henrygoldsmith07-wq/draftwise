@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart, waitForAppReady } from "./helpers.mjs";
 
 /**
  * Browser-level journeys for the document workflows users depend on.
@@ -12,18 +13,8 @@ import { test, expect } from "@playwright/test";
 const editor = (page) => page.getByLabel("Draft editor");
 const titleInput = (page) => page.getByLabel("Document title");
 
-async function waitForAppReady(page) {
-  await expect(page.locator(".saved-dot")).toHaveAttribute("title", /Saved|Unsaved|Storage|Could not|Saving/u, { timeout: 20_000 });
-}
-
 async function openApp(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await waitForAppReady(page);
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();
@@ -77,6 +68,30 @@ test("document lifecycle: create, type, autosave, switch, refresh restores last-
   // A's content still lives in the store
   await openDocumentByTitle(page, "Doc A");
   await expect(editor(page)).toHaveValue("Alpha body text for document A.");
+});
+
+test("library search finds a phrase in the middle of a draft", async ({ page }) => {
+  const opening = "An opening line that every card already shows.";
+  const middle = "Somewhere in the middle, the phrase quarterly forecast appears.";
+  await editor(page).fill(`${opening}\n\n${middle}\n\nA closing line.`);
+  await titleInput(page).fill("Long draft");
+  await page.waitForTimeout(700);
+
+  await page.getByRole("button", { name: "Documents" }).click({ force: true });
+  await waitForAppReady(page);
+  const search = page.getByLabel("Search documents");
+
+  // The phrase is past the card's opening excerpt, which is all the dashboard
+  // used to look at.
+  await search.fill("quarterly forecast");
+  await expect(page.locator(".document-card-title", { hasText: "Long draft" })).toBeVisible();
+  await expect(page.locator(".document-card-excerpt mark")).toHaveText("quarterly forecast");
+
+  await search.fill("nothing like this exists");
+  await expect(page.getByRole("heading", { name: "No documents match" })).toBeVisible();
+
+  await search.fill("long draft");
+  await expect(page.locator(".document-card-title", { hasText: "Long draft" })).toBeVisible();
 });
 
 test("undo isolation: undo in B never restores A's text", async ({ page }) => {
@@ -150,9 +165,21 @@ test("version history: checkpoint, edit, preview, restore keeps both versions", 
   await waitForAppReady(page);
   await expect(page.getByRole("heading", { name: "Versioned" })).toBeVisible();
 
-  // Preview the checkpoint and restore it
+  // Preview the checkpoint: the default view says what changed, rather than
+  // making the writer compare two columns of near-identical prose by eye.
   await page.getByRole("button", { name: "Preview" }).first().click();
   await expect(page.getByRole("dialog", { name: "Version preview" })).toBeVisible();
+  await expect(page.locator(".history-diff-summary")).toHaveText(/2 changes · \+2 words · −1 word/u);
+  // A lone comma in a change is punctuation, not an extra word.
+  await expect(page.locator(".history-diff-summary")).not.toContainText("+3 words");
+  await expect(page.locator(".history-diff del.diff-removed")).toContainText("one");
+  await expect(page.locator(".history-diff ins.diff-added").first()).toHaveText("two");
+  await expect(page.locator(".history-diff ins.diff-added").last()).toContainText(", revised");
+  // Side by side is still available, and switching back keeps the same dialog.
+  await page.getByRole("button", { name: "Side by side" }).click();
+  await expect(page.locator(".history-preview-columns")).toBeVisible();
+  await page.getByRole("button", { name: "Changes", exact: true }).click();
+  await expect(page.locator(".history-diff")).toBeVisible();
   await page.getByRole("button", { name: "Restore this version" }).click();
   await page.getByRole("button", { name: "Confirm restore this version" }).click();
   await expect(editor(page)).toHaveValue("Version one content.");
@@ -289,4 +316,20 @@ test("keyboard: Ctrl+S save and Escape closing rewrite preview", async ({ page }
   await expect(page.locator(".rewrite-preview")).toBeVisible({ timeout: 10_000 });
   await page.keyboard.press("Escape");
   await expect(page.locator(".rewrite-preview")).toHaveCount(0);
+});
+
+test("length goal shows live progress in the editor", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (event) => errors.push(event.message));
+
+  // No target, no meter.
+  await expect(page.getByRole("progressbar", { name: "Length goal progress" })).toHaveCount(0);
+  await page.getByLabel("Length").selectOption("300");
+  const meter = page.getByRole("progressbar", { name: "Length goal progress" });
+  await expect(meter).toContainText("0 of 300 words");
+  await editor(page).fill("word ".repeat(150).trim());
+  await expect(meter).toContainText("150 of 300 words");
+  await expect(meter).toHaveAttribute("aria-valuenow", "50");
+
+  expect(errors).toEqual([]);
 });

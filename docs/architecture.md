@@ -49,6 +49,10 @@ The web app stores one versioned workspace at `draftwise:workspace:v2`. Writing 
 
 The site build uses the repository’s framework runner. `scripts/build-extension.mjs` transpiles the pure shared packages with TypeScript and wraps them as browser globals, so the extension does not need runtime imports or a bundler. `npm run build` runs both steps and keeps the generated bundles in source control for “Load unpacked” users. CI regenerates them and fails if the checked-in output changes.
 
+There are two site builds, and they write to the same place. `npm run build` produces the Cloudflare Workers artifact through vinext; `npm run build:vercel` produces the Next.js build that Vercel serves. Both write route types into `.next/types`, in their own shapes: vinext writes `routes.d.ts`, Next writes `routes.d.ts` and the `validator.ts` that checks against it. Run the Cloudflare build after the Vercel one and the two files disagree, so `tsc` reports errors in a generated file that nobody wrote about a change that nobody made.
+
+`npm run type-check` therefore runs `next typegen` first. That regenerates the types in one shape, so the check is correct whatever ran before it — and it means CI, which checks before it builds, validates the route types instead of finding none. The rule generalises: a check that fails for reasons unrelated to the source is a check people learn to ignore.
+
 ## Deployment
 
 Two builds, two targets. `npm run build` produces the Cloudflare Workers artifact; `npm run build:vercel` produces the Next.js production build that Vercel serves. The browser suite runs against both: the `e2e` job uses the dev server, and the `e2e-production` job builds and serves the production artifact. The second one exists because a Content-Security-Policy, the service worker and the Open Graph routes are production-only behaviour that a dev-server run cannot exercise.

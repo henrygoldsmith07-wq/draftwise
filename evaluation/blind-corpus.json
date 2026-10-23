@@ -690,5 +690,89 @@
     "kind": "clean",
     "text": "Mum says lunch is at one on Sunday and we should all be there. Can you bring the pudding you made last time, everyone loved it.",
     "expected": []
+  },
+  {
+    "id": "blind-email-017",
+    "style": "email",
+    "kind": "clean",
+    "text": "Thanks for sending the revised proposal so quickly. The timeline works for our team, and the budget matches what we discussed last quarter. I will confirm the venue once the client signs off.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-018",
+    "style": "email",
+    "kind": "clean",
+    "text": "Could you please review the attached summary before Friday? I want to make sure the figures agree with finance, because the board meets on Monday morning.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-017",
+    "style": "report",
+    "kind": "clean",
+    "text": "Revenue grew twelve per cent year on year, driven by renewals in the enterprise segment. Churn remained flat, and net retention reached its highest level since 2021.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-018",
+    "style": "report",
+    "kind": "clean",
+    "text": "The survey received 412 responses, with most participants rating support quality as good or excellent. The main complaint concerned waiting times on Monday mornings.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-019",
+    "style": "report",
+    "kind": "clean",
+    "text": "The committee approved the pilot, and the first workshops begin in June. Our partners will supply the venues while we recruit the facilitators.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-019",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Cities that invest in public libraries gain far more than quiet rooms. The branches lend tools, host evening classes, and give teenagers somewhere warm to study after school.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-020",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Learning a second language reshapes how we hear our first. Once you notice grammatical gender in French, the absence of it in English starts to feel like a choice.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-021",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Museums face a difficult bargain with their donors. The gifts keep the lights on, yet every named wing quietly narrows what the curators feel free to exhibit.",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-018",
+    "style": "casual",
+    "kind": "clean",
+    "text": "finally booked the flights for august, leaving on the thursday night so we land friday morning. can you check if your brother still has the spare air mattress",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-019",
+    "style": "casual",
+    "kind": "clean",
+    "text": "that meeting could have been an email honestly. still, good to see everyone, and the free lunch was decent for once",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-018",
+    "style": "technical",
+    "kind": "clean",
+    "text": "The migration runs in three stages. First we snapshot the primary, then we replay the write-ahead log on the replica, and finally we promote it during the maintenance window.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-019",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Each request carries a signed token that the gateway validates before routing. Expired tokens receive a 401, and the client refreshes them silently in the background.",
+    "expected": []
   }
 ]

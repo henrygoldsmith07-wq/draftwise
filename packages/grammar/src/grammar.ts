@@ -277,6 +277,19 @@ function toBaseVerbForm(word: string): string | null {
   return null;
 }
 
+/**
+ * The third-person singular of a base-form lexical verb.
+ *
+ * Sibilant and -o endings take "es" ("pass" -> "passes", "go" ->
+ * "goes"); a consonant + "y" takes "ies" ("study" -> "studies") while a
+ * vowel + "y" just takes "s" ("play" -> "plays"); the rest take "s".
+ */
+function toThirdSingular(base: string): string {
+  if (/(?:s|x|z|ch|sh|o)$/u.test(base)) return `${base}es`;
+  if (/[^aeiou]y$/u.test(base)) return `${base.slice(0, -1)}ies`;
+  return `${base}s`;
+}
+
 function inHypotheticalClause(text: string, position: number) {
   const boundaries = [".", "!", "?", "\n"].map((mark) => text.lastIndexOf(mark, position - 1));
   const clauseStart = Math.max(...boundaries) + 1;
@@ -353,6 +366,170 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
     if (isPrepositionalObject(text, match.index ?? 0)) continue;
     pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, base), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.9, preferences));
+  }
+  // Singular subject + base-form lexical verb ("The result show"). The mirror
+  // image of the loop above: the subject must be singular-looking and the
+  // word after it an unambiguous base-form verb. Every guard below is bought
+  // with a real false positive the unguarded pattern reported during
+  // development, so the rule stays miss-never-FP on correct prose.
+  const BASE_FORM_VERBS = new Set([
+    "make", "write", "keep", "use", "build", "show", "tell", "need", "want",
+    "give", "take", "come", "run", "seem", "appear", "remain", "contain",
+    "include", "require", "provide", "offer", "say", "get", "find", "follow",
+    "help", "work", "play", "move", "turn", "start", "end", "mean", "leave",
+    "change", "grow", "belong", "speak", "drive", "eat", "drink", "stand",
+    "cover", "vary",
+  ]);
+  // Past tenses identical to the base form ("The report cost millions" is
+  // the past tense, not an agreement error).
+  const SAME_FORM_PAST_VERBS = new Set([
+    "cost", "hit", "hurt", "cut", "put", "set", "shut", "split", "spread",
+    "cast", "burst", "quit", "let", "read", "bid", "thrust",
+  ]);
+  // The subjunctive after a mandative governor ("demand the result show")
+  // takes the base form even with a singular subject.
+  const MANDATIVE_GOVERNORS = new Set([
+    "demand", "suggest", "require", "request", "propose", "recommend", "insist",
+    "ask", "order", "urge", "prefer", "advise", "move", "decree", "stipulate",
+  ]);
+  const MANDATIVE_NOUNS = new Set([
+    "demand", "request", "requirement", "proposal", "recommendation",
+    "insistence", "order", "preference",
+  ]);
+  // Subjects that are plural (or number-ambiguous) without ending in -s:
+  // plural pronouns, generic plurals ("the rich get richer"), adjectives
+  // used as plural nouns ("the poor show little interest"), ordinals used
+  // collectively ("the first show courage"), and invariant nouns.
+  const PLURAL_OR_AMBIGUOUS_SUBJECTS = new Set([
+    "i", "you", "we", "they", "first", "second", "third", "fourth", "fifth",
+    "last", "best", "worst", "rest", "most", "least", "following",
+    "poor", "rich", "young", "old", "elderly", "unemployed", "homeless",
+    "blind", "deaf", "disabled", "needy", "wealthy", "brave", "meek",
+    "accused", "dead", "living", "missing", "wounded",
+    "data", "media", "police", "sheep", "deer", "fish", "aircraft", "offspring",
+  ]);
+  // Participial adjectives in subject position ("the delivered work") are
+  // adjectives, not subjects: the word after them is the head noun, which
+  // this rule must not "correct". Genuine errors with an attributive
+  // participle ("the detailed report cover …") are conceded as misses —
+  // the participial shape is far more often correct business prose.
+  const EN_PARTICIPLES = new Set([
+    "broken", "chosen", "driven", "fallen", "forgotten", "frozen", "given",
+    "hidden", "mistaken", "proven", "risen", "stolen", "taken", "written",
+    "beaten", "bitten", "shaken", "torn", "worn", "sunken", "swollen",
+  ]);
+  // En-GB collective nouns take plural agreement ("Our team show promise"
+  // is correct in London). In en-US the singular is required, so the rule
+  // still fires there.
+  const COLLECTIVE_NOUNS_GB = new Set([
+    "team", "committee", "government", "family", "company", "jury", "audience",
+    "staff", "crew", "council", "board", "parliament", "cabinet", "firm",
+    "group", "class", "club", "party", "band", "orchestra", "choir", "troupe",
+  ]);
+  // Words after the candidate that prove it is a noun, not a verb: an
+  // infinitive ("the right show to watch"), a coordinator ("show and prove"
+  // needs two fixes, not a half-fix), an auxiliary ("the take was huge"),
+  // or the head of a relative clause ("the one show I like").
+  const NOUN_PROVING_FOLLOWERS = new Set([
+    "to", "and", "or", "i", "you", "he", "she", "it", "we", "they",
+    "who", "which", "whom", "whose", "that",
+  ]);
+  const verbLike = (word: string): boolean => {
+    if (!word) return false;
+    if (SUBJECT_SLOT_AUX.has(word) || BASE_FORM_VERBS.has(word)) return true;
+    const base = toBaseVerbForm(word);
+    return !!base && (VERB_HINTS.has(base) || BASE_FORM_VERBS.has(base));
+  };
+  for (const match of text.matchAll(/\b(the|this|that|my|your|our|their)\s+([\p{L}][\p{L}'’-]*)\s+([\p{L}]+)\b/giu)) {
+    const subject = match[2] ?? "";
+    const verb = match[3] ?? "";
+    const subjectLower = subject.toLocaleLowerCase();
+    const verbLower = verb.toLocaleLowerCase();
+    if (!BASE_FORM_VERBS.has(verbLower) || SAME_FORM_PAST_VERBS.has(verbLower)) continue;
+    if (PLURAL_OR_AMBIGUOUS_SUBJECTS.has(subjectLower)) continue;
+    // A modal or auxiliary in subject position ("That would give us a day")
+    // is the head of a verb phrase, not a subject the rule can judge.
+    if (SUBJECT_SLOT_AUX.has(subjectLower)) continue;
+    if (nounLooksPlural(subject) || AMBIGUOUS_NUMBER_NOUNS.test(subject)) continue;
+    if (/ed$/u.test(subjectLower) || EN_PARTICIPLES.has(subjectLower)) continue;
+    if (preferences.dialect !== "en-US" && COLLECTIVE_NOUNS_GB.has(subjectLower)) continue;
+    const matchStart = match.index ?? 0;
+    const beforeText = text.slice(0, matchStart);
+    const previousWord = /([\p{L}]+)\s*$/u.exec(beforeText)?.[1]?.toLocaleLowerCase() ?? "";
+    if (MANDATIVE_GOVERNORS.has(previousWord)) continue;
+    if (previousWord === "that") {
+      const governor = /([\p{L}]+)\s+that\s*$/u.exec(beforeText)?.[1]?.toLocaleLowerCase() ?? "";
+      if (MANDATIVE_GOVERNORS.has(governor) || MANDATIVE_NOUNS.has(governor)) continue;
+    }
+    if (isPrepositionalObject(text, matchStart)) continue;
+    const afterText = text.slice(matchStart + match[0].length);
+    const afterMatch = /^\s*([\p{L}']+)([\s\S]*)$/u.exec(afterText);
+    const nextWord = (afterMatch?.[1] ?? "").toLocaleLowerCase();
+    if (NOUN_PROVING_FOLLOWERS.has(nextWord) || SUBJECT_SLOT_AUX.has(nextWord)) continue;
+    // Noun-noun compounds where a word is verb-shaped: the candidate can be
+    // the first modifier ("the show start times vary" — the later verb owns
+    // the agreement) or the second noun ("the work offer stands" — the
+    // -s verb right after it owns the predicate).
+    const nextBase = toBaseVerbForm(nextWord);
+    if (nextBase && (VERB_HINTS.has(nextBase) || BASE_FORM_VERBS.has(nextBase))) continue;
+    if (nextWord.endsWith("s")) {
+      const nextNextWord = /^\s*([\p{L}']+)/u.exec(afterMatch?.[2] ?? "")?.[1]?.toLocaleLowerCase() ?? "";
+      if (verbLike(nextNextWord)) continue;
+    }
+    const start = matchStart + (match[0].lastIndexOf(verb));
+    pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, toThirdSingular(verbLower)), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.88, preferences));
+  }
+  // Comma splice before a demonstrative subject + be ("…, the other two
+  // are …"). The comma joins two independent clauses; the fix starts a new
+  // sentence. Narrow by construction: only this/that/these/those + a be
+  // verb, and only when the segment before the comma contains a finite verb
+  // — greetings and fragments ("Yes, this is fine") have none and are left
+  // alone. A preceding colon properly introduces the clause, and "that is
+  // to say" parentheticals are idiomatic, so both are excluded.
+  const IRREGULAR_PAST_VERBS = new Set([
+    "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
+    "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
+    "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
+    "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
+    "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
+    "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
+    "sold", "sent", "spent", "built", "lent", "said",
+  ]);
+  const FINITE_VERB_BEFORE_COMMA = /\b(am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|shall|should|will|would|may|might|must)\b|[\p{L}]ed\b/iu;
+  // A message written entirely without letter case has no sentence
+  // conventions either (the terminal-stop rule already treats it that way),
+  // and comma splices are normal rhythm in that register — flagging them
+  // corrects the register, not the writing.
+  const skipCommaSplice = isUncasedDraft(text);
+  for (const match of text.matchAll(/,\s*(this|that|these|those|the)\s+((?:[\p{L}'’-]+\s+){0,3}?)(is|are|was|were)\b/giu)) {
+    if (skipCommaSplice) break;
+    const demonstrative = match[1] ?? "";
+    const middle = match[2] ?? "";
+    const beVerb = (match[3] ?? "").toLocaleLowerCase();
+    const commaPosition = match.index ?? 0;
+    // "the" needs a subject phrase after it ("the other two are"); a bare
+    // "the are" is not English, and the number must agree with a
+    // demonstrative ("these is" belongs to the agreement rules, not this one).
+    if (demonstrative === "the" && !middle.trim()) continue;
+    const singularBe = ["is", "was"].includes(beVerb);
+    const singularDem = ["this", "that"].includes(demonstrative.toLocaleLowerCase());
+    if (demonstrative.toLocaleLowerCase() !== "the" && singularBe === !singularDem) continue;
+    const afterClause = text.slice(commaPosition + match[0].length);
+    if (/^\s*to\b/iu.test(afterClause)) continue;
+    const boundaries = [".", "!", "?", ";", "\n", ":"].map((mark) => text.lastIndexOf(mark, commaPosition - 1));
+    const clauseStart = Math.max(...boundaries) + 1;
+    const beforeClause = text.slice(clauseStart, commaPosition);
+    // A leading subordinator or preposition ("If the text changed, the
+    // rewrite is rejected") makes the first half dependent, so the comma
+    // joins it to its main clause correctly — there is no splice.
+    if (/^\s*(if|when|because|although|though|while|whereas|since|as|unless|until|after|before|once|whether|where|even|lest|provided|supposing)\b/iu.test(beforeClause)) continue;
+    const hasFiniteVerb = FINITE_VERB_BEFORE_COMMA.test(beforeClause)
+      || beforeClause.split(/[^\p{L}']+/u).some((word) => IRREGULAR_PAST_VERBS.has(word.toLocaleLowerCase()));
+    if (!hasFiniteVerb) continue;
+    const demonstrativeStart = commaPosition + match[0].indexOf(demonstrative, 1);
+    const demonstrativeEnd = demonstrativeStart + demonstrative.length;
+    const capitalised = demonstrative.charAt(0).toLocaleUpperCase() + demonstrative.slice(1);
+    pushIssue(issues, makeIssue("punctuation-comma-splice", commaPosition, demonstrativeEnd, text.slice(commaPosition, demonstrativeEnd), `. ${capitalised}`, "punctuation", "medium", "Possible comma splice", "Two complete sentences are joined by a comma. Start a new sentence here.", 0.8, preferences));
   }
   const trimmed = text.trim();
   const lastSentence = document.sentences[document.sentences.length - 1];

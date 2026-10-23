@@ -162,6 +162,9 @@
   {"id":"grammar-30","kind":"grammar","text":"The data is clear.","expected":[]},
   {"id":"grammar-31","kind":"grammar","text":"The results shows steady improvement.","expected":[{"ruleId":"grammar-subject-verb-agreement","category":"grammar"}]},
   {"id":"grammar-32","kind":"grammar","text":"I hope your still able to attend.","expected":[{"ruleId":"grammar-confused-your","category":"grammar"}]},
+  {"id":"grammar-40","kind":"grammar","text":"The result show promise.","expected":[{"ruleId":"grammar-subject-verb-agreement","category":"grammar"}]},
+  {"id":"grammar-41","kind":"punctuation","text":"The committee made one mistake, the other two are ready.","expected":[{"ruleId":"punctuation-comma-splice","category":"punctuation"}]},
+  {"id":"grammar-42","kind":"punctuation","text":"She left early, this is certain.","expected":[{"ruleId":"punctuation-comma-splice","category":"punctuation"}]},
   {"id":"grammar-33","kind":"grammar","text":"Its the final step that matters.","expected":[{"ruleId":"grammar-confused-its","category":"grammar"}]},
   {"id":"grammar-34","kind":"grammar","text":"Either myself or my colleague will attend.","expected":[{"ruleId":"grammar-reflexive-subject","category":"grammar"}]},
   {"id":"grammar-35","kind":"grammar","text":"Neither himself nor his brother came.","expected":[{"ruleId":"grammar-reflexive-subject","category":"grammar"}]},
@@ -518,5 +521,9 @@
   {"id":"correct-extended-british-37","kind":"dialect","text":"The organisation has a centre in Manchester.","expected":[]},
   {"id":"correct-extended-british-38","kind":"dialect","text":"The cancelled rehearsal moved to the neighbouring theatre.","expected":[]},
   {"id":"correct-extended-british-39","kind":"dialect","text":"The local catalogue stores the labelled files.","expected":[]},
-  {"id":"correct-extended-british-40","kind":"dialect","text":"The final programme gives the audience a useful overview.","expected":[]}
+  {"id":"correct-extended-british-40","kind":"dialect","text":"The final programme gives the audience a useful overview.","expected":[]},
+  {"id":"false-positive-singular-verb-01","kind":"false-positive","text":"Our team show great promise this season.","expected":[]},
+  {"id":"false-positive-singular-verb-02","kind":"false-positive","text":"The report cost millions to produce.","expected":[]},
+  {"id":"false-positive-singular-verb-03","kind":"false-positive","text":"The work offer stands firm despite the criticism.","expected":[]},
+  {"id":"false-positive-comma-splice-01","kind":"false-positive","text":"Yes, this is the right venue for the event.","expected":[]}
 ]

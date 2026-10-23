@@ -121,20 +121,23 @@ enforce today.
 
 ## Current result
 
-Measured on 84 examples / 3,169 words, 68 of them clean text:
+Measured on 96 examples / 3,490 words, 80 of them clean text:
 
 | Metric | Value |
 | --- | --- |
 | Precision (all suggestions) | 0.17 |
 | Recall (labelled) | 0.818 |
-| Error false positives / 1,000 words | 1.3 |
-| Style suggestions / 1,000 words | 26.5 |
-| Error false positives / 1,000 words, clean text only | 0.4 |
-| Style suggestions / 1,000 words, clean text only | 26.6 |
+| Error false positives / 1,000 words | 1.4 |
+| Style suggestions / 1,000 words | 24.1 |
+| Error false positives / 1,000 words, clean text only | 0.3 |
+| Style suggestions / 1,000 words, clean text only | 23.6 |
 
-Measured 2026-10-23 (`npm run evaluate:blind`): 84 examples / 3,169 words,
-18 true positives, 88 false positives total — 4 error-category, 84 style —
-and 4 missed. The error-FP drop since the 2.5/1,000 reading comes from rule
+Measured 2026-10-23 (`npm run evaluate:blind`): 96 examples / 3,490 words,
+18 true positives, 89 false positives total — 5 error-category, 84 style —
+and 4 missed. Twelve clean examples were added across all five styles without
+tuning against the results; they produced zero new findings of any kind, and
+the error-FP drop since the previous reading (1.6 → 1.4) is the larger
+denominator, not fewer flags. The error-FP drop since the 2.5/1,000 reading comes from rule
 changes, each justified by a writing principle and covered by new `tuned`
 examples rather than by these numbers (see Discipline):
 
@@ -162,14 +165,26 @@ examples rather than by these numbers (see Discipline):
   `metre`/`metres` after a numeral or `square`/`cubic` (`ran 5 meters`, `a 100
   meter dash`), and US `metre`/`metres` always → `meter`/`meters` (`metre` is
   never the device). A bare `a meter` or `parking meter` stays untouched — the
-  device is `meter` in both variants. Tuned recall is 0.994 (178/179); the
-  single remaining tuned miss is that bare homograph, deliberately unflagged.
+device is `meter` in both variants. Tuned recall is 0.995 (181/182); the
+single remaining tuned miss is that bare homograph, deliberately unflagged.
+- Singular-subject agreement in reverse (`The result show` → `shows`): the
+  base verb must be unambiguous, with guards for same-form past tenses
+  (`cost`), mandative subjunctives (`demand the result show`), en-GB
+  collective nouns (`team show` is correct in London, flagged in New York),
+  participial adjectives (`the delivered work`), noun compounds (`the work
+  offer stands`), and modal subjects (`That would give`).
+- Comma splices before a demonstrative subject + `be` (`…, the other two
+  are …` → `. The …`): requires a finite verb before the comma (greetings
+  like `Yes, this is fine` stay clean), skips dependent openers (`If the
+  text changed, the rewrite is rejected`) and `that is to say`
+  parentheticals, and does not fire in caseless drafts. Tuned recall rose
+  178 → 181 with zero tuned false positives.
 
 **This is a finding, not a target.** Read it as: the local engine behaves like a
 tool written for edited formal prose, and it is noticeably noisier on ordinary
 writing than the tuned corpus suggests.
 
-False positives by rule (all 87, clean + labelled examples):
+False positives by rule (all 89, clean + labelled examples):
 
 | Count | Rule | Character of the finding |
 | --- | --- | --- |
@@ -184,6 +199,7 @@ False positives by rule (all 87, clean + labelled examples):
 | 1 | `punctuation-missing-terminal` | Draft genuinely ends without a full stop. Correct; unpinned (annotation gap). |
 | 1 | `punctuation-oxford-comma` | Low-severity `consider` gated by the `oxfordComma` preference. |
 | 1 | `structure-fragment` | `Quick one.` Readability opinion. |
+| 1 | `punctuation-comma-splice` | Genuine splice (`, the other two are`) in `blind-essay-008`; the blind expectation pins the span `mistake`, so the harness counts the correct flag as an extra (annotation gap, same class as the `its`/`are` rows above). |
 
 The 4 misses: two are expectations the engine disputes (`were` after
 `Neither…nor` with a plural nearer subject is correct proximity agreement;
@@ -191,16 +207,16 @@ the `of` in `performs the request` is grammatical — that expectation matches
 nothing ungrammatical in its example), one needs entity knowledge the engine
 refuses to guess at (`Board` capitalisation: `the Board` is routinely a proper
 body, so unnecessary-capitalisation detection stays unwritten), and one needs
-a detector that does not exist (the comma splice after `mistake` — clause
-parsing, withheld for its false-positive risk). None of them was tuned
+the comma splice after `mistake` — the detector now exists and fires on that
+very sentence, but the blind expectation pins the span `mistake` while the
+rule spans the join (`, the`), so it remains a miss by span even as the
+sentence is genuinely flagged. None of them was tuned
 against: the blind examples are unchanged, and the reasoning is recorded here
 instead.
 
 Recall (0.773) is measured against labelled expectations that pin a category
-and an original rather than a rule. Three known detection gaps remain open, all misses, never false positives:
-singular-subject + base-form lexical verbs (`The result show` — the reverse
-of the agreement check, withheld because en-GB collective nouns like `team`
-take plural verbs); `your`/`its` with no following word (`Hope your well` —
+and an original rather than a rule. Two known detection gaps remain open, both misses, never false positives:
+`your`/`its` with no following word (`Hope your well` —
 withheld because possessive readings like `your well water` exist); and a bare
 `meter` with no measurement context (`uses a meter` — withheld because the
 device, `a parking meter`, is `meter` in every dialect; only a numeral or

@@ -71,6 +71,27 @@ test("caseless messages are not judged on sentence boundaries", () => {
   assert.deepEqual(splices("just heard back from the garage, the bill is bigger than we thought"), []);
 });
 
+test("clause-final your/its confusion is corrected", () => {
+  const your = analyzeLocally("Hope your well.", { dialect: "en-GB" }).issues.filter((issue) => issue.ruleId === "grammar-confused-your");
+  assert.equal(your.length, 1);
+  assert.equal(your[0].replacement, "you're");
+  const its = analyzeLocally("I think its late.", { dialect: "en-GB" }).issues.filter((issue) => issue.ruleId === "grammar-confused-its");
+  assert.equal(its.length, 1);
+  assert.equal(its[0].replacement, "it's");
+});
+
+test("already-covered confusion words flag exactly once", () => {
+  assert.equal(analyzeLocally("Your right.", { dialect: "en-GB" }).issues.filter((issue) => issue.ruleId === "grammar-confused-your").length, 1);
+  assert.equal(analyzeLocally("Its ready.", { dialect: "en-GB" }).issues.filter((issue) => issue.ruleId === "grammar-confused-its").length, 1);
+});
+
+test("possessive your/its before a noun or after for/a preposition stays silent", () => {
+  for (const text of ["It is for your own good.", "The bucket fell down your well.", "We draw your well water daily.", "Your late arrival upset the schedule.", "Your free trial ends soon."]) {
+    const issues = analyzeLocally(text, { dialect: "en-GB" }).issues.filter((issue) => issue.ruleId === "grammar-confused-your");
+    assert.deepEqual(issues, [], text);
+  }
+});
+
 test("correct agreement stays silent", () => {
   assert.deepEqual(agreement("The results show growth."), []);
   assert.deepEqual(agreement("Our team shows promise."), []);

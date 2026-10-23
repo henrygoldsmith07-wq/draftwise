@@ -165,6 +165,8 @@
   {"id":"grammar-40","kind":"grammar","text":"The result show promise.","expected":[{"ruleId":"grammar-subject-verb-agreement","category":"grammar"}]},
   {"id":"grammar-41","kind":"punctuation","text":"The committee made one mistake, the other two are ready.","expected":[{"ruleId":"punctuation-comma-splice","category":"punctuation"}]},
   {"id":"grammar-42","kind":"punctuation","text":"She left early, this is certain.","expected":[{"ruleId":"punctuation-comma-splice","category":"punctuation"}]},
+  {"id":"grammar-45","kind":"grammar","text":"Hope your well.","expected":[{"ruleId":"grammar-confused-your","category":"grammar"}]},
+  {"id":"grammar-46","kind":"grammar","text":"I think its late.","expected":[{"ruleId":"grammar-confused-its","category":"grammar"}]},
   {"id":"grammar-33","kind":"grammar","text":"Its the final step that matters.","expected":[{"ruleId":"grammar-confused-its","category":"grammar"}]},
   {"id":"grammar-34","kind":"grammar","text":"Either myself or my colleague will attend.","expected":[{"ruleId":"grammar-reflexive-subject","category":"grammar"}]},
   {"id":"grammar-35","kind":"grammar","text":"Neither himself nor his brother came.","expected":[{"ruleId":"grammar-reflexive-subject","category":"grammar"}]},
@@ -525,5 +527,8 @@
   {"id":"false-positive-singular-verb-01","kind":"false-positive","text":"Our team show great promise this season.","expected":[]},
   {"id":"false-positive-singular-verb-02","kind":"false-positive","text":"The report cost millions to produce.","expected":[]},
   {"id":"false-positive-singular-verb-03","kind":"false-positive","text":"The work offer stands firm despite the criticism.","expected":[]},
-  {"id":"false-positive-comma-splice-01","kind":"false-positive","text":"Yes, this is the right venue for the event.","expected":[]}
+  {"id":"false-positive-comma-splice-01","kind":"false-positive","text":"Yes, this is the right venue for the event.","expected":[]},
+  {"id":"false-positive-confused-01","kind":"false-positive","text":"It is for your own good.","expected":[]},
+  {"id":"false-positive-confused-02","kind":"false-positive","text":"The bucket fell down your well.","expected":[]},
+  {"id":"false-positive-confused-03","kind":"false-positive","text":"We draw your well water daily.","expected":[]}
 ]

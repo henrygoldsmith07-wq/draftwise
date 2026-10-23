@@ -165,7 +165,7 @@ examples rather than by these numbers (see Discipline):
   `metre`/`metres` after a numeral or `square`/`cubic` (`ran 5 meters`, `a 100
   meter dash`), and US `metre`/`metres` always → `meter`/`meters` (`metre` is
   never the device). A bare `a meter` or `parking meter` stays untouched — the
-device is `meter` in both variants. Tuned recall is 0.995 (181/182); the
+device is `meter` in both variants. Tuned recall is 0.995 (183/184); the
 single remaining tuned miss is that bare homograph, deliberately unflagged.
 - Singular-subject agreement in reverse (`The result show` → `shows`): the
   base verb must be unambiguous, with guards for same-form past tenses
@@ -179,6 +179,15 @@ single remaining tuned miss is that bare homograph, deliberately unflagged.
   text changed, the rewrite is rejected`) and `that is to say`
   parentheticals, and does not fire in caseless drafts. Tuned recall rose
   178 → 181 with zero tuned false positives.
+- Trailing `your`/`its` confusion (`Hope your well` → `you're`, `I think
+  its late` → `it's`): fires only when the confusion adjective is the last
+  word of the sentence, which is the whole test — a possessive needs its
+  noun (`your well water`, `your late arrival`), so with no noun coming the
+  contraction dominates. Adjectives already covered mid-sentence
+  (`welcome/going/right/sure`, `ready/done/over/…`) are excluded to avoid
+  double-flagging; `for your own good` and locative water-wells (`down
+  your well`) are guarded. Tuned recall rose 181 → 183, still zero tuned
+  false positives, and the blind run gained no new extras from it.
 
 **This is a finding, not a target.** Read it as: the local engine behaves like a
 tool written for edited formal prose, and it is noticeably noisier on ordinary
@@ -215,9 +224,8 @@ against: the blind examples are unchanged, and the reasoning is recorded here
 instead.
 
 Recall (0.773) is measured against labelled expectations that pin a category
-and an original rather than a rule. Two known detection gaps remain open, both misses, never false positives:
-`your`/`its` with no following word (`Hope your well` —
-withheld because possessive readings like `your well water` exist); and a bare
+and an original rather than a rule. One known detection gap remains open, a miss, never a false positive:
+a bare
 `meter` with no measurement context (`uses a meter` — withheld because the
 device, `a parking meter`, is `meter` in every dialect; only a numeral or
 `square`/`cubic` before it proves the unit, and only then is `metre`

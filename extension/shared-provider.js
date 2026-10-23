@@ -1285,6 +1285,17 @@ function findConfusedWords(text, preferences) {
         [/\b(its)\s+(a|an|the|not|been|going)\b/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
         [/\b(its)\s+(?:almost|nearly|just|really|quite|very|so|pretty|already|finally|always|never|probably|definitely|simply|literally)\s+[\p{L}]+(?=\s+(?:to\b|and\b|but\b|or\b|because\b|though\b|although\b|so\b|then\b))/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
         [/\b(its)\s+(ready|done|over|finished|fine|great|obvious|clear|unclear|impossible)(?=\s+(?:to\b|and\b|but\b|or\b|because\b)|[.,!?;:]|$)/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
+        // Your/its followed by a bare confusion adjective at the end of the
+        // sentence ("Hope your well", "I think its late"). The clause-final
+        // position is the whole test: a possessive needs its noun ("your well
+        // water", "your late arrival"), so with no noun coming the contraction
+        // dominates. Adjectives already covered above (welcome/going/right/sure
+        // for your; ready/done/over/… for its) are excluded to avoid flagging
+        // the same span twice. Guards: "for your own good" (benefit, not
+        // confusion) via for/of, and locative water-wells ("down your well")
+        // via the preposition before your.
+        [/(?<!\b(?:for|of|down|near|behind|at|to|into|from|by|around|over|under|inside|outside|upon|within|without|toward|towards|off|onto|past)\s)\b(your)\s+(well|wrong|ready|late|early|sick|tired|busy|correct|alright|okay|ok|free|great)(?=\s*[.!?…]|$)/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
+        [/(?<!\b(?:for|of|down|near|behind|at|to|into|from|by|around|over|under|inside|outside|upon|within|without|toward|towards|off|onto|past)\s)\b(its)\s+(well|wrong|late|early|sick|tired|busy|correct|alright|okay|ok|free)(?=\s*[.!?…]|$)/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
         [/\b(their)\s+(is|are|was|were|has|have|a|an|not)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
         [/\b(there)\s+(own|idea|ideas|team|house|car|name|responsibility)\b/giu, "their", "grammar-confused-there", "Their shows possession; there points to a place or introduces a statement."],
         [/\b(better|worse|more|less|rather|different)\s+(then)\b/giu, "than", "grammar-confused-than", "Than compares; then describes time or sequence.", 2],

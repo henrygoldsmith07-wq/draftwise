@@ -44,6 +44,7 @@ import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
+import { ToastProvider } from "@/components/draftwise/utilities/Toast";
 
 const SAMPLE_DOCUMENT = `The best writing systems make the next sentence easier to write. Draftwise keeps your words private by default, then gives you a clear path from rough idea to finished copy.
 
@@ -1017,6 +1018,7 @@ export default function Home() {
       <KeyboardShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <NewDraftDialogComponent open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
       <ClearDataDialogComponent open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />
+      <ToastProvider />
     </PageLayout>
   );
 }

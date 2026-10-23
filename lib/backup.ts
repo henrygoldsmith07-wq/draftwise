@@ -77,6 +77,28 @@ export function buildBackup(input: {
   };
 }
 
+/**
+ * A backup that is safe to store anywhere: identical to the full backup
+ * except provider/classifier secrets are blanked. Restoring it keeps every
+ * document, goal, and setting — the writer just re-enters two keys.
+ */
+export function stripBackupSecrets(workspace: DraftwiseWorkspace): DraftwiseWorkspace {
+  return {
+    ...workspace,
+    provider: { ...workspace.provider, apiKey: "", customHeaders: "" },
+    classifier: workspace.classifier ? { ...workspace.classifier, apiKey: "" } : workspace.classifier,
+  };
+}
+
+export function buildSecretsFreeBackup(input: {
+  documents: StoredDocument[];
+  workspace: DraftwiseWorkspace;
+  activity: ActivityLog;
+  exportedAt?: string;
+}): BackupFile {
+  return buildBackup({ ...input, workspace: stripBackupSecrets(input.workspace) });
+}
+
 export function serializeBackup(backup: BackupFile): string {
   return JSON.stringify(backup);
 }

@@ -11,7 +11,7 @@ import { downloadFile } from "@/lib/import-export";
 import { testProviderConnection } from "@/lib/ai-provider";
 import { formatRelativeTime } from "@/lib/time";
 import { exportProfile, importProfile } from "@/lib/profile-transfer";
-import { buildBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
+import { buildBackup, buildSecretsFreeBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
 import type { StoredDocument } from "@/lib/documents";
 import type { ClassifierSettings, DraftwiseWorkspace, ProviderSettings, StylePreferences } from "@/packages/types/src";
 import { DEFAULT_CLASSIFIER_SETTINGS } from "@/packages/types/src";
@@ -132,17 +132,21 @@ export function ProviderSettingsDialog({
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [pendingBackup, setPendingBackup] = useState<{ backup: RestorableBackup; warnings: string[] } | null>(null);
   const [restoring, setRestoring] = useState(false);
-  const exportBackup = () => {
-    const backup = buildBackup({
+  const exportBackup = (withoutSecrets = false) => {
+    const builder = withoutSecrets ? buildSecretsFreeBackup : buildBackup;
+    const backup = builder({
       documents: backupDocuments,
       workspace: backupWorkspace,
       activity: readRawActivityLog(readBackupActivityRaw()),
     });
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    const suffix = withoutSecrets ? "-no-secrets" : "";
+    downloadFile({ filename: `draftwise-backup-${stamp}${suffix}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
     onBackupExported?.();
     setPendingBackup(null);
-    setBackupMessage(`Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
+    setBackupMessage(withoutSecrets
+      ? `Backup exported without secrets: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. Safe to store anywhere — re-enter your API keys after restoring.`
+      : `Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
   };
   const importBackupFile = (file: File) => {
     const tooLarge = oversizedBackupFile(file);
@@ -388,10 +392,11 @@ export function ProviderSettingsDialog({
           <div className="writing-profile">
             <div className="writing-profile-heading">
               <strong>Backup & restore</strong>
-              <span>Your whole library — every document with its goals and history, settings, and writing activity — as one file. A backup includes your API keys so a restore brings back a working app; keep the file somewhere private.</span>
+              <span>Your whole library — every document with its goals and history, settings, and writing activity — as one file. The full backup includes your API keys so a restore brings back a working app; keep that file somewhere private. Prefer the no-secrets file for cloud drives — every document restores, you just re-enter two keys.</span>
             </div>
             <div className="writing-profile-transfer">
-              <Button size="sm" variant="outline" onClick={exportBackup}><Download size={13} /> Export backup</Button>
+              <Button size="sm" variant="outline" onClick={() => exportBackup(false)}><Download size={13} /> Export backup</Button>
+              <Button size="sm" variant="outline" onClick={() => exportBackup(true)}><Download size={13} /> Export without secrets</Button>
               <label className="writing-profile-import">
                 <Upload size={13} /> Restore backup
                 <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importBackupFile(file); event.target.value = ""; }} />

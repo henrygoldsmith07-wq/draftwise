@@ -4,10 +4,12 @@ import {
   BACKUP_KIND,
   MAX_BACKUP_DOCUMENTS,
   buildBackup,
+  buildSecretsFreeBackup,
   oversizedBackupFile,
   parseBackup,
   readRawActivityLog,
   serializeBackup,
+  stripBackupSecrets,
 } from "../lib/backup.ts";
 import { MemoryDocumentBackend, createDocument } from "../lib/documents.ts";
 import { DocumentLifecycle } from "../lib/document-lifecycle.ts";
@@ -84,6 +86,28 @@ test("unreadable activity is dropped with a warning while documents restore", ()
   assert.equal(result.ok, true);
   assert.deepEqual(result.backup.activity.days, []);
   assert.equal(result.backup.activityDropped, true);
+});
+
+test("a secrets-free backup blanks keys but keeps everything else", () => {
+  const ws = workspace();
+  ws.provider = { ...ws.provider, apiKey: "sk-live", customHeaders: JSON.stringify({ "X-Tenant": "abc" }) };
+  ws.classifier = { ...(ws.classifier ?? {}), baseUrl: "https://example.com", apiKey: "cls-live" };
+  const backup = buildSecretsFreeBackup({
+    documents: [createDocument("Doc", "Text.")],
+    workspace: ws,
+    activity: { version: 1, days: [] },
+  });
+  assert.equal(backup.workspace.provider.apiKey, "");
+  assert.equal(backup.workspace.provider.customHeaders, "");
+  assert.equal(backup.workspace.classifier?.apiKey, "");
+  // Non-secret settings survive: endpoint, model, goals.
+  assert.equal(backup.workspace.provider.baseUrl, ws.provider.baseUrl);
+  assert.equal(backup.workspace.provider.model, ws.provider.model);
+  // The source workspace is untouched.
+  assert.equal(ws.provider.apiKey, "sk-live");
+  // And the stripped file still restores.
+  assert.equal(parseBackup(serializeBackup(backup)).ok, true);
+  assert.equal(stripBackupSecrets(ws).provider.apiKey, "");
 });
 
 test("oversized backups are refused before and after reading", () => {

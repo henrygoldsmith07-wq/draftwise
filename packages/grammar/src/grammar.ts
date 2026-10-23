@@ -22,7 +22,16 @@ export function findConfusedWords(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
   const patterns: Array<[RegExp, string, string, string, number?]> = [
     [/\b(your)\s+(welcome|going|right|sure)\b/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
-    [/\b(its)\s+(a|an|not|been|going)\b/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
+    // Temporal and additive adverbs almost never sit between a possessive and
+    // its noun ("your still able" is always "you're still able"), while
+    // intensifiers routinely do ("your very first attempt", "your quite nice
+    // garden"), so only the former are checked. "own" is excluded because
+    // "your very own" is never in the list and "your own" is possessive.
+    [/\b(your)\s+(still|always|never|already|also)\s+(?!own\b)[\p{L}]+/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
+    // A possessive can never precede "the": determiners do not stack, so
+    // "your the best" and "its the last thing" are always the contraction.
+    [/\b(your)\s+the\b/giu, "you're", "grammar-confused-your", "Your is possessive; you’re means you are."],
+    [/\b(its)\s+(a|an|the|not|been|going)\b/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
     [/\b(its)\s+(?:almost|nearly|just|really|quite|very|so|pretty|already|finally|always|never|probably|definitely|simply|literally)\s+[\p{L}]+(?=\s+(?:to\b|and\b|but\b|or\b|because\b|though\b|although\b|so\b|then\b))/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
     [/\b(its)\s+(ready|done|over|finished|fine|great|obvious|clear|unclear|impossible)(?=\s+(?:to\b|and\b|but\b|or\b|because\b)|[.,!?;:]|$)/giu, "it's", "grammar-confused-its", "It’s means it is; its shows possession."],
     [/\b(their)\s+(is|are|was|were|has|have|a|an|not)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
@@ -36,13 +45,124 @@ export function findConfusedWords(text: string, preferences: StylePreferences) {
     [/\b(some|good|useful|professional)\s+(advise)\b/giu, "advice", "grammar-confused-advise", "Advice is the noun; advise is the verb.", 2],
     [/\b(to|will|can|may|might|could)\s+(loose)\b/giu, "lose", "grammar-confused-loose", "Lose means misplace or fail to win; loose means not tight.", 2],
   ];
+  // In a draft written entirely without letter case the writer has abandoned
+  // apostrophes along with capitals, so suggesting one back ("its" ->
+  // "it's", "your" -> "you're") is register noise: the same draft writes
+  // "dont" and "i" without one. Letter-level confusions (their/there,
+  // than/then) are still checked. See isUncasedDraft.
+  const uncasedConfusion = isUncasedDraft(text);
   for (const [pattern, replacement, ruleId, explanation, groupIndex = 1] of patterns) {
+    if (uncasedConfusion && (ruleId === "grammar-confused-its" || ruleId === "grammar-confused-your")) continue;
     for (const match of text.matchAll(pattern)) {
       const start = (match.index ?? 0);
       const original = match[groupIndex] ?? "";
       const wordStart = start + (match[0]?.indexOf(original) ?? 0);
       pushIssue(issues, makeIssue(ruleId, wordStart, wordStart + original.length, original, preserveCase(original, replacement), "grammar", "medium", "Check the commonly confused word", explanation, 0.78, preferences));
     }
+  }
+  return issues;
+}
+
+const REFLEXIVE_SUBJECTIVE: Record<string, string> = {
+  myself: "I", yourself: "you", himself: "he", herself: "she", itself: "it",
+  ourselves: "we", yourselves: "you", themselves: "they", oneself: "one",
+};
+const REFLEXIVE_OBJECTIVE: Record<string, string> = {
+  myself: "me", yourself: "you", himself: "him", herself: "her", itself: "it",
+  ourselves: "us", yourselves: "you", themselves: "them", oneself: "one",
+};
+const REFLEXIVE_ALTERNATION = Object.keys(REFLEXIVE_SUBJECTIVE).join("|");
+
+// Auxiliaries and modals put a following either/neither phrase in subject
+// position ("will either himself or James attend" needs "he"). They are
+// listed explicitly because VERB_HINTS mixes them with lexical verbs, and a
+// lexical verb in the same slot governs an object instead ("invited both
+// myself" needs "me").
+const SUBJECT_SLOT_AUX = new Set([
+  "am", "be", "is", "are", "was", "were", "been", "being",
+  "have", "has", "had", "do", "does", "did",
+  "will", "would", "can", "could", "shall", "should", "may", "might", "must",
+]);
+
+// Base-form transitive verbs that VERB_HINTS does not carry but that govern
+// an object slot the same way a preposition does ("contact either myself"
+// needs "me", while "if either myself" needs "I").
+const TRANSITIVE_GOVERNORS = new Set([
+  "send", "give", "ask", "invite", "include", "contact", "email", "call",
+  "bring", "take", "pass", "share", "forward", "cc", "notify", "let",
+  "help", "see", "hear", "watch",
+]);
+
+/**
+ * Whether the either/neither/both phrase starting at `keywordStart` sits in
+ * an object slot (after a preposition or transitive verb: "to either
+ * myself" → "me") or a subject slot ("if either myself" → "I").
+ *
+ * Defaults to subject: a conjunction, comma or clause boundary before the
+ * keyword means nothing governs the phrase, and the reflexive is in subject
+ * position by elimination.
+ */
+function reflexiveSlotCase(text: string, keywordStart: number): "subject" | "object" {
+  const before = text.slice(0, keywordStart);
+  if (PREPOSITION_BEFORE.test(before)) return "object";
+  const previous = /([\p{L}']+)\s*$/u.exec(before)?.[1]?.toLocaleLowerCase();
+  if (!previous || SUBJECT_SLOT_AUX.has(previous)) return "subject";
+  if (VERB_HINTS.has(previous) || /(ed|ing)$/u.test(previous) || TRANSITIVE_GOVERNORS.has(previous)) return "object";
+  return "subject";
+}
+
+const REFLEXIVE_NEXT_WORD_EXCLUDED = new Set([
+  "and", "or", "nor", "the", "a", "an", "to", "of", "for", "with",
+  "by", "from", "in", "on", "at", "as", "but", "if", "that",
+]);
+
+function reflexiveFollowedByVerb(text: string, reflexiveEnd: number): boolean {
+  const next = /\s+([\p{L}']+)/u.exec(text.slice(reflexiveEnd))?.[1]?.toLocaleLowerCase();
+  if (!next || REFLEXIVE_NEXT_WORD_EXCLUDED.has(next)) return false;
+  return SUBJECT_SLOT_AUX.has(next)
+    || VERB_HINTS.has(next)
+    || /(ed|ing|es)$/u.test(next);
+}
+
+/**
+ * A reflexive pronoun standing in for a plain personal pronoun.
+ *
+ * "Either myself or my colleague" and "myself will attend" are
+ * hypercorrections: a reflexive needs its antecedent in the clause ("I
+ * myself will attend", "he fixed it himself"), and without one the
+ * subject slot takes "I" and the object slot "me". The emphatic uses
+ * never match: they follow their antecedent mid-clause, while both patterns
+ * here are anchored where no antecedent can stand — after either/neither/
+ * both, or at a sentence boundary followed by a verb.
+ *
+ * Mid-clause coordination ("John and myself attended") is deliberately not
+ * covered: telling a subject ("John and I") from an object ("for John and
+ * me") there needs government analysis this rule does not attempt. A miss,
+ * never a false positive.
+ */
+export function findReflexiveSubjects(text: string, preferences: StylePreferences) {
+  const issues: WritingIssue[] = [];
+  const push = (start: number, original: string, replacement: string, slot: "subject" | "object") => {
+    pushIssue(issues, makeIssue("grammar-reflexive-subject", start, start + original.length, original, preserveCase(original, replacement), "grammar", "high", "Check the reflexive pronoun",
+      slot === "subject"
+        ? `“${original}” cannot be the subject of a clause on its own — the reflexive needs its antecedent (“I myself”). Use the subject pronoun “${replacement}” here.`
+        : `After a preposition or verb the reflexive needs its antecedent in the clause. Use the object pronoun “${replacement}” here.`,
+      0.9, preferences));
+  };
+  for (const match of text.matchAll(new RegExp(`\\b(either|neither|both)\\s+(${REFLEXIVE_ALTERNATION})\\s+(or|nor|and)\\b`, "giu"))) {
+    const original = match[2] ?? "";
+    const lower = original.toLocaleLowerCase();
+    const slot = reflexiveSlotCase(text, match.index ?? 0);
+    const replacement = (slot === "subject" ? REFLEXIVE_SUBJECTIVE : REFLEXIVE_OBJECTIVE)[lower] ?? original;
+    const wordStart = (match.index ?? 0) + (match[0]?.indexOf(original) ?? 0);
+    push(wordStart, original, replacement, slot);
+  }
+  for (const match of text.matchAll(new RegExp(`(^|[.!?]\\s+)(${REFLEXIVE_ALTERNATION})\\b`, "giu"))) {
+    const original = match[2] ?? "";
+    const start = (match.index ?? 0) + (match[1]?.length ?? 0);
+    if (!reflexiveFollowedByVerb(text, start + original.length)) continue;
+    const replacement = REFLEXIVE_SUBJECTIVE[original.toLocaleLowerCase()] ?? original;
+    push(start, original, replacement, "subject");
   }
   return issues;
 }
@@ -136,6 +256,27 @@ function isPrepositionalObject(text: string, position: number) {
  * singular subject reported a grammar error on correct writing, so the "were"
  * agreement fix is withheld inside those clauses.
  */
+/**
+ * The base form of a third-person singular lexical verb, or null when `word`
+ * is not shaped like one.
+ *
+ * Consonant + "ies" takes "y" ("studies" -> "study") while vowel + "ies"
+ * takes "ie" ("dies" -> "die"); sibilant and -o endings take "es"
+ * ("watches" -> "watch", "goes" -> "go"); the rest drop a single "s"
+ * except double-s endings ("class" is a noun, not "clas" + "s"). Inputs
+ * shorter than four letters are never verb forms worth judging ("as", "is").
+ */
+function toBaseVerbForm(word: string): string | null {
+  if (word.length < 4) return null;
+  if (word.endsWith("ies")) {
+    const stem = word.slice(0, -3);
+    return /[aeiou]$/u.test(stem) ? `${stem}ie` : `${stem}y`;
+  }
+  if (/(?:s|x|z|ch|sh|o)es$/u.test(word)) return word.slice(0, -2);
+  if (word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return null;
+}
+
 function inHypotheticalClause(text: string, position: number) {
   const boundaries = [".", "!", "?", "\n"].map((mark) => text.lastIndexOf(mark, position - 1));
   const clauseStart = Math.max(...boundaries) + 1;
@@ -168,18 +309,50 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     for (const match of text.matchAll(pattern)) {
       const subject = match[1] ?? "";
       const verb = match[2] ?? "";
-      const subjectIsPlural = nounLooksPlural(subject);
-      const pluralVerb = ["are", "were", "have", "do"].includes(verb.toLocaleLowerCase());
-      const singularVerb = ["is", "was", "has", "does"].includes(verb.toLocaleLowerCase());
-      if ((pluralVerb && subjectIsPlural) || (singularVerb && !subjectIsPlural && !["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase()))) continue;
-      const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
       // Only the determiner patterns can be thrown off by sentence structure;
       // "he/she/it" and "they/we/you" are unambiguous subjects.
       const determinerLed = /^(?:the|this|that|these|those|my|your|our|their)\b/iu.test(match[0]);
+      // A personal pronoun after a determiner agrees with itself: "that it
+      // is" and "that they are" are correct English, and the pronoun-led
+      // patterns above already own the cases where they are wrong. Without
+      // this, every relative clause with a pronoun subject was reported.
+      // "I" is not exempt: no above pattern covers it, and "that I is"
+      // is always wrong.
+      const pronounSubject = ["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase());
+      if (determinerLed && pronounSubject) continue;
+      const subjectIsPlural = nounLooksPlural(subject);
+      const pluralVerb = ["are", "were", "have", "do"].includes(verb.toLocaleLowerCase());
+      const singularVerb = ["is", "was", "has", "does"].includes(verb.toLocaleLowerCase());
+      if ((pluralVerb && subjectIsPlural) || (singularVerb && !subjectIsPlural && !pronounSubject)) continue;
+      const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
       if (determinerLed && isPrepositionalObject(text, match.index ?? 0)) continue;
       if (verb.toLocaleLowerCase() === "were" && inHypotheticalClause(text, start)) continue;
       pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, replacements[verb.toLocaleLowerCase()] ?? verb), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.94, preferences));
     }
+  }
+  // Auxiliary verbs end in -s too, but the patterns above own them: "The
+  // results is" and "The results has" are already reported with the right
+  // fix, so this loop only sees lexical verbs.
+  const AUXILIARY_VERB_FORMS = new Set(["is", "are", "was", "were", "has", "have", "does", "do", "am"]);
+  // Plural-looking nouns that are singular or number-ambiguous in ordinary
+  // prose: academic fields take singular agreement ("statistics shows" is
+  // correct for the discipline), and headquarters/means can be either, so a
+  // precision rule declines to judge them.
+  const AMBIGUOUS_NUMBER_NOUNS = /(?:headquarters|means|economics|statistics|politics|ethics|linguistics|classics)$/iu;
+  for (const match of text.matchAll(/\b(?:the|this|that|my|your|our|their)\s+([\p{L}][\p{L}'’-]*)\s+([\p{L}]+s)\b/giu)) {
+    const subject = match[1] ?? "";
+    const verb = match[2] ?? "";
+    const verbLower = verb.toLocaleLowerCase();
+    if (AUXILIARY_VERB_FORMS.has(verbLower)) continue;
+    if (!nounLooksPlural(subject) || AMBIGUOUS_NUMBER_NOUNS.test(subject)) continue;
+    const base = toBaseVerbForm(verbLower);
+    // The stripped form must be a known verb: without that, noun-noun
+    // compounds ("the sales calls rang") and stray words ("the results as
+    // presented") would be "corrected" into nonsense.
+    if (!base || !VERB_HINTS.has(base)) continue;
+    const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+    if (isPrepositionalObject(text, match.index ?? 0)) continue;
+    pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, base), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.9, preferences));
   }
   const trimmed = text.trim();
   const lastSentence = document.sentences[document.sentences.length - 1];

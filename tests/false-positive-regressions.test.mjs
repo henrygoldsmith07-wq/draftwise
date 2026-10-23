@@ -115,6 +115,13 @@ test("filler words are not flagged in casual voice", () => {
   assert.deepEqual(casual.map((issue) => issue.original), [], "casual voice carries tone in these words");
 });
 
+test("hedging intensifiers read as filler in formal prose", () => {
+  for (const word of ["somewhat", "obviously"]) {
+    const found = analyzeLocally(`The result is ${word} unclear.`, style).issues.filter((issue) => issue.ruleId === "conciseness-filler");
+    assert.equal(found.length, 1, `${word} should read as filler`);
+  }
+});
+
 test("filler words are still flagged in formal prose", () => {
   const text = "The committee basically decided that the proposal would just require further review before any final decision could be made.";
   const formal = displayed(text, goals("professional", "inform", "formal")).filter((issue) => issue.ruleId === "conciseness-filler");

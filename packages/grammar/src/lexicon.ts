@@ -4,6 +4,7 @@ export const TYPO_FIXES : Record<string, string> = {
   adn: "and",
   acheive: "achieve",
   adress: "address",
+  althogh: "although",
   arguement: "argument",
   becuase: "because",
   beleive: "believe",
@@ -12,6 +13,7 @@ export const TYPO_FIXES : Record<string, string> = {
   comming: "coming",
   couldnt: "couldn't",
   definately: "definitely",
+  definitly: "definitely",
   dont: "don't",
   equipement: "equipment",
   goverment: "government",
@@ -29,7 +31,11 @@ export const TYPO_FIXES : Record<string, string> = {
   reciever: "receiver",
   refered: "referred",
   reserch: "research",
+  particuliar: "particular",
   seperate: "separate",
+  seperated: "separated",
+  seperates: "separates",
+  seperating: "separating",
   sucess: "success",
   succesful: "successful",
   teh: "the",
@@ -75,6 +81,22 @@ export const TYPO_FIXES : Record<string, string> = {
   winner: "winner",
   winners: "winners",
 };
+
+/**
+ * TYPO_FIXES entries that are only a missing apostrophe.
+ *
+ * In a draft written entirely without letter case the writer has abandoned
+ * apostrophes along with capitals ("dont", "couldnt", "youre"), so
+ * suggesting one back is register noise, not a correction: the same draft
+ * leaves "thats", "ive" and "ill" unflagged, and flagging only the subset
+ * that happens to sit in TYPO_FIXES is arbitrary. Genuine misspellings
+ * ("recieve", "seperate") are still corrected in that register, because a
+ * wrong letter is a slip in any register. See isUncasedDraft.
+ */
+export const REGISTER_CONTRACTIONS = new Set([
+  "couldnt", "dont", "doesnt", "shouldnt", "wasnt", "isnt", "cant",
+  "youre", "theyre", "youve",
+]);
 
 // Keep the common lexicon inline so the web app and extension share exactly the same
 // local checker. The core list is ordered by frequency; the extended list adds useful
@@ -301,11 +323,12 @@ export const DIALECT_VARIANTS : Record<string, { "en-GB": string; "en-US": strin
   favourite: { "en-GB": "favourite", "en-US": "favorite" },
   fulfil: { "en-GB": "fulfil", "en-US": "fulfill" },
   labelled: { "en-GB": "labelled", "en-US": "labeled" },
-  // No metre/meter entry. The unit is "metre" in British English but the
-  // device is "meter" in both variants, so "A parking meter took coins" was
-  // rewritten to "metre" — not a dialect preference, just wrong. Telling the
-  // two apart needs context the word alone does not carry, and suggesting
-  // incorrect English costs the writer more trust than a missing suggestion.
+  // No unconditional metre/meter entry. The unit is "metre" in British
+  // English but the device is "meter" in both variants, so "A parking meter
+  // took coins" was rewritten to "metre" — not a dialect preference, just
+  // wrong. The word alone cannot tell them apart, so only a measurement
+  // context (a numeral or square/cubic before it) earns the British spelling.
+  // See METER_UNIT_CONTEXT and contextualDialectReplacement.
   practise: { "en-GB": "practise", "en-US": "practice" },
   programme: { "en-GB": "programme", "en-US": "program" },
   theatre: { "en-GB": "theatre", "en-US": "theater" },
@@ -315,7 +338,13 @@ export const DIALECT_VARIANTS : Record<string, { "en-GB": string; "en-US": strin
   specialise: { "en-GB": "specialise", "en-US": "specialize" },
 };
 
-export const CONTEXTUAL_DIALECT_WORDS  = new Set(["license", "licence", "practice", "practise", "program", "programme"]);
+export const CONTEXTUAL_DIALECT_WORDS  = new Set(["license", "licence", "practice", "practise", "program", "programme", "meter", "meters", "metre", "metres"]);
+// Words before "meter"/"meters" that remove the device reading, leaving only
+// the unit: "ran 5 meters", "a 100 meter dash", "ten square meters". A bare
+// "a meter" or "parking meter" stays untouched — the device is "meter" in
+// both variants. Numerals are tested directly (the tokenizer splits "3.5"
+// into "3" and "5", and either half still proves a measurement follows).
+export const METER_UNIT_CONTEXT  = new Set(["square", "cubic"]);
 export const DIALECT_VERB_CONTEXT  = new Set(["i", "you", "we", "they", "he", "she", "it", "to", "will", "would", "can", "could", "may", "might", "must", "should", "shall"]);
 export const DIALECT_NOUN_CONTEXT  = new Set(["a", "an", "the", "my", "your", "our", "their", "this", "that", "driving", "software", "business", "professional", "commercial", "export", "operating", "training", "television", "tv", "radio", "loyalty", "rehabilitation", "education", "educational", "arts", "concert", "event"]);
 export const PROGRAMME_COMPUTING_CONTEXT  = new Set(["computer", "software", "code", "coding", "programming", "developer", "application", "app", "script", "source", "compile", "compiler", "debug", "debugging", "api", "machine", "algorithm", "database", "terminal", "runtime", "python", "javascript"]);
@@ -325,8 +354,10 @@ export const FILLER_WORDS  = new Set([
   "actually",
   "basically",
   "just",
+  "obviously",
   "really",
   "simply",
+  "somewhat",
 ]);
 
 export const WORDINESS : Array<[string, string]> = [

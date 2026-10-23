@@ -45,6 +45,12 @@ test("spelling handles transpositions, omitted letters, inflections, hyphens, po
   assert.equal(suggestSpelling("writng"), "writing");
   assert.equal(suggestSpelling("recieve"), "receive");
   assert.equal(suggestSpelling("enviroment"), "environment");
+  // Inflected forms of a known typo are typos too: the blind corpus showed
+  // "seperated" slipping through while "seperate" was caught.
+  assert.equal(suggestSpelling("seperated"), "separated");
+  assert.equal(suggestSpelling("seperates"), "separates");
+  assert.equal(suggestSpelling("seperating"), "separating");
+  assert.equal(analyzeLocally("The traditions separated early.").issues.some((issue) => issue.category === "spelling"), false);
   const result = analyzeLocally("The writer's well-known café has a naïve example.");
   assert.equal(result.issues.some((issue) => issue.category === "spelling"), false);
 });
@@ -111,6 +117,93 @@ test("article exceptions and noun agreement cover common high-confidence cases",
   assert.equal(incorrect.issues.filter((issue) => issue.ruleId === "grammar-subject-verb-agreement").length, 2);
 });
 
+test("a pronoun subject after a determiner agrees with itself", () => {
+  // "that it is" and "that they are" are correct English: the relative
+  // pronoun is its own subject, so there is nothing to disagree with. The
+  // blind corpus showed each of these reported as an agreement error.
+  for (const text of ["I know that it is true.", "They said that they are ready.", "Boredom has a bad reputation that it does not deserve."]) {
+    assert.equal(analyzeLocally(text).issues.some((issue) => issue.ruleId === "grammar-subject-verb-agreement"), false, text);
+  }
+  // The pronoun-led patterns still own genuine pronoun errors.
+  assert.ok(analyzeLocally("She are ready.").issues.some((issue) => issue.ruleId === "grammar-subject-verb-agreement"));
+  assert.ok(analyzeLocally("They is ready.").issues.some((issue) => issue.ruleId === "grammar-subject-verb-agreement"));
+});
+
+test("lexical verbs agree with a plural subject and stay quiet otherwise", () => {
+  const hit = analyzeLocally("The results shows steady improvement.");
+  const issue = hit.issues.find((item) => item.ruleId === "grammar-subject-verb-agreement");
+  assert.ok(issue);
+  assert.equal(issue.replacement, "show");
+  // Correct agreement, ambiguous number, and noun-noun compounds stay clean.
+  for (const text of ["The results show steady improvement.", "The economics shows growth.", "Our headquarters shows growth.", "The sales calls rang unanswered."]) {
+    assert.equal(analyzeLocally(text).issues.some((item) => item.ruleId === "grammar-subject-verb-agreement"), false, text);
+  }
+});
+
+test("confused your and its cover adverbs and determiner stacking", () => {
+  for (const [text, ruleId, original] of [
+    ["I hope your still able to come.", "grammar-confused-your", "your"],
+    ["Its the final step that matters.", "grammar-confused-its", "Its"],
+    ["We finished early, as its the last task today.", "grammar-confused-its", "its"],
+  ]) {
+    const found = analyzeLocally(text).issues.find((item) => item.ruleId === ruleId);
+    assert.ok(found, text);
+    assert.equal(found.original, original);
+  }
+  // Intensifiers before a noun are grammatical possessives, not errors.
+  assert.equal(analyzeLocally("I like your very own car.").issues.some((item) => item.category === "grammar"), false);
+  assert.equal(analyzeLocally("Thank you for your very kind words.").issues.some((item) => item.category === "grammar"), false);
+});
+
+test("a reflexive without its antecedent gets the matching personal pronoun", () => {
+  // Subject slot takes the subjective form, object slot (after a
+  // preposition or transitive verb) the objective form.
+  for (const [text, original, replacement] of [
+    ["Either myself or my colleague will attend.", "myself", "I"],
+    ["Neither himself nor his brother came.", "himself", "he"],
+    ["Will either himself or James attend the review?", "himself", "he"],
+    ["Myself will review the draft tomorrow.", "Myself", "I"],
+    ["Please send the notes to either myself or John.", "myself", "me"],
+    ["She invited both myself and John to the launch.", "myself", "me"],
+    ["Let either myself or John know your decision.", "myself", "me"],
+  ]) {
+    const found = analyzeLocally(text).issues.find((item) => item.ruleId === "grammar-reflexive-subject");
+    assert.ok(found, text);
+    assert.equal(found.original, original);
+    assert.equal(found.replacement, replacement);
+  }
+  // Emphatic reflexives follow their antecedent, and correct pronouns stay clean.
+  for (const text of [
+    "I myself will review the draft.",
+    "The report itself shows the trend.",
+    "He fixed it himself yesterday.",
+    "She invited both me and John to the launch.",
+  ]) {
+    assert.equal(analyzeLocally(text).issues.some((item) => item.ruleId === "grammar-reflexive-subject"), false, text);
+  }
+  // Mid-clause coordination is a known gap, never a false positive.
+  assert.equal(analyzeLocally("Myself and John attended the review.").issues.some((item) => item.ruleId === "grammar-reflexive-subject"), false);
+});
+
+test("an uncased draft gets no apostrophe suggestions", () => {
+  // The draft abandoned apostrophes along with capitals, so suggesting one
+  // back is register noise. Letter-level slips are still corrected, and the
+  // same words in a cased draft are still flagged.
+  const uncased = analyzeLocally("i told priya dont bother coming early as its not ready yet and your still welcome");
+  assert.equal(uncased.issues.some((item) => item.ruleId === "spelling-common-typo"), false);
+  assert.equal(uncased.issues.some((item) => item.ruleId === "grammar-confused-its"), false);
+  assert.equal(uncased.issues.some((item) => item.ruleId === "grammar-confused-your"), false);
+  assert.ok(analyzeLocally("i recieved your message and i will definitly have a look tomorrow").issues.some((item) => item.category === "spelling"));
+  assert.ok(analyzeLocally("I told them dont bother coming early.").issues.some((item) => item.ruleId === "spelling-common-typo"));
+  assert.ok(analyzeLocally("Please come, as its not ready.").issues.some((item) => item.ruleId === "grammar-confused-its"));
+});
+
+test("common single-slip typos resolve without fuzzy guessing", () => {
+  assert.equal(suggestSpelling("althogh"), "although");
+  assert.equal(suggestSpelling("particuliar"), "particular");
+  assert.equal(suggestSpelling("definitly"), "definitely");
+});
+
 test("British dialect rules distinguish contextual licence, practise, and programme", () => {
   const british = analyzeLocally(
     "The authority will license the company. I practice every day. I need a driving license. The training program helps. The software program runs.",
@@ -123,6 +216,22 @@ test("British dialect rules distinguish contextual licence, practise, and progra
   assert.equal(dialectIssues.some((issue) => issue.original === "will" || issue.original === "software"), false);
   assert.equal(dialectIssues.filter((issue) => issue.original === "license").length, 1);
   assert.equal(dialectIssues.filter((issue) => issue.original === "program").length, 1);
+});
+
+test("metre is suggested only for measurements, never for the device", () => {
+  // A numeral or square/cubic before the word removes the device reading, so
+  // only then is the British unit spelling earned. Anything else — "a meter",
+  // "parking meter" — may be the device, which is "meter" everywhere.
+  const measured = analyzeLocally("She ran 5 meters to the line and won the 100 meter dash.", { dialect: "en-GB" });
+  const measuredIssues = measured.issues.filter((issue) => issue.ruleId === "dialect-spelling");
+  assert.ok(measuredIssues.some((issue) => issue.original === "meters" && issue.replacement === "metres"));
+  assert.ok(measuredIssues.some((issue) => issue.original === "meter" && issue.replacement === "metre"));
+  for (const text of ["A parking meter took coins.", "The meter in the driveway is broken."]) {
+    assert.equal(analyzeLocally(text, { dialect: "en-GB" }).issues.some((issue) => issue.ruleId === "dialect-spelling"), false, text);
+  }
+  // "metre" is never the device, so US English always rewrites it.
+  const us = analyzeLocally("The track is 400 metres long.", { dialect: "en-US" });
+  assert.ok(us.issues.some((issue) => issue.ruleId === "dialect-spelling" && issue.original === "metres" && issue.replacement === "meters"));
 });
 
 test("dialect rules leave ambiguous contextual forms alone and handle US counterparts", () => {

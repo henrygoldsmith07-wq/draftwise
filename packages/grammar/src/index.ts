@@ -9,6 +9,7 @@ import {
 import {
   findCapitalization,
   findConfusedWords,
+  findReflexiveSubjects,
   findPunctuation,
   findPrecisionGrammarIssues,
 } from "./grammar.ts";
@@ -69,6 +70,7 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
   const rawIssues = mergeWritingIssues([
     ...findSpelling(text, preferences, document),
     ...findConfusedWords(text, preferences),
+    ...findReflexiveSubjects(text, preferences),
     ...findPrecisionGrammarIssues(text, preferences, document),
     ...findPunctuation(text, preferences),
     ...findCapitalization(text, preferences),

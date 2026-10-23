@@ -489,5 +489,206 @@
     "kind": "clean",
     "text": "Host permissions are optional and granted per site. The extension registers no static content script; it asks for access to an origin only when the writer grants it, and revoking that grant unregisters the script immediately rather than at the next browser start.",
     "expected": []
+  },
+  {
+    "id": "blind-essay-014",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Memory is not a recording but a reconstruction. Each time an event is recalled, the mind rebuilds it from fragments, and the rebuilding introduces small changes. A confident witness is therefore not necessarily an accurate one, which courts have been slow to accept.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-015",
+    "style": "essay",
+    "kind": "clean",
+    "text": "A map draws a boundary and then pretends the boundary was always there. The line on the paper looks inevitable, yet somebody chose where it falls and somebody else agreed. To read a map well is to ask who drew it and what they needed it to show.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-016",
+    "style": "essay",
+    "kind": "spelling",
+    "text": "The two traditions seperated early, and the split occured before either side had written its principles down. What followed was a century of argument about a division that nobody had planned, which suggests the causes ran deeper than the occasion.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "seperated"
+      },
+      {
+        "category": "spelling",
+        "original": "occured"
+      }
+    ]
+  },
+  {
+    "id": "blind-essay-017",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Political language is designed to make lies sound truthful. The passive construction fits that purpose exactly: responsibility disappears into the syntax. A sentence that says mistakes were made names nobody, and that is precisely why it survives.",
+    "expected": []
+  },
+  {
+    "id": "blind-essay-018",
+    "style": "essay",
+    "kind": "clean",
+    "text": "Boredom has a bad reputation that it does not deserve. An idle afternoon produces the thought that a busy one suppresses, and the mind wanders usefully when nothing demands its attention. Cultures that prize constant activity lose whatever only idleness can find.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-013",
+    "style": "report",
+    "kind": "clean",
+    "text": "Uptake rose in every quarter except the second, when maintenance closed the main site for eleven days. Adjusting for that closure, growth was steady throughout the period. The shortfall against target is therefore a timing effect rather than a demand problem.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-014",
+    "style": "report",
+    "kind": "grammar",
+    "text": "The results shows a steady improvement across all four sites, and the trend have continued into the new quarter. Both findings support the original case for further investment.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "shows"
+      },
+      {
+        "category": "grammar",
+        "original": "have"
+      }
+    ]
+  },
+  {
+    "id": "blind-report-015",
+    "style": "report",
+    "kind": "clean",
+    "text": "Three suppliers met the deadline in full, two delivered partial orders, and one withdrew. The partial orders covered the critical items, so production continued without interruption. Procurement recommends dual sourcing for the next cycle to reduce this exposure.",
+    "expected": []
+  },
+  {
+    "id": "blind-report-016",
+    "style": "report",
+    "kind": "clean",
+    "text": "Satisfaction scored highest on clarity of communication and lowest on speed of resolution. The gap between the two has widened since spring, which points to capacity rather than competence. Two additional handlers would close most of the difference within a quarter.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-014",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Retries use exponential backoff with jitter, so a failing dependency receives progressively less pressure rather than a synchronised wave. After five attempts the operation is marked failed and surfaced to the operator, who decides whether a manual retry is warranted.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-015",
+    "style": "technical",
+    "kind": "clean",
+    "text": "Migrations run inside a single transaction where the store supports it. When the store cannot roll back a step, the migration writes a compensating record first, so a half-applied change is detectable and reversible without restoring from backup.",
+    "expected": []
+  },
+  {
+    "id": "blind-technical-016",
+    "style": "technical",
+    "kind": "spelling",
+    "text": "The reciever acknowledges each packet before the sender discards it from the queue, and duplicates are dropped by sequence number. Loss is therefore detected by timeout rather than by inspection.",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "reciever"
+      }
+    ]
+  },
+  {
+    "id": "blind-technical-017",
+    "style": "technical",
+    "kind": "clean",
+    "text": "The merge step takes the union of local findings and validated provider findings. Overlapping ranges on the same span are resolved by keeping the stronger finding, and the surviving issue carries the identifier of the rule that produced it.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-012",
+    "style": "email",
+    "kind": "clean",
+    "text": "Thanks for sending this over. I have read the proposal and I am comfortable with the approach, though I would like the risks section to state plainly who owns each mitigation before we share it further.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-013",
+    "style": "email",
+    "kind": "clean",
+    "text": "Could we move Thursday's call to the afternoon? The morning is now full, and I would rather give this the full hour than compress it. Please send an updated invitation whenever convenient.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-014",
+    "style": "email",
+    "kind": "grammar",
+    "text": "Your welcome, happy to help with the slides. Let me know if anything else is needed before Friday, and I will send the final version on Thursday.",
+    "expected": [
+      {
+        "category": "grammar",
+        "original": "Your"
+      }
+    ]
+  },
+  {
+    "id": "blind-email-015",
+    "style": "email",
+    "kind": "clean",
+    "text": "Quick update: the invoice has been approved and payment should follow this week. I will confirm once it lands.",
+    "expected": []
+  },
+  {
+    "id": "blind-email-016",
+    "style": "email",
+    "kind": "clean",
+    "text": "I am out on Friday but reachable by email for anything urgent. Priya can approve routine items in my absence, and anything else will wait until Monday without harm.",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-012",
+    "style": "casual",
+    "kind": "clean",
+    "text": "that film was brilliant, we should all go on saturday if anyone is free. i can drive if needed, the car has plenty of room",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-013",
+    "style": "casual",
+    "kind": "clean",
+    "text": "just heard back from the garage, the bill is bigger than we thought. still needs doing though so ive said yes, picking it up tuesday",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-014",
+    "style": "casual",
+    "kind": "spelling",
+    "text": "definately up for saturday, just let me know what time. i can bring snacks and drinks if needed",
+    "expected": [
+      {
+        "category": "spelling",
+        "original": "definately"
+      }
+    ]
+  },
+  {
+    "id": "blind-casual-015",
+    "style": "casual",
+    "kind": "clean",
+    "text": "no worries at all, take your time with it. id rather you did it properly than rushed it and we had to redo the whole thing",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-016",
+    "style": "casual",
+    "kind": "clean",
+    "text": "the train is delayed again so ill be a bit late. start without me if you need to, i know where to find you",
+    "expected": []
+  },
+  {
+    "id": "blind-casual-017",
+    "style": "casual",
+    "kind": "clean",
+    "text": "Mum says lunch is at one on Sunday and we should all be there. Can you bring the pudding you made last time, everyone loved it.",
+    "expected": []
   }
 ]

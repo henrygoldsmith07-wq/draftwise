@@ -6,18 +6,22 @@ Draftwise is a private, local-first writing assistant for the web and the browse
 
 - Local analysis is useful without an account, network, or API key.
 - AI is opt-in and uses a single canonical toggle in the web app and extension.
-- Drafts are persisted only in the browser’s local storage in this build.
+- Drafts are persisted only in the browser, in IndexedDB; settings and the learned profile stay in local storage. Nothing is sent anywhere unless AI is enabled and the writer asks for it.
 - Provider output is treated as untrusted input: ranges, categories, replacements, URLs, numbers, and markup are validated before anything is shown or applied.
 - Every rewrite is preview-first. Nothing changes the draft until the writer chooses Replace or Insert.
 
 ## What is included
 
-- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals, dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing.
+- Web editor with highlighted ranges, accept/dismiss/dictionary actions, undo/redo, focus mode, per-document writing goals with a live length-goal progress meter, a document library whose search covers the whole draft (not just the opening excerpt, and it highlights the matched passage), dark mode, keyboard shortcuts, debounced local persistence, immediate Ctrl/Cmd+S saves, and page-exit flushing.
+- A real installable PWA. The service worker caches the app shell, so the deployed site opens and keeps checking a draft with the network switched off — which is the one thing the cloud competitors in this category cannot offer, because their analysis lives on their servers. The writer is told when they are offline and what still works, and Settings offers the install and reports whether the app is genuinely ready to open with no network.
+- Version history with a word-level comparison: opening a checkpoint shows what changed between it and the current draft, with added and removed passages marked, a plain summary ("2 changes · +12 words · −6 words"), and side-by-side still one click away. Very long drafts fall back to a paragraph comparison and say so.
+- Read aloud through the browser's own speech engine, with the passage being spoken marked in the editor and a voice chosen to match the draft's British or American dialect. It never touches the network or the configured provider, and the control disables itself when the browser has no voices installed, with an explanation. Editing the draft stops the reading rather than leaving the highlight behind.
 - Local checks for ranked spelling candidates (British/US English, dictionaries, names, acronyms, contractions, hyphenated and technical terms), dialect, confused words, punctuation, capitalization, repetition, wordiness, clichés, filler words, vague language, terminology consistency, sentence structure, passive voice, and paragraph length.
+- Register awareness: a draft written entirely in lower case (a chat message, a quick note) is treated as a deliberate voice rather than as a page of capitalisation errors, and sentence-case advice returns the moment any capital letter appears. The same signal silences terminal-punctuation advice on those messages. A short all-lower-case fragment is still reported, because there is not enough text to establish a register.
 - Transparent correctness, clarity, conciseness, readability, engagement, consistency, and goal-alignment scores with supporting signals.
 - Incremental local and AI analysis: safe context boundaries, unaffected-issue retention/remapping, chunking for long drafts, request cancellation, bounded caching, response validation, and graceful local fallback.
 - Preview-first rewrites with local fallback, protected URLs, emails, dates, currencies, identifiers, filenames, quoted text, and stale-selection checks. AI alternatives remain previews until chosen.
-- Full backup and restore: every document with its goals and history, settings, and writing activity as one versioned JSON file from Settings. A backup includes API keys so a restore brings back a working app — keep the file private.
+- Full backup and restore: every document with its goals and history, settings, and writing activity as one versioned JSON file from Settings. A backup includes API keys so a restore brings back a working app — keep the file private. Once the library holds real work, a dismissible reminder nudges writers with no recent backup to export one.
 - Dependency-light Manifest V3 extension. Dynamic content-script registration runs only on explicitly granted sites; provider-origin access is separately granted to the service worker, and the content script never receives the API key.
 
 ## Run locally
@@ -29,7 +33,7 @@ npm install
 npm run dev
 ```
 
-The web editor works without environment variables. To enable AI, open Settings, enable AI, and configure an HTTPS OpenAI-compatible endpoint, model, and API key. Localhost HTTP endpoints are allowed for development only.
+The web editor works without environment variables. To enable AI, open Settings, enable AI, and configure an HTTPS OpenAI-compatible endpoint, model, and API key. Localhost HTTP endpoints are allowed for development only. Use Test connection to verify the URL and key against the provider's model list before depending on it — the check sends the key in the header and no draft text.
 
 Useful checks:
 
@@ -60,7 +64,7 @@ npx vercel --prod   # production
 
 `vercel.json` sets `framework: nextjs` and points the build at `npm run build:vercel`, which regenerates the extension bundles and then runs `next build`. There is nothing else to configure: no environment variables, no database, no server code. Analysis runs in the browser and drafts are stored locally, so the deployment serves the interface and nothing else.
 
-The web app is fully client-side, which is why the only output is two static pages. The Cloudflare Workers build (`npm run build` via vinext) is unaffected and remains the default for local preview.
+Analysis runs in the browser and drafts are stored locally, so the server only serves the interface. The Cloudflare Workers build (`npm run build` via vinext) is unaffected and remains the default for `npm start` local preview.
 
 To check a deployment before trusting it, run the browser suite against the same production build a deployment serves:
 
@@ -68,7 +72,7 @@ To check a deployment before trusting it, run the browser suite against the same
 npm run test:e2e:production
 ```
 
-`npm run test:e2e` runs the same 13 tests against the vinext dev server. The production config exists because passing against the dev server does not tell you the deployed artifact works; this one does.
+`npm run test:e2e` runs the same browser suite against the vinext dev server. The production config exists because passing against the dev server does not tell you the deployed artifact works; this one does.
 
 ## Install the extension
 

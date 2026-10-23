@@ -8,26 +8,70 @@ import { Button } from "@/components/ui/button";
 import { buildExplanation, categoryColors } from "@/packages/grammar/src";
 import type { PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
-export function HighlightLayer({ text, issues, activeIssueId }: { text: string; issues: WritingIssue[]; activeIssueId: string | null }) {
+/**
+ * The mirror layer behind the transparent textarea: everything visible in the
+ * editor that is not the text itself.
+ *
+ * Ranges are rendered by cutting the draft at every range boundary and styling
+ * each run once. An earlier version walked the issue list and skipped any issue
+ * that overlapped its predecessor, which was fine while issues were the only
+ * ranges — but read-aloud highlights an arbitrary passage that usually overlaps
+ * one. Cutting at boundaries lets a spoken passage and a finding share the same
+ * characters: the run carries both, and each keeps its own colour.
+ */
+export function HighlightLayer({ text, issues, activeIssueId, spokenRange }: {
+  text: string;
+  issues: WritingIssue[];
+  activeIssueId: string | null;
+  /** Passage the speech engine is reading right now, in draft offsets. */
+  spokenRange?: { start: number; end: number } | null;
+}) {
   const nodes = useMemo<ReactNode[]>(() => {
-    const output: ReactNode[] = [];
-    let cursor = 0;
     const safeIssues = issues
       .filter((item) => item.start >= 0 && item.end <= text.length && item.end > item.start)
       .sort((a, b) => a.start - b.start || a.end - b.end);
+    const spoken = spokenRange && spokenRange.start >= 0 && spokenRange.end <= text.length && spokenRange.end > spokenRange.start
+      ? spokenRange
+      : null;
+
+    const boundaries = new Set<number>([0, text.length]);
     for (const item of safeIssues) {
-      if (item.start < cursor) continue;
-      if (item.start > cursor) output.push(<span key={`plain-${cursor}`}>{text.slice(cursor, item.start)}</span>);
-      output.push(
-        <mark key={item.id} className={`editor-highlight ${activeIssueId === item.id ? "is-active" : ""}`} data-category={item.category} style={{ "--issue-color": categoryColors[item.category] } as CSSProperties}>
-          {text.slice(item.start, item.end)}
-        </mark>,
-      );
-      cursor = item.end;
+      boundaries.add(item.start);
+      boundaries.add(item.end);
     }
-    if (cursor < text.length) output.push(<span key={`plain-${cursor}`}>{text.slice(cursor)}</span>);
+    if (spoken) {
+      boundaries.add(spoken.start);
+      boundaries.add(spoken.end);
+    }
+    const points = [...boundaries].sort((left, right) => left - right);
+
+    const output: ReactNode[] = [];
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const start = points[index];
+      const end = points[index + 1];
+      if (end <= start) continue;
+      const slice = text.slice(start, end);
+      const issue = safeIssues.find((item) => item.start <= start && item.end >= end);
+      const isSpoken = spoken ? start >= spoken.start && end <= spoken.end : false;
+      if (issue) {
+        output.push(
+          <mark
+            key={`issue-${start}`}
+            className={`editor-highlight ${activeIssueId === issue.id ? "is-active" : ""} ${isSpoken ? "is-spoken" : ""}`}
+            data-category={issue.category}
+            style={{ "--issue-color": categoryColors[issue.category] } as CSSProperties}
+          >
+            {slice}
+          </mark>,
+        );
+      } else if (isSpoken) {
+        output.push(<span key={`spoken-${start}`} className="editor-spoken">{slice}</span>);
+      } else {
+        output.push(slice);
+      }
+    }
     return output;
-  }, [activeIssueId, issues, text]);
+  }, [activeIssueId, issues, spokenRange, text]);
 
   return <div aria-hidden="true" className="editor-highlights">{nodes}</div>;
 }

@@ -54,3 +54,73 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - run: git diff --exit-code
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm run install:ci
+      - run: npx playwright install --with-deps chromium
+      # The browser suite is the only check that exercises the shipped UI:
+      # hydration races and ambiguous locators have broken it before while
+      # every other gate stayed green. The dev server boots itself through
+      # the Playwright webServer config; no credentials or network needed.
+      - name: Run browser tests
+        id: e2e
+        shell: bash
+        run: |
+          set -o pipefail
+          npx playwright test 2>&1 | tee e2e-output.log
+      - name: Upload browser diagnostics
+        if: failure() && steps.e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: |
+            e2e-output.log
+            test-results/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The browser suite above runs against the dev server. That is not the same
+  # artifact a deployment serves: the deployed app is the Next.js production
+  # build, with different chunking, different headers, and a service worker
+  # that only exists in production. Passing on the dev server says nothing
+  # about whether the deployed build works, and the repo's own README says so.
+  #
+  # This job exists because a Content-Security-Policy, a service worker and
+  # the Open Graph routes are all production-only behaviour that a dev-server
+  # run cannot exercise. A broken policy ships a blank page to every visitor
+  # while every other job stays green.
+  e2e-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm run install:ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run browser tests against the production build
+        id: e2e-production
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:e2e:production 2>&1 | tee e2e-production-output.log
+      - name: Upload browser diagnostics
+        if: failure() && steps.e2e-production.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-production-diagnostics-${{ github.run_id }}
+          path: |
+            e2e-production-output.log
+            test-results/
+          if-no-files-found: error
+          retention-days: 7

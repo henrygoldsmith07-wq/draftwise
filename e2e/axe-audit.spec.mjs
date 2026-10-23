@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart, waitForAppReady } from "./helpers.mjs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -30,22 +31,8 @@ function axeSource() {
   return readFile(require.resolve("axe-core/axe.min.js"), "utf8");
 }
 
-async function waitForAppReady(page) {
-  await expect(page.locator(".saved-dot")).toHaveAttribute(
-    "title",
-    /Saved|Unsaved|Storage|Could not|Saving/u,
-    { timeout: 30_000 },
-  );
-}
-
 async function openApp(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await waitForAppReady(page);
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();
@@ -55,11 +42,36 @@ async function openApp(page) {
 const CONTENT_WITH_ISSUES =
   "This is repeatd wording and the numbers is wrong, so the analysis has something to show.";
 
-async function runAxe(page, label) {
-  await page.evaluate(async (source) => {
+async function runAxe(page, label, withinSelector = null) {
+  await page.evaluate(async ({ source, selector }) => {
     const initialise = new Function(source);
     initialise();
-    await window.axe.run(document, {
+    // A selector scopes the audit to part of the page. Auditing through an
+    // open modal measures the background dimmed by the overlay, which no
+    // writer ever reads as content — the dialog audit scopes to the dialog
+    // itself. The selector must resolve to a rendered element: auditing a
+    // hidden node would pass vacuously, so a miss throws loudly instead of
+    // falling back to the whole document.
+    const root = selector
+      ? [...document.querySelectorAll(selector)].find((node) => node.getClientRects().length > 0)
+      : document;
+    if (!root) throw new Error(`axe audit scope not found: ${selector}`);
+    // Colours measured mid-animation are neither the old nor the new state:
+    // a dialog fading in reads grey over its overlay, and the theme toggle and
+    // hover transitions blend foreground into background. Let every finite
+    // animation and transition settle before auditing. A re-render can cancel
+    // a transition and start another, so loop until none is left running. The
+    // loop is bounded by a deadline and polls on timers: an animation whose
+    // finished promise never settles must delay the audit, not hang the test.
+    const running = () => (root === document ? document.getAnimations() : root.getAnimations({ subtree: true }))
+      .filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().endTime !== Infinity);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const deadline = performance.now() + 3_000;
+    while (running().length && performance.now() < deadline) {
+      await Promise.race([Promise.all(running().map((animation) => animation.finished.catch(() => undefined))), sleep(250)]);
+      await sleep(50);
+    }
+    await window.axe.run(root, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] },
       resultTypes: ["violations"],
     }).then((results) => {
@@ -77,7 +89,7 @@ async function runAxe(page, label) {
         targets: v.nodes.map((n) => n.target.join(" ")),
       }));
     });
-  }, await axeSource());
+  }, { source: await axeSource(), selector: withinSelector });
   const violations = await page.evaluate(() => window.__axeViolations);
   if (violations?.length) {
     console.log(`axe violations in ${label}:\n${violations
@@ -127,9 +139,30 @@ test.describe("axe-core audit", () => {
 
   test("settings dialog passes axe", async ({ page }) => {
     await openApp(page);
-    await page.getByRole("button", { name: "Open settings" }).click();
+    // The workspace carries its own settings shortcut, so the bare name is ambiguous — the header gear opens the dialog this audit means.
+    await page.locator("header").getByRole("button", { name: "Open settings" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
-    expect(await runAxe(page, "settings dialog")).toEqual([]);
+    // Scoped to the dialog: the goal bar behind the modal is covered by the
+    // editor-view audits at full opacity, and measuring it through the
+    // overlay's dimming would flag colours no one can see.
+    expect(await runAxe(page, "settings dialog", "[role=\"dialog\"]")).toEqual([]);
+  });
+
+  test("dialogs pass axe in dark theme", async ({ page }) => {
+    // Dialogs portal to document.body, outside .app-shell, so they carry the
+    // theme themselves. Text that inherited body's light-theme colour once
+    // rendered near-black on the dark dialog surface.
+    await openApp(page);
+    await page.getByRole("button", { name: /Use dark theme/u }).click();
+    await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "shortcuts dialog / dark", "[role=\"dialog\"]")).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.locator("header").getByRole("button", { name: "Open settings" }).click();
+    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    expect(await runAxe(page, "settings dialog / dark", "[role=\"dialog\"]")).toEqual([]);
   });
 
   test("editor passes axe at mobile width", async ({ page }) => {

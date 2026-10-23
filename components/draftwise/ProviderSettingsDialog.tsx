@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { ChevronRight, Download, Info, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppInstallSection } from "@/components/draftwise/AppInstallSection";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { downloadFile } from "@/lib/import-export";
+import { testProviderConnection } from "@/lib/ai-provider";
+import { formatRelativeTime } from "@/lib/time";
 import { exportProfile, importProfile } from "@/lib/profile-transfer";
-import { buildBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
+import { buildBackup, buildSecretsFreeBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
 import type { StoredDocument } from "@/lib/documents";
 import type { ClassifierSettings, DraftwiseWorkspace, ProviderSettings, StylePreferences } from "@/packages/types/src";
 import { DEFAULT_CLASSIFIER_SETTINGS } from "@/packages/types/src";
@@ -21,6 +24,8 @@ const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: stri
 interface ProviderSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** App theme: the dialog portals outside .app-shell, so it carries its own scope for the dark palette. */
+  theme: "dark" | "light";
   settings: ProviderSettings;
   style: StylePreferences;
   aiEnabled: boolean;
@@ -38,13 +43,21 @@ interface ProviderSettingsDialogProps {
   backupWorkspace: DraftwiseWorkspace;
   /** Reads the raw activity log for the backup export; unreadable content exports as empty. */
   readBackupActivityRaw: () => string | null;
-  /** Replace everything with a parsed backup, then reload. Must not reload on failure. */
-  onRestoreBackup: (backup: RestorableBackup) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * Restore a parsed backup. Replace swaps the whole library, settings and
+   * activity, then reloads — and must not reload on failure. Merge adds the
+   * backup's documents alongside the current ones, touches nothing else,
+   * and reports per-document counts on success. Merge must not reload at all.
+   */
+  onRestoreBackup: (backup: RestorableBackup, mode: "replace" | "merge") => Promise<{ ok: true; merged?: { added: number; skipped: number; renamed: number } } | { ok: false; error: string }>;
+  /** Stamps the backup reminder's last-export time after a settings export. */
+  onBackupExported?: () => void;
 }
 
 export function ProviderSettingsDialog({
   open,
   onOpenChange,
+  theme,
   settings,
   style,
   aiEnabled,
@@ -60,6 +73,7 @@ export function ProviderSettingsDialog({
   backupWorkspace,
   readBackupActivityRaw,
   onRestoreBackup,
+  onBackupExported,
 }: ProviderSettingsDialogProps) {
   const patchSettings = (patch: Partial<ProviderSettings>) => onSettingsChange({ ...settings, ...patch });
   const patchStyle = (patch: Partial<StylePreferences>) => onStyleChange({ ...style, ...patch });
@@ -71,6 +85,21 @@ export function ProviderSettingsDialog({
   // document store returns one when local storage is unavailable), so it is now
   // shown with a next action instead of silently discarded.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // BYOK setup fails silently today: a typo'd URL or revoked key only
+  // surfaces later as a vague mid-draft analysis error. The test lists
+  // models (key in the header, nothing else sent) so settings can say
+  // "connected" before the writer depends on it.
+  const [connectionTest, setConnectionTest] = useState<{ ok: boolean; message: string } | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const runConnectionTest = () => {
+    if (testingConnection) return;
+    setTestingConnection(true);
+    setConnectionTest(null);
+    void testProviderConnection({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, customHeaders: settings.customHeaders })
+      .then((result) => setConnectionTest(result))
+      .catch(() => setConnectionTest({ ok: false, message: "The test failed unexpectedly. Check the URL and try again." }))
+      .finally(() => setTestingConnection(false));
+  };
   // Profile portability: the writer's learned language data as a file they
   // own. Export downloads it; import merges a file additively and reports
   // exactly what changed. Secrets never enter the file (see profile-transfer).
@@ -98,21 +127,26 @@ export function ProviderSettingsDialog({
   // writer owns. Unlike the profile export this necessarily includes API
   // keys, so both directions say so. Restore is a deliberate two-step:
   // parse first, then an inline confirmation naming exactly what arrives —
-  // replacing the whole library must never happen as a side effect of
-  // merely picking a file.
+  // neither replacing the whole library nor merging into it must ever happen
+  // as a side effect of merely picking a file.
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [pendingBackup, setPendingBackup] = useState<{ backup: RestorableBackup; warnings: string[] } | null>(null);
   const [restoring, setRestoring] = useState(false);
-  const exportBackup = () => {
-    const backup = buildBackup({
+  const exportBackup = (withoutSecrets = false) => {
+    const builder = withoutSecrets ? buildSecretsFreeBackup : buildBackup;
+    const backup = builder({
       documents: backupDocuments,
       workspace: backupWorkspace,
       activity: readRawActivityLog(readBackupActivityRaw()),
     });
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    const suffix = withoutSecrets ? "-no-secrets" : "";
+    downloadFile({ filename: `draftwise-backup-${stamp}${suffix}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    onBackupExported?.();
     setPendingBackup(null);
-    setBackupMessage(`Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
+    setBackupMessage(withoutSecrets
+      ? `Backup exported without secrets: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. Safe to store anywhere — re-enter your API keys after restoring.`
+      : `Backup exported: ${backup.documents.length} ${backup.documents.length === 1 ? "document" : "documents"}, settings and activity. It contains your API keys — keep the file somewhere private.`);
   };
   const importBackupFile = (file: File) => {
     const tooLarge = oversizedBackupFile(file);
@@ -134,14 +168,27 @@ export function ProviderSettingsDialog({
       setBackupMessage("That file could not be read.");
     });
   };
-  const confirmRestore = () => {
+  const confirmRestore = (mode: "replace" | "merge") => {
     if (!pendingBackup || restoring) return;
     setRestoring(true);
-    void onRestoreBackup(pendingBackup.backup).then((result) => {
+    void onRestoreBackup(pendingBackup.backup, mode).then((result) => {
       setRestoring(false);
-      if (result.ok) return;
-      setPendingBackup(null);
-      setBackupMessage(result.error);
+      if (!result.ok) {
+        setPendingBackup(null);
+        setBackupMessage(result.error);
+        return;
+      }
+      // A merge leaves the dialog open on the writer's intact library: say
+      // exactly what arrived. A replace reloads the app, so no message needed.
+      if (mode === "merge" && result.merged) {
+        const { added, skipped, renamed } = result.merged;
+        const parts: string[] = [];
+        if (added > 0) parts.push(`${added} added`);
+        if (renamed > 0) parts.push(`${renamed} kept as titled ${renamed === 1 ? "copy" : "copies"} (same identity, different text)`);
+        if (skipped > 0) parts.push(`${skipped} already here`);
+        setPendingBackup(null);
+        setBackupMessage(`Merged into your library: ${parts.join(", ")}. Your current documents, settings and activity were left untouched.`);
+      }
     });
   };
   const save = () => {
@@ -162,7 +209,7 @@ export function ProviderSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="settings-dialog">
+      <DialogContent className="settings-dialog" data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Provider & privacy</DialogTitle>
           <DialogDescription>
@@ -200,6 +247,11 @@ export function ProviderSettingsDialog({
             <span>Model</span>
             <Input value={settings.model} onChange={(event) => patchSettings({ model: event.target.value })} placeholder={PROVIDER_PRESETS.find((item) => item.value === settings.provider)?.modelPlaceholder ?? "gpt-4o-mini"} />
           </label>
+
+          <div className="settings-connection">
+            <Button size="sm" variant="outline" onClick={runConnectionTest} disabled={testingConnection}>{testingConnection ? "Testing…" : "Test connection"}</Button>
+            {connectionTest ? <span role="status" className={connectionTest.ok ? "connection-ok" : "connection-error"}>{connectionTest.message}</span> : <span className="connection-hint">Checks the URL and key against the provider&apos;s model list. No draft text is sent.</span>}
+          </div>
 
           <details className="settings-advanced">
             <summary><ChevronRight size={14} className="settings-advanced-chevron" /> Advanced</summary>
@@ -340,27 +392,34 @@ export function ProviderSettingsDialog({
           <div className="writing-profile">
             <div className="writing-profile-heading">
               <strong>Backup & restore</strong>
-              <span>Your whole library — every document with its goals and history, settings, and writing activity — as one file. A backup includes your API keys so a restore brings back a working app; keep the file somewhere private.</span>
+              <span>Your whole library — every document with its goals and history, settings, and writing activity — as one file. The full backup includes your API keys so a restore brings back a working app; keep that file somewhere private. Prefer the no-secrets file for cloud drives — every document restores, you just re-enter two keys.</span>
             </div>
             <div className="writing-profile-transfer">
-              <Button size="sm" variant="outline" onClick={exportBackup}><Download size={13} /> Export backup</Button>
+              <Button size="sm" variant="outline" onClick={() => exportBackup(false)}><Download size={13} /> Export backup</Button>
+              <Button size="sm" variant="outline" onClick={() => exportBackup(true)}><Download size={13} /> Export without secrets</Button>
               <label className="writing-profile-import">
                 <Upload size={13} /> Restore backup
                 <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importBackupFile(file); event.target.value = ""; }} />
               </label>
             </div>
+            <p className="backup-age">{backupWorkspace.lastBackupAt ? `Last exported ${formatRelativeTime(backupWorkspace.lastBackupAt)}.` : "Never exported yet — your words live only in this browser."}</p>
             {pendingBackup ? (
               <div className="writing-profile-transfer-message" role="alert">
-                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}? This replaces every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
+                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}?</span>
                 {pendingBackup.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+                <span><strong>Merge into library</strong> adds the documents from the backup alongside your current ones — settings, activity and open draft untouched. Documents already here with identical text are skipped; same identity but different text is kept as a titled copy. Nothing is removed and nothing reloads.</span>
+                <span><strong>Replace everything</strong> swaps every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
                 <span>
-                  <Button size="sm" variant="outline" disabled={restoring} onClick={confirmRestore}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
+                  <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("merge")}>{restoring ? "Merging…" : "Merge into library"}</Button>{' '}
+                  <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("replace")}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
                   <Button size="sm" variant="ghost" disabled={restoring} onClick={() => setPendingBackup(null)}>Cancel</Button>
                 </span>
               </div>
             ) : null}
             {backupMessage ? <p className="writing-profile-transfer-message" role="status">{backupMessage}</p> : null}
           </div>
+
+          <AppInstallSection />
 
           <div className="settings-footnote">
             <Info size={14} />

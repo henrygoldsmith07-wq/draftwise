@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { DocumentDashboard } from "@/components/draftwise/DocumentDashboard";
+import { OfflineNotice } from "@/components/draftwise/OfflineNotice";
 import { VersionHistoryView } from "@/components/draftwise/VersionHistoryView";
 import { ExtensionGuide } from "@/components/draftwise/ExtensionGuide";
 import { InsightsView } from "@/components/draftwise/InsightsView";
@@ -32,7 +33,8 @@ import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writ
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
 import { ACTIVITY_STORAGE_KEY, countWords, creditSince } from "@/lib/writing-activity";
-import type { RestorableBackup } from "@/lib/backup";
+import { buildBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
+import { shouldShowBackupReminder } from "@/lib/backup-reminder";
 import { resolveDocumentStyle } from "@/lib/documents";
 import { WritingActivityStore } from "@/lib/activity-store";
 import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
@@ -40,8 +42,11 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
 import { DocumentHistoryStore } from "@/lib/document-history";
+import { THEME_COLORS } from "@/lib/theme-colors";
 import { createRewriteRetryArgs, useRewrite } from "@/hooks/useRewrite";
 import { useSelection } from "@/hooks/useSelection";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { noteServiceWorkerUnavailable, registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
 import { ToastProvider } from "@/components/draftwise/utilities/Toast";
@@ -54,7 +59,7 @@ The result is a calmer writing loop: notice one useful change, accept it when it
 
 type WorkspaceView = "home" | "write" | "insights" | "extension" | "history";
 
-function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function ShortcutDialog({ open, onOpenChange, theme }: { open: boolean; onOpenChange: (open: boolean) => void; theme: "dark" | "light" }) {
   const shortcuts = [
     ["Save locally", "⌘ / Ctrl + S"],
     ["Next suggestion", "⌘ / Ctrl + ↓"],
@@ -67,7 +72,7 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>Keep your hands on the draft while you review suggestions.</DialogDescription>
@@ -78,10 +83,10 @@ function ShortcutDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   );
 }
 
-function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+function NewDraftDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Start a new draft?</DialogTitle>
           <DialogDescription>
@@ -97,10 +102,10 @@ function NewDraftDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
   );
 }
 
-function ClearDataDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+function ClearDataDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>Clear all local Draftwise data?</DialogTitle>
           <DialogDescription>
@@ -190,6 +195,19 @@ export default function Home() {
   // seeded sample; the dashboard is the honest default, and opening any
   // document still lands in the editor from there.
   const [view, setView] = useState<WorkspaceView>("home");
+  // Rail "new" badges clear on first visit and stay cleared: the stamp lives
+  // in the persisted workspace, and each opener writes exactly once — the
+  // guard keeps later visits from dirtying state and queuing pointless saves.
+  const showInsightsNew = workspace.seenInsightsAt == null;
+  const showExtensionNew = workspace.seenExtensionAt == null;
+  const openInsights = useCallback(() => {
+    setView("insights");
+    if (workspace.seenInsightsAt == null) updateWorkspace({ seenInsightsAt: Date.now() });
+  }, [updateWorkspace, workspace.seenInsightsAt]);
+  const openExtensionGuide = useCallback(() => {
+    setView("extension");
+    if (workspace.seenExtensionAt == null) updateWorkspace({ seenExtensionAt: Date.now() });
+  }, [updateWorkspace, workspace.seenExtensionAt]);
   // Returning writers resume where they left off: once both stores hydrate,
   // a single render-phase adoption moves to the editor when real words exist.
   // A fresh install owns no words (the seed is empty by design), so it stays
@@ -322,6 +340,33 @@ export default function Home() {
   const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
   const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
   const docsReady = documents.hydrated;
+
+  // Register the service worker so the deployed app is a real PWA: Chrome
+  // only offers to install an app that has one, and without it the app needs
+  // the network just to open. Every check Draftwise makes already runs in the
+  // browser, so the only thing standing between the writer and a working
+  // editor on a train was the page itself.
+  //
+  // Registration is best-effort and never blocks the first paint. In
+  // development it is skipped entirely, because the dev server's module URLs
+  // change on every edit and a worker that cached them would serve stale
+  // modules to the next person who opened the page.
+  useEffect(() => {
+    if (!shouldRegisterServiceWorker({
+      production: process.env.NODE_ENV === "production",
+      hasServiceWorker: typeof navigator !== "undefined" && "serviceWorker" in navigator,
+      secureContext: typeof window !== "undefined" && window.isSecureContext,
+    })) {
+      noteServiceWorkerUnavailable();
+      return;
+    }
+    void registerServiceWorker();
+  }, []);
+
+  // Whether the browser believes it has a network, so the writer is told
+  // plainly that the local checks are still running.
+  const online = useOnlineStatus();
+
   useEffect(() => {
     if (!hydrated || !docsReady) return;
     activityStore.hydrate(window.localStorage);
@@ -531,10 +576,10 @@ export default function Home() {
 
   const undo = useCallback(() => {
     applyHistory(historyStore.undo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
   const redo = useCallback(() => {
     applyHistory(historyStore.redo(activeId || "draft"));
-  }, [activeId, applyHistory]);
+  }, [activeId, applyHistory, historyStore]);
 
   const runRewrite = useCallback((label: string, instruction: string) => {
     if (!selectedText.trim()) return;
@@ -586,7 +631,7 @@ export default function Home() {
     // A new document means the writer is writing: land them in the editor.
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const newDocument = useCallback(() => {
     if (!(documents.active?.draft ?? "").trim()) {
@@ -642,7 +687,7 @@ export default function Home() {
     setActiveIssueId(null);
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
 
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
@@ -663,7 +708,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [cancelRewrite, documents, setSelection]);
+  }, [cancelRewrite, documents, setSelection, historyStore]);
 
   const importFromFile = useCallback((file: File) => {
     // Refuse an oversized file before reading it. `file.text()` loads the whole
@@ -688,7 +733,7 @@ export default function Home() {
       setView("write");
       resetUnhidden(result.text);
     });
-  }, [defaultDialect, defaultGoals, documents, resetUnhidden]);
+  }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -696,6 +741,30 @@ export default function Home() {
     const file = format === "md" ? exportAsMarkdown(target.title, target.draft) : exportAsText(target.title, target.draft);
     downloadFile(file);
   }, [documents.documents]);
+
+  /**
+   * Backup reminder: drafts live only in this browser, so writers with real
+   * work get one calm nudge to export a backup they own. "Later" snoozes for
+   * a week; any completed export (here or in settings) stamps lastBackupAt
+   * and silences the nudge for a month.
+   */
+  const totalLibraryWords = useMemo(
+    () => documents.summaries.reduce((sum, document) => sum + (document.wordCount || 0), 0),
+    [documents.summaries],
+  );
+  const showBackupReminder = !loading && view === "home" && shouldShowBackupReminder({
+    totalWords: totalLibraryWords,
+    lastBackupAt: workspace.lastBackupAt,
+    snoozedAt: workspace.backupReminderSnoozedAt,
+  });
+  const markBackupExported = useCallback(() => {
+    updateWorkspace({ lastBackupAt: Date.now(), backupReminderSnoozedAt: undefined });
+  }, [updateWorkspace]);
+  // Declared next to readBackupActivityRaw below (which it needs):
+  // exportBackupFromReminder. See below.
+  const snoozeBackupReminder = useCallback(() => {
+    updateWorkspace({ backupReminderSnoozedAt: Date.now() });
+  }, [updateWorkspace]);
 
   const duplicateDocument = useCallback((id: string) => {
     const copy = documents.duplicate(id);
@@ -706,7 +775,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   const deleteDocument = useCallback((id: string) => {
     const wasActive = id === documents.activeId;
@@ -718,7 +787,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setSelection({ start: 0, end: 0 });
-  }, [documents, setSelection]);
+  }, [documents, setSelection, historyStore]);
 
   // Document content lives in exactly one state system (the document store),
   // so no mirror or repair effect is needed: the editor reads documents.active
@@ -811,13 +880,36 @@ export default function Home() {
     }
   }, []);
 
+  // Reminder export lives here (not with the banner state above) because it
+  // needs the activity reader. Same file and message as the settings export,
+  // plus the reminder stamp so the nudge goes quiet afterwards.
+  const exportBackupFromReminder = useCallback(() => {
+    const backup = buildBackup({
+      documents: documents.documents,
+      workspace,
+      activity: readRawActivityLog(readBackupActivityRaw()),
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadFile({ filename: `draftwise-backup-${stamp}.json`, content: serializeBackup(backup), type: "application/json;charset=utf-8" });
+    markBackupExported();
+  }, [documents.documents, markBackupExported, readBackupActivityRaw, workspace]);
+
   // Backup restore: replace the whole library, then reload so every in-memory
   // store (dismissals, undo histories, baselines, review signals) rehydrates
   // from the restored state instead of lingering with pre-restore values.
   // Nothing reloads unless every persistence surface confirms its writes:
   // pending lifecycle writes live in memory and a reload would drop them.
-  const restoreBackup = useCallback(async (backup: RestorableBackup) => {
+  const restoreBackup = useCallback(async (backup: RestorableBackup, mode: "replace" | "merge") => {
     cancelRewrite();
+    // Merge keeps everything current and only adds: settings, activity and
+    // the open document are untouched, and the merged drafts join the live
+    // state through the normal path — no reload, nothing at risk.
+    if (mode === "merge") {
+      const merged = await documents.mergeAll(backup.documents);
+      if (!merged.ok) return merged;
+      await documents.flush();
+      return { ok: true as const, merged: merged.merged };
+    }
     const replaced = await documents.replaceAll(backup.documents, backup.workspace.activeDocumentId);
     if (!replaced.ok) return replaced;
     setWorkspace(backup.workspace);
@@ -845,7 +937,7 @@ export default function Home() {
     setSelection({ start: 0, end: 0 });
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
-  }, [cancelRewrite, clearPersistedData, documents, setSelection, updateWorkspace]);
+  }, [cancelRewrite, clearPersistedData, documents, setSelection, historyStore]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -931,6 +1023,16 @@ export default function Home() {
   }, [acceptAll, acceptIssue, cancelRewrite, clearDataOpen, currentActiveIssueId, dismissIssue, documents, newDraftOpen, redo, rewritePreview, saveAll, settingsOpen, shortcutsOpen, undo, view, visibleIssues]);
 
   const darkMode = workspace.theme === "dark" || (workspace.theme === "system" && systemDark);
+  // Radix dialogs portal to document.body, outside .app-shell, so the theme
+  // has to ride on the dialog itself for the dark palette to reach it.
+  const themeName = darkMode ? "dark" : "light";
+  // The theme-color metadata only knows the OS preference. Repoint it at the
+  // resolved app theme so an explicit toggle also recolours the browser chrome.
+  useEffect(() => {
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute("content", THEME_COLORS[themeName]);
+    }
+  }, [themeName]);
   // Truthful save state: combines workspace-settings persistence and the
   // document store's own confirmed writes. "Saved locally" appears only after
   // both persisted; degraded storage tiers are named rather than hidden.

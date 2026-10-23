@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createDocumentBackend, summariseDocuments, type DocumentSummary, type DocumentReview, type StoredDocument } from "@/lib/documents";
 import { DocumentLifecycle, type DocumentSaveStatus, type DocumentsSeed } from "@/lib/document-lifecycle";
 
@@ -75,6 +75,7 @@ export function useDocuments(seed: DocumentsSeed, ready = true, preferredActiveI
     duplicateSnapshot: useCallback((documentId: string, snapshotId: string) => lifecycle.duplicateSnapshot(documentId, snapshotId), [lifecycle]),
     clearAll: useCallback((freshSeed?: DocumentsSeed) => lifecycle.clearAll(freshSeed), [lifecycle]),
     replaceAll: useCallback((documents: StoredDocument[], activeId?: string) => lifecycle.replaceAll(documents, activeId), [lifecycle]),
+    mergeAll: useCallback((documents: StoredDocument[]) => lifecycle.mergeAll(documents), [lifecycle]),
     // The live store, so "Clear all local data" reaches the tier that is
     // actually holding the drafts (IndexedDB) rather than a fresh
     // localStorage backend over a key the app no longer writes to.

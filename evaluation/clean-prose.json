@@ -848,5 +848,20 @@
     "id": "prod-020",
     "style": "product",
     "text": "Every suggestion stays a preview until the writer chooses to accept it."
+  },
+  {
+    "id": "casual-001",
+    "style": "casual",
+    "text": "i told priya dont bother coming early as the room is not ready yet"
+  },
+  {
+    "id": "casual-002",
+    "style": "casual",
+    "text": "me and jake left after twenty minutes and went to get food instead"
+  },
+  {
+    "id": "casual-003",
+    "style": "casual",
+    "text": "that is kind of you and i appreciate the quick reply"
   }
 ]

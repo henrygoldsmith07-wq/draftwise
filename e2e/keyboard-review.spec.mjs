@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { freshStart } from "./helpers.mjs";
 
 /**
  * Keyboard-driven suggestion review.
@@ -18,16 +19,12 @@ const DRAFT =
   "This is repeatd wording and the numbers is wrong, so the analysis has something to show for the reviewer.";
 
 async function openWorkspace(page) {
-  await page.goto("/");
-  await page.evaluate(() => {
-    indexedDB.deleteDatabase("draftwise-documents");
-    localStorage.clear();
-  });
-  await page.reload();
-  await page.locator(".saved-dot").waitFor({ timeout: 30_000 });
+  await freshStart(page);
   // Fresh installs open on the documents dashboard, so step into the editor.
   // On a resumed session this is a no-op: the app is already writing.
   await page.getByRole("button", { name: "Write", exact: true }).click();
+  // The editor stays disabled until the document store finishes hydrating; filling before then types into a field that discards its value.
+  await expect(page.getByLabel("Draft editor")).toBeEnabled({ timeout: 30_000 });
   await page.getByLabel("Draft editor").fill(DRAFT);
   await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 15_000 });
 }
@@ -170,7 +167,8 @@ test("plain arrows still move the caret and are not stolen", async ({ page }) =>
 
 test("the shortcuts dialog documents every review binding it implements", async ({ page }) => {
   await openWorkspace(page);
-  await page.getByRole("button", { name: "Open settings" }).waitFor();
+  // The workspace now carries its own settings shortcut, so the bare name is ambiguous — the header gear is the readiness signal this wait means. It stays a wait, not a click: opening settings here would cover the rail button below.
+  await page.locator("header").getByRole("button", { name: "Open settings" }).waitFor();
   await page.getByRole("button", { name: /Keyboard shortcuts/u }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();

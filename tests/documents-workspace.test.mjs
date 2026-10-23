@@ -8,6 +8,8 @@ import {
   recordSnapshot,
   sanitiseStoredDocument,
   summariseDocuments,
+  documentMatchesQuery,
+  matchingExcerpt,
   MAX_SNAPSHOTS_PER_DOCUMENT,
 } from "../lib/documents.ts";
 import { exportAsMarkdown, exportAsText, importDocument, titleFromFilename } from "../lib/import-export.ts";
@@ -23,6 +25,28 @@ test("documents count words, summarise by recency, and search titles and text", 
   assert.equal(summaries[1].wordCount, 4);
   assert.deepEqual(summariseDocuments([older, newer], "revenue").map((item) => item.title), ["Quarterly report"]);
   assert.equal(countWords("  one   two three "), 3);
+});
+
+test("search reaches the middle of a long draft, not just the card's excerpt", () => {
+  const opening = "An opening line that every card already shows.\n\n";
+  const middle = "Somewhere in the middle, the phrase quarterly forecast appears.\n\n";
+  const closing = "A closing line.\n";
+  const document = createDocument("Long draft", opening + middle + closing);
+
+  // The dashboard used to filter on title and excerpt only, so this phrase was
+  // unfindable even though the input promised to search the text.
+  assert.equal(documentMatchesQuery(document, "quarterly forecast"), true);
+  assert.equal(documentMatchesQuery(document, "QUARTERLY"), true);
+  assert.equal(documentMatchesQuery(document, "long draft"), true);
+  assert.equal(documentMatchesQuery(document, "not in this draft"), false);
+  assert.equal(documentMatchesQuery(document, "   "), true);
+
+  const excerpt = matchingExcerpt(document, "quarterly forecast");
+  assert.ok(excerpt);
+  assert.match(excerpt, /quarterly forecast/u);
+  assert.match(excerpt, /…/u);
+  assert.equal(matchingExcerpt(document, "long draft"), null);
+  assert.equal(matchingExcerpt(document, ""), null);
 });
 
 test("autosave snapshots are rate-limited but manual snapshots always record", () => {

@@ -9,6 +9,7 @@
  * and reused anywhere.
  */
 
+import { cleanPreferredReplacements } from "./terminology.ts";
 import {
   DEFAULT_CLASSIFIER_SETTINGS,
   DEFAULT_GOALS,
@@ -85,7 +86,8 @@ export function isWritingGoals(value: unknown): value is WritingGoals {
     && (value.documentType === undefined || isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]))
     && (value.targetLength === undefined || (typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0))
     && (value.requiredTerminology === undefined || isStringArray(value.requiredTerminology))
-    && (value.forbiddenTerminology === undefined || isStringArray(value.forbiddenTerminology));
+    && (value.forbiddenTerminology === undefined || isStringArray(value.forbiddenTerminology))
+    && (value.preferredReplacements === undefined || isStringMap(value.preferredReplacements));
 }
 
 export function isStylePreferences(value: unknown): value is StylePreferences {
@@ -187,6 +189,15 @@ function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
     ...(value.forbiddenTerminology !== undefined || fallback.forbiddenTerminology !== undefined
       ? { forbiddenTerminology: isStringArray(value.forbiddenTerminology) ? value.forbiddenTerminology : fallback.forbiddenTerminology ?? [] }
       : {}),
+    // A valid-but-hostile swap map is cleaned rather than trusted verbatim:
+    // the writer keeps their other goals and the prompt never carries an
+    // unbounded map from stored data.
+    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
+      ? { preferredReplacements: cleanPreferredReplacements(isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {}) }
+      : {}),
+    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
+      ? { preferredReplacements: isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {} }
+      : {}),
   };
 }
 
@@ -261,9 +272,13 @@ function sanitiseClassifier(value: unknown, fallback: ClassifierSettings | undef
   } satisfies ClassifierSettings;
 }
 
+function sanitiseTimestamp(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, unknown>): DraftwiseWorkspace {
   const fallbackClassifier = initial.classifier ?? DEFAULT_CLASSIFIER_SETTINGS;
-  return {
+  const workspace: DraftwiseWorkspace = {
     version: 2,
     goals: sanitiseGoals(value.goals, initial.goals ?? DEFAULT_GOALS),
     style: sanitiseStyle(value.style, initial.style ?? DEFAULT_STYLE_PREFERENCES),
@@ -280,6 +295,19 @@ function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, un
     // limit. The newest keys are the ones worth keeping.
     dismissedIssueKeys: sanitiseDismissedKeys(value.dismissedIssueKeys, initial.dismissedIssueKeys ?? []),
   };
+  // Backup-reminder bookkeeping must survive reloads or the nudge returns
+  // every visit. Malformed values are dropped, and the keys stay absent
+  // (rather than present-but-undefined) so stored workspaces keep their shape.
+  const lastBackupAt = sanitiseTimestamp(value.lastBackupAt);
+  if (lastBackupAt !== undefined) workspace.lastBackupAt = lastBackupAt;
+  const snoozedAt = sanitiseTimestamp(value.backupReminderSnoozedAt);
+  if (snoozedAt !== undefined) workspace.backupReminderSnoozedAt = snoozedAt;
+  // Rail "new" badges, same shape as the reminder bookkeeping above.
+  const seenInsightsAt = sanitiseTimestamp(value.seenInsightsAt);
+  if (seenInsightsAt !== undefined) workspace.seenInsightsAt = seenInsightsAt;
+  const seenExtensionAt = sanitiseTimestamp(value.seenExtensionAt);
+  if (seenExtensionAt !== undefined) workspace.seenExtensionAt = seenExtensionAt;
+  return workspace;
 }
 
 const MAX_PERSISTED_DISMISSALS = 500;

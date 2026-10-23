@@ -9,10 +9,11 @@ const root = new URL("../", import.meta.url);
 const file = (name) => new URL(name, root);
 
 function browserLikeContext() {
-  const listeners = { installed: [], startup: [], changed: [], removed: [], clicked: [], message: [] };
+  const listeners = { installed: [], startup: [], changed: [], removed: [], clicked: [], message: [], tabUpdated: [] };
   const storage = { values: { siteAccess: [], disabledSites: [], excludedSites: [], aiEnabled: false, provider: { apiKey: "" } }, writes: 0 };
   const scripting = { registered: new Map(), unregistered: [] };
   const permissionState = { deniedOrigins: new Set() };
+  const badge = { text: [], background: [], titles: [] };
   const event = (name) => ({ addListener(handler) { listeners[name].push(handler); } });
   const context = {
     URL,
@@ -28,7 +29,13 @@ function browserLikeContext() {
   };
   context.chrome = {
     runtime: { lastError: undefined, onInstalled: event("installed"), onStartup: event("startup"), onMessage: event("message"), openOptionsPage() {} },
-    action: { onClicked: event("clicked") },
+    action: {
+      onClicked: event("clicked"),
+      setBadgeText(details, callback) { badge.text.push(details); callback?.(); },
+      setBadgeBackgroundColor(details, callback) { badge.background.push(details); callback?.(); },
+      setTitle(details, callback) { badge.titles.push(details); callback?.(); },
+    },
+    tabs: { onUpdated: event("tabUpdated") },
     storage: {
       local: {
         get(_keys, callback) { callback(storage.values); },
@@ -56,7 +63,7 @@ function browserLikeContext() {
       getRegisteredContentScripts(_filter, callback) { callback([...scripting.registered.values()]); },
     },
   };
-  return { context, listeners, storage, scripting, permissionState };
+  return { context, listeners, storage, scripting, permissionState, badge };
 }
 
 test("extension manifest keeps host access optional and includes generated shared bundles", async () => {
@@ -68,6 +75,14 @@ test("extension manifest keeps host access optional and includes generated share
   assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
   assert.deepEqual(manifest.optional_host_permissions, ["https://*/*", "http://*/*"]);
   assert.equal(manifest.content_scripts, undefined);
+  // Store readiness: the toolbar, the extension list, and the web store all
+  // need declared icons, and every declared file must actually ship.
+  assert.deepEqual(manifest.icons, { 16: "icon-16.png", 32: "icon-32.png", 48: "icon-48.png", 128: "icon-128.png" });
+  assert.deepEqual(manifest.action.default_icon, { 16: "icon-16.png", 32: "icon-32.png" });
+  for (const icon of Object.values(manifest.icons)) {
+    const bytes = await readFile(file(`extension/${icon}`));
+    assert.ok(bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47, `${icon} is a real PNG`);
+  }
   await readFile(file("extension/shared-analysis.js"), "utf8");
   await readFile(file("extension/shared-provider.js"), "utf8");
   await readFile(file("extension/field-classification.js"), "utf8");
@@ -179,6 +194,92 @@ test("clearing site access unregisters stale dynamically registered scripts", as
 
   assert.equal(runtime.scripting.registered.has("draftwise-site-example-com"), false);
   assert.ok(runtime.scripting.unregistered.includes("draftwise-site-example-com"));
+});
+
+test("the toolbar badge counts the suggestions in the field the writer is in", async () => {
+  // The panel and the floating button both live inside the page, so they
+  // only reach the writer who is looking at the field. The badge is the one
+  // piece of feedback that reaches them while they read what they have just
+  // written — which is where they are most of the time.
+  const runtime = browserLikeContext();
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+
+  const handler = runtime.listeners.message[0];
+  handler({ type: "draftwise-badge", count: 3 }, { tab: { id: 7 }, frameId: 0 }, () => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.badge.text.length, 1);
+  // It is set for the tab that produced it, never globally: the count
+  // describes one page, and a global badge would show it on every other tab
+  // as well.
+  // The fields are compared one by one rather than with deepStrictEqual,
+  // because the object was built inside the background script's own realm
+  // and so does not share this realm's Object prototype.
+  assert.equal(runtime.badge.text[0].tabId, 7);
+  assert.equal(runtime.badge.text[0].text, "3");
+  assert.equal(runtime.badge.background.length, 1);
+  assert.equal(runtime.badge.background[0].tabId, 7);
+  // The title says what the number is, so hovering the icon explains it.
+  assert.match(runtime.badge.titles[0].title, /3 suggestions in this field/u);
+});
+
+test("a count of zero clears the badge instead of showing a zero", async () => {
+  // A badge reading "0" is noise: it says Draftwise is looking at
+  // something, when the honest answer is that there is nothing to report.
+  const runtime = browserLikeContext();
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+
+  const handler = runtime.listeners.message[0];
+  handler({ type: "draftwise-badge", count: 0 }, { tab: { id: 7 }, frameId: 0 }, () => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.badge.text[0].tabId, 7);
+  assert.equal(runtime.badge.text[0].text, "");
+  assert.equal(runtime.badge.background.length, 0);
+});
+
+test("the badge is cleared when the writer navigates away", async () => {
+  // The count describes a document the writer has left. Carrying it over to
+  // the next page would be a number about nothing.
+  const runtime = browserLikeContext();
+  vm.runInNewContext(readFileSync(file("extension/background.js"), "utf8"), runtime.context, { filename: "background.js" });
+
+  runtime.listeners.tabUpdated[0](7, { status: "loading" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(runtime.badge.text[0].tabId, 7);
+  assert.equal(runtime.badge.text[0].text, "");
+});
+
+test("the badge carries a count and nothing else", async () => {
+  // A badge that leaked the text being written would be a different
+  // product, and a different promise, from this one. The content script
+  // sends a number; the background stores nothing.
+  const content = await readFile(file("extension/content.js"), "utf8");
+  assert.match(content, /type: "draftwise-badge", count: next/u);
+  // The message must not carry the field's text alongside the count.
+  const badgeMessage = content.match(/sendMessage\(\{[^}]*draftwise-badge[^}]*\}\)/u);
+  assert.ok(badgeMessage, "the badge message is sent from the content script");
+  assert.doesNotMatch(badgeMessage[0], /text|value|snippet|original/u);
+
+  const background = await readFile(file("extension/background.js"), "utf8");
+  // Nothing is written to storage: the badge is rebuilt from scratch on
+  // every navigation rather than remembered.
+  const badgeBlock = background.match(/if \(message\?\.type === "draftwise-badge"\) \{[\s\S]*?\n  \}/u);
+  assert.ok(badgeBlock, "the background handles the badge message");
+  assert.doesNotMatch(badgeBlock[0], /storage/i);
+});
+
+test("the extension still asks for no more permission than it uses", async () => {
+  // The badge listens for tab navigations. Doing that without the "tabs"
+  // permission is deliberate: that permission would give the extension a
+  // view of every URL the writer visits, and it needs none of them.
+  const manifest = JSON.parse(await readFile(file("extension/manifest.json"), "utf8"));
+  assert.deepEqual(manifest.permissions, ["storage", "scripting"]);
+  assert.equal(manifest.permissions.includes("tabs"), false);
+
+  const background = await readFile(file("extension/background.js"), "utf8");
+  assert.match(background, /chrome\.tabs\.onUpdated/u);
 });
 
 

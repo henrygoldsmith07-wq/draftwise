@@ -47,6 +47,25 @@
   let aiCoverage = null;
   let paused = false;
   let seenOnboarding = false;
+
+  // The toolbar badge.
+  //
+  // The panel and the floating button already say how the field is doing,
+  // but both live inside the page — the writer has to be looking at the
+  // field to see them. The badge is the one piece of feedback that reaches
+  // the writer when they are somewhere else in the window, which is where
+  // they are while they read what they have just written.
+  //
+  // It carries a count and nothing else. No text, no snippet, no history:
+  // a badge that leaked what someone was typing would be a different
+  // product, and a different promise, from this one.
+  let reportedBadge = null;
+  function reportBadge(count) {
+    const next = Number.isFinite(count) && count > 0 ? Math.min(count, 99) : 0;
+    if (next === reportedBadge) return;
+    reportedBadge = next;
+    chrome.runtime.sendMessage({ type: "draftwise-badge", count: next }).catch(() => {});
+  }
   // Suggestions the writer dismissed, remembered across rescans and navigations.
   // Previously dismissals lived only in the in-memory array, so the same note
   // came back on the next keystroke. These are fingerprints, not text: the
@@ -149,6 +168,9 @@
     activeField = null;
     if (button) button.hidden = true;
     if (panel) panel.hidden = true;
+    // Nothing is being checked any more, so the toolbar must stop claiming
+    // that something is.
+    reportBadge(0);
   }
 
   function aiStateLabel() {
@@ -202,6 +224,9 @@
     const fixFirst = visible.filter((item) => item.tier === "fix-first").length;
     button.textContent = visible.length ? String(Math.min(visible.length, 99)) : "✦";
     button.setAttribute("aria-label", `${visible.length} writing suggestion${visible.length === 1 ? "" : "s"}`);
+    // The badge says the same thing the button does, so the two can never
+    // disagree about how the field is doing.
+    reportBadge(visible.length);
     clearPanel();
     const header = document.createElement("div"); header.className = "dw-head";
     header.append(textNode("span", "", "dw-mark"), textNode("span", "draftwise", "dw-title"), textNode("span", aiStateLabel(), "dw-source"), textNode("span", String(visible.length) + " suggestion" + (visible.length === 1 ? "" : "s"), "dw-count"));
@@ -484,7 +509,15 @@
       window.clearTimeout(scanTimer);
       scanTimer = window.setTimeout(() => scan(element), 360);
     });
-    element.addEventListener("blur", () => { window.setTimeout(() => { if (document.activeElement !== element && panel) panel.hidden = true; }, 120); });
+    element.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (document.activeElement !== element && panel) panel.hidden = true;
+        // The badge describes the field the writer is in. Once they have
+        // left it the count is about nothing, and a stale number on the
+        // toolbar is worse than no number at all.
+        if (document.activeElement !== element) reportBadge(0);
+      }, 120);
+    });
   }
 
   function initShadow() {

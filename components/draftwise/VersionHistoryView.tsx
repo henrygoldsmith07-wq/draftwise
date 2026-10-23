@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDialogFocusTrap } from "@/hooks/useDialogFocusTrap";
 import type { DocumentSnapshot, StoredDocument } from "@/lib/documents";
+import { describeDiff, diffText } from "@/lib/text-diff";
 
 function formatTimestamp(timestamp: number) {
   const date = new Date(timestamp);
@@ -41,8 +42,16 @@ export interface VersionHistoryViewProps {
 export function VersionHistoryView({ document: document, onBack, onRestore, onDuplicateSnapshot }: VersionHistoryViewProps) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+  // Which way the preview explains itself. "Changes" is the default because it
+  // answers the question the writer opened the preview to ask; two full columns
+  // of near-identical prose make them do the comparison by eye.
+  const [comparison, setComparison] = useState<"changes" | "side-by-side">("changes");
   const snapshots = [...document.snapshots].reverse();
   const preview = snapshots.find((snapshot) => snapshot.id === previewId) ?? null;
+  // Computed inline rather than memoised: it only runs while a preview is open,
+  // the diff is bounded and cheap for normal drafts, and React Compiler's
+  // `preserve-manual-memoization` rule rejects the object-derived dependency.
+  const diff = preview ? diffText(preview.text, document.draft) : null;
   // The preview is a real dialog: it traps Tab, closes on Escape, and hands
   // focus back to the Preview button it opened from. The close callback is
   // stable so opening the dialog arms the trap once instead of re-arming it
@@ -104,16 +113,47 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
           <strong>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</strong>
           <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)}><X size={15} /></button>
         </div>
-        <div className="history-preview-columns">
-          <div>
-            <small>Current version</small>
-            <p>{document.draft || "Empty"}</p>
+        <div className="history-preview-toolbar">
+          {/* Buttons with aria-pressed rather than a tablist: these switch the
+              body of one dialog, and a half-implemented tablist would promise
+              arrow-key navigation the preview does not implement. */}
+          <div className="history-preview-modes" role="group" aria-label="Preview format">
+            <Button size="sm" variant={comparison === "changes" ? "default" : "ghost"} aria-pressed={comparison === "changes"} onClick={() => setComparison("changes")}>Changes</Button>
+            <Button size="sm" variant={comparison === "side-by-side" ? "default" : "ghost"} aria-pressed={comparison === "side-by-side"} onClick={() => setComparison("side-by-side")}>Side by side</Button>
           </div>
-          <div>
-            <small>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</small>
-            <p>{preview.text || "Empty"}</p>
-          </div>
+          <span className="history-diff-summary" role="status">{diff ? describeDiff(diff) : ""}</span>
         </div>
+        {diff && comparison === "changes" ? (
+          diff.summary.changedBlocks === 0 ? (
+            <div className="history-diff-empty">
+              <p>This version is identical to the current draft.</p>
+            </div>
+          ) : (
+            <div className="history-diff-panel">
+              <p className="history-diff-legend"><ins>Added since this version</ins> <del>Removed since this version</del></p>
+              <div className="history-diff" aria-label="Changes from this version to the current draft">
+                {diff.parts.map((part, index) => part.kind === "same"
+                  ? <span key={index}>{part.text}</span>
+                  : part.kind === "added"
+                    ? <ins key={index} className="diff-added">{part.text}</ins>
+                    : <del key={index} className="diff-removed">{part.text}</del>)}
+              </div>
+              {diff.precise ? null : <small className="history-diff-note">This draft is long, so the comparison is by paragraph rather than by word.</small>}
+            </div>
+          )
+        ) : null}
+        {comparison === "side-by-side" ? (
+          <div className="history-preview-columns">
+            <div>
+              <small>Current version</small>
+              <p>{document.draft || "Empty"}</p>
+            </div>
+            <div>
+              <small>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</small>
+              <p>{preview.text || "Empty"}</p>
+            </div>
+          </div>
+        ) : null}
         <div className="history-preview-actions">
           <Button size="sm" variant="ghost" onClick={() => setPreviewId(null)}>Back to current</Button>
           {confirmRestoreId === preview.id ? (

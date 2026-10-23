@@ -35,7 +35,41 @@ test("security policy does not restrict BYOK provider connections", async () => 
   assert.match(connectSrc[1], /https:/u, "BYOK providers may live on any HTTPS host");
   assert.match(connectSrc[1], /http:\/\/localhost:\*/u, "localhost providers for local models must work");
   assert.doesNotMatch(connectSrc[1], /api\.(openai|anthropic|google)\.com/u, "no vendor host may be pinned into the policy");
-  assert.doesNotMatch(directives, /default-src/u, "default-src would need a full review before being introduced");
+});
+
+test("the policy constrains scripts instead of leaving them unconstrained", async () => {
+  const config = await readFile(configUrl, "utf8");
+  // This assertion used to forbid default-src outright, on the grounds that
+  // it "would need a full review before being introduced" — a fair position,
+  // because the previous policy named no script-src either, and with no
+  // default-src that left scripts loadable from ANY origin.
+  //
+  // The review is done and is enforced by a browser test: the policy is taken
+  // out of this file, attached to a real page, and the app is driven through
+  // it. e2e/deployment-headers.spec.mjs fails on any refusal the browser
+  // reports, which is the failure mode a unit test could not catch.
+  //
+  // What protects the app from a wrong guess is now the browser test, so the
+  // directive that makes the policy real can be introduced.
+  const policy = /Content-Security-Policy[^\n]*value:\s*"([^"]+)"/u.exec(config);
+  assert.ok(policy, "Content-Security-Policy must be declared in next.config.ts");
+  const [, directives] = policy;
+  assert.match(directives, /default-src 'self'/u, "the policy must constrain everything it does not name");
+  assert.match(directives, /script-src 'self'/u, "scripts must be same-origin");
+  assert.match(directives, /style-src 'self'/u, "styles must be same-origin");
+  // The app sets suggestion colours and issue highlights through style
+  // attributes, and Next emits inline bootstrap scripts, so both need the
+  // inline allowance — a policy without it breaks the app rather than
+  // tightening it.
+  assert.match(directives, /script-src 'self' 'unsafe-inline'/u);
+  assert.match(directives, /style-src 'self' 'unsafe-inline'/u);
+  // The dev server's hot-reload channel is a WebSocket on localhost. It is
+  // the same trust boundary as the http://localhost exceptions the app
+  // already needs for local models; the deployed app opens no WebSocket.
+  assert.match(directives, /ws:\/\/localhost:\*/u, "the dev server's hot-reload channel must work");
+  // Upgrading insecure requests would rewrite the localhost provider calls
+  // to https and break local models, silently and at request time.
+  assert.doesNotMatch(directives, /upgrade-insecure-requests/u);
 });
 
 test("the deployed header policy matches the Next.js one", async () => {

@@ -9,8 +9,10 @@ import {
   DIALECT_VERB_CONTEXT,
   DIALECT_VARIANTS,
   KEYBOARD_NEIGHBOURS,
+  METER_UNIT_CONTEXT,
   PROGRAMME_COMPUTING_CONTEXT,
   PROGRAMME_NON_COMPUTING_CONTEXT,
+  REGISTER_CONTRACTIONS,
   SPELLING_COMMON,
   SPELLING_COMMON_EXTRA,
   SPELLING_COMMON_GAP,
@@ -34,6 +36,9 @@ import {
   type Token,
   parseDocument,
 } from "./parser.ts";
+import {
+  isUncasedDraft,
+} from "./grammar.ts";
 
 // Common English words, plurals, and technical vocabulary that the compact lexicon
 // missed. Each entry prevents a false positive from the fuzzy spelling suggester.
@@ -79,6 +84,19 @@ function contextualDialectReplacement(tokens: Token[], index: number, preference
   }
   if (word === "programme" && preferences.dialect === "en-US") {
     return [...nearby].some((value) => PROGRAMME_NON_COMPUTING_CONTEXT.has(value) || PROGRAMME_COMPUTING_CONTEXT.has(value)) || nounUse ? "program" : undefined;
+  }
+  // "metre" is never the device, so in US English it is always the unit and
+  // always becomes "meter". The other direction needs proof of a measurement:
+  // a numeral or square/cubic immediately before it. Anything else — "a
+  // meter", "parking meter" — may be the device, which is "meter" in
+  // British English too, so it is left alone.
+  if ((word === "metre" || word === "metres") && preferences.dialect === "en-US") {
+    return word === "metre" ? "meter" : "meters";
+  }
+  if ((word === "meter" || word === "meters") && preferences.dialect === "en-GB") {
+    const measured = Boolean(immediateBefore && (/^[\p{N}]/u.test(immediateBefore) || METER_UNIT_CONTEXT.has(immediateBefore)));
+    if (!measured) return undefined;
+    return word === "meter" ? "metre" : "metres";
   }
   return undefined;
 }
@@ -300,7 +318,15 @@ for (const [base, variants] of Object.entries(DIALECT_VARIANTS)) {
 
 export function findSpelling(text: string, preferences: StylePreferences, document = parseDocument(text)) {
   const issues: WritingIssue[] = [];
+  // A draft written entirely without letter case has abandoned apostrophes
+  // along with capitals (see REGISTER_CONTRACTIONS): suggesting one back is
+  // register noise. Genuine misspellings are still corrected.
+  const uncased = isUncasedDraft(text);
   for (const [tokenIndex, token] of document.tokens.entries()) {
+    // Skipped outright rather than just demoted from the typo table, because
+    // suggestSpelling consults TYPO_FIXES itself and would re-suggest the
+    // same apostrophe through the fuzzy path.
+    if (uncased && REGISTER_CONTRACTIONS.has(token.lower)) continue;
     const typo = TYPO_FIXES[token.lower];
     const contextualReplacement = contextualDialectReplacement(document.tokens, tokenIndex, preferences);
     const dialect = !CONTEXTUAL_DIALECT_WORDS.has(token.lower)

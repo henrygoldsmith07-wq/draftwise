@@ -231,6 +231,16 @@ export interface WritingGoals {
   requiredTerminology?: string[];
   /** Terms the writer never wants to see. */
   forbiddenTerminology?: string[];
+  /**
+   * Word swaps this document enforces ("login" -> "sign in").
+   *
+   * The global style profile already carries preferredTerminology for the
+   * whole library; this is the per-document counterpart for team style
+   * guides — a client draft can prefer "sign in" while another draft in the
+   * same library prefers "log in", without either polluting the other.
+   * Entries here win over the global map for this document only.
+   */
+  preferredReplacements?: Record<string, string>;
 }
 
 /** A transparent entry in the local Writing Profile; every one is user-removable. */
@@ -432,6 +442,22 @@ export interface DraftwiseWorkspace {
    * findings is silently undone. Bounded, because the array grows with use.
    */
   dismissedIssueKeys?: string[];
+  /**
+   * Backup-reminder bookkeeping. Drafts live only in this browser, so the
+   * app nudges writers with real work to export a backup they own.
+   * lastBackupAt is stamped whenever a full backup is exported (settings or
+   * reminder); backupReminderSnoozedAt records a "later" dismissal so the
+   * nudge stays quiet for a while instead of nagging on every visit.
+   */
+  lastBackupAt?: number;
+  backupReminderSnoozedAt?: number;
+  /**
+   * When the writer first opened the Insights and Extension views. The rail
+   * marks both "new" until then; a badge that never clears teaches writers
+   * to ignore badges, so the first visit stamps it away persistently.
+   */
+  seenInsightsAt?: number;
+  seenExtensionAt?: number;
 }
 
 export const DEFAULT_GOALS: WritingGoals = {

@@ -41,10 +41,25 @@ The manifest uses `activeTab`/`scripting` plus optional HTTP(S) host permissions
 
 ## Persistence
 
-A backup (`lib/backup.ts`) serialises every document plus the workspace and activity log as one versioned file. Restore validates the whole file, replaces the library through `DocumentLifecycle.replaceAll`, swaps the workspace and activity, flushes every surface, and reloads so no in-memory store lingers with pre-restore values.
+A backup (`lib/backup.ts`) serialises every document plus the workspace and activity log as one versioned file. Restore validates the whole file, then offers two paths: replace swaps the library through `DocumentLifecycle.replaceAll`, swaps the workspace and activity, flushes every surface, and reloads so no in-memory store lingers with pre-restore values; merge adds the backup's documents alongside the current ones through `DocumentLifecycle.mergeAll`, touches nothing else, and needs no reload. Merge dedupes transparently — identical title and text is skipped, a shared id with different content is kept as a titled copy under a fresh id — and reports added/skipped/renamed counts.
 
 The web app stores one versioned workspace at `draftwise:workspace:v2`. Writing goals live on each document (`StoredDocument.goals`) — including required/forbidden terminology, edited in the goal bar (`lib/terminology.ts` parsing rule) — as does the spelling dialect (`StoredDocument.dialect`); the workspace copies are the sticky defaults new documents inherit and the fallbacks for older documents. The learned profile (dictionary, dismissal history) stays global — it describes the writer, not the draft. The hook also migrates the previous split keys (`draftwise:draft`, `draftwise:goals`, `draftwise:provider`, `draftwise:theme`, and `draftwise:ai-enabled`) without crashing on malformed values. A clear-data action removes both the versioned and legacy keys.
 
 ## Build boundary
 
 The site build uses the repository’s framework runner. `scripts/build-extension.mjs` transpiles the pure shared packages with TypeScript and wraps them as browser globals, so the extension does not need runtime imports or a bundler. `npm run build` runs both steps and keeps the generated bundles in source control for “Load unpacked” users. CI regenerates them and fails if the checked-in output changes.
+
+There are two site builds, and they write to the same place. `npm run build` produces the Cloudflare Workers artifact through vinext; `npm run build:vercel` produces the Next.js build that Vercel serves. Both write route types into `.next/types`, in their own shapes: vinext writes `routes.d.ts`, Next writes `routes.d.ts` and the `validator.ts` that checks against it. Run the Cloudflare build after the Vercel one and the two files disagree, so `tsc` reports errors in a generated file that nobody wrote about a change that nobody made.
+
+`npm run type-check` therefore runs `next typegen` first. That regenerates the types in one shape, so the check is correct whatever ran before it — and it means CI, which checks before it builds, validates the route types instead of finding none. The rule generalises: a check that fails for reasons unrelated to the source is a check people learn to ignore.
+
+## Deployment
+
+Two builds, two targets. `npm run build` produces the Cloudflare Workers artifact; `npm run build:vercel` produces the Next.js production build that Vercel serves. The browser suite runs against both: the `e2e` job uses the dev server, and the `e2e-production` job builds and serves the production artifact. The second one exists because a Content-Security-Policy, the service worker and the Open Graph routes are production-only behaviour that a dev-server run cannot exercise.
+
+The service worker (`public/sw.js`) caches the app shell so the deployed app opens and keeps checking a draft with the network switched off. It only ever handles its own origin and only `GET` requests: provider and classifier calls are never intercepted, never cached and never replayed.
+
+**The Vercel project currently has Deployment Protection enabled**, so both the production alias and the preview deployments answer `401 Protected deployment` to anyone who is not signed in to Vercel. Verified against `draftwise-henry-107b.vercel.app` on 2026-10-21.
+
+That matters more than it looks, because it is the opposite of this product’s promise. Draftwise is sold on “no account, no server, no sign-up” — a visitor currently needs a Vercel account to open the page at all. It also makes the rest of the deployment work unreachable: `/robots.txt`, `/sitemap.xml` and the Open Graph image are all behind the same gate, so no crawler or social card can see them, and the installable PWA can be neither installed nor used by anyone else. Turning off Deployment Protection (Vercel → Settings → Deployment Protection) is what makes the public surface real; until then, the metadata, the manifest and the service worker describe an app nobody outside the team can reach.
+

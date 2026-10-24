@@ -167,6 +167,37 @@ examples rather than by these numbers (see Discipline):
   never the device). A bare `a meter` or `parking meter` stays untouched — the
 device is `meter` in both variants. Tuned recall is 0.995 (183/184); the
 single remaining tuned miss is that bare homograph, deliberately unflagged.
+- Everyday error coverage (tuned 188 → 269, still zero false positives,
+  blind gained zero extras). Three verb systems: perfect participles (`I have
+  went` → `gone`, with guards for tool-nouns, `bit parts`, `lay members`,
+  `dove grey`), `did` + base (`didn't went` → `go`, Titlecase-guarded for
+  `Did Rose`, noun-guarded for `left luggage`/`ground coffee`/`wound care`),
+  and bare `seen` (`I seen` → `saw`, adjacency doing the work of the
+  auxiliary test). Distributive agreement (`each have` → `has`, with guards
+  for time adverbials, `neither have I` inversion, mandative subjunctives,
+  noun compounds like `each study group`, and modals between keyword and
+  verb). Determiner agreement (`these kind` → `kinds`, `a phenomena` →
+  `phenomenon`, `one of the reason` → `reasons`). Subject pronouns (`John
+  and me went` / `Me and John went` / `John and myself attended` → `I`, with
+  prepositional-object and transitive-governor guards) and formal `whom`
+  after prepositions. Redundant prepositions (`off of`, `inside/outside of`,
+  `where is the station at`, with verb-presence and idiom guards), `reason
+  is because` → `that`, possessive typos (`its'` → `its`, quote-guarded),
+  `fewer`/`many`/`number` for countables, adverbial `every day`, `apart of`
+  → `a part of`, and some fifty idiom homophones (`bare/bear`, `pore/pour`,
+  `toe/tow`, `rein/reign`, `pique/peak`, `faze/phase`, `coarse/course`,
+  `peace/piece`, `rite/right`, `role/roll`, `weather/whether`, `loose/lose`,
+  `breath/breathe`, `advice/advise`, `device/devise`, `principal/principle`,
+  `stationery/stationary`, `complement/compliment`, `discreet/discrete`,
+  `council/counsel`, `sight/site`, `couldn't care less`, `irregardless`,
+  `ought of`, `different than the others`, `who's car` → `whose`). Every
+  pattern carries its miss-never-FP guard, each locked by tuned
+  false-positive examples and unit tests; the two blind collisions found in
+  development (casual `me and jake left`, `nobody could say`) were fixed by
+  principle — pronoun case and `whom` stay out of caseless drafts as
+  register corrections, and modals between a distributive and its verb end
+  the agreement test — not by touching the blind examples. Tuned recall is
+  now 0.996 (269/270) with the same single deliberate `meter` miss.
 - Singular-subject agreement in reverse (`The result show` → `shows`): the
   base verb must be unambiguous, with guards for same-form past tenses
   (`cost`), mandative subjunctives (`demand the result show`), en-GB
@@ -223,7 +254,7 @@ sentence is genuinely flagged. None of them was tuned
 against: the blind examples are unchanged, and the reasoning is recorded here
 instead.
 
-Recall (0.773) is measured against labelled expectations that pin a category
+Recall (0.818) is measured against labelled expectations that pin a category
 and an original rather than a rule. One known detection gap remains open, a miss, never a false positive:
 a bare
 `meter` with no measurement context (`uses a meter` — withheld because the

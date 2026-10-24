@@ -194,7 +194,21 @@ export default function Home() {
   // Home first. Opening in the editor used to land a fresh install inside the
   // seeded sample; the dashboard is the honest default, and opening any
   // document still lands in the editor from there.
-  const [view, setView] = useState<WorkspaceView>("home");
+  const [view, setViewState] = useState<WorkspaceView>("home");
+  // A view the writer asked for outranks the app's own resume decision.
+  //
+  // The resume below runs the first time both stores report hydrated, and
+  // that is not the same moment as "the writer has finished arriving". On a
+  // slow device the stores can finish hydrating after the writer has already
+  // clicked Documents — and the resume then pulled them back into the
+  // editor, throwing away the view they had just chosen. Every deliberate
+  // move goes through setView, so this flag is the writer's own opinion
+  // recorded at the moment they express it.
+  const [viewChosen, setViewChosen] = useState(false);
+  const setView = useCallback((next: WorkspaceView) => {
+    setViewChosen(true);
+    setViewState(next);
+  }, []);
   // Rail "new" badges clear on first visit and stay cleared: the stamp lives
   // in the persisted workspace, and each opener writes exactly once — the
   // guard keeps later visits from dirtying state and queuing pointless saves.
@@ -203,20 +217,24 @@ export default function Home() {
   const openInsights = useCallback(() => {
     setView("insights");
     if (workspace.seenInsightsAt == null) updateWorkspace({ seenInsightsAt: Date.now() });
-  }, [updateWorkspace, workspace.seenInsightsAt]);
+  }, [setView, updateWorkspace, workspace.seenInsightsAt]);
   const openExtensionGuide = useCallback(() => {
     setView("extension");
     if (workspace.seenExtensionAt == null) updateWorkspace({ seenExtensionAt: Date.now() });
-  }, [updateWorkspace, workspace.seenExtensionAt]);
+  }, [setView, updateWorkspace, workspace.seenExtensionAt]);
   // Returning writers resume where they left off: once both stores hydrate,
   // a single render-phase adoption moves to the editor when real words exist.
   // A fresh install owns no words (the seed is empty by design), so it stays
   // on the dashboard. This is adoption during render, not setState in an
   // effect, following the same pattern as the dismissal hydration below.
+  //
+  // It never overrides a view the writer has already chosen: somebody who
+  // asked for their library gets their library, whether they asked before or
+  // after the stores finished waking up.
   const [resumed, setResumed] = useState(false);
   if (hydrated && documents.hydrated && !resumed) {
     setResumed(true);
-    if (documents.documents.some((document) => document.draft.trim() !== "")) setView("write");
+    if (!viewChosen && documents.documents.some((document) => document.draft.trim() !== "")) setViewState("write");
   }
   const [filter, setFilter] = useState<TierFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
@@ -631,7 +649,7 @@ export default function Home() {
     // A new document means the writer is writing: land them in the editor.
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, setView, historyStore]);
 
   const newDocument = useCallback(() => {
     if (!(documents.active?.draft ?? "").trim()) {
@@ -687,7 +705,7 @@ export default function Home() {
     setActiveIssueId(null);
     setView("write");
     resetUnhidden(document.draft);
-  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, historyStore]);
+  }, [cancelRewrite, defaultDialect, defaultGoals, documents, resetUnhidden, setSelection, setView, historyStore]);
 
   const openDocument = useCallback((id: string) => {
     if (id === documents.activeId) {
@@ -708,7 +726,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [cancelRewrite, documents, setSelection, historyStore]);
+  }, [cancelRewrite, documents, setSelection, setView, historyStore]);
 
   const importFromFile = useCallback((file: File) => {
     // Refuse an oversized file before reading it. `file.text()` loads the whole
@@ -733,7 +751,7 @@ export default function Home() {
       setView("write");
       resetUnhidden(result.text);
     });
-  }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
+  }, [defaultDialect, defaultGoals, documents, resetUnhidden, setView, historyStore]);
 
   const exportDocument = useCallback((id: string, format: "txt" | "md") => {
     const target = documents.documents.find((document) => document.id === id);
@@ -775,7 +793,7 @@ export default function Home() {
     setDismissedIssueKeys([]);
     setActiveIssueId(null);
     setView("write");
-  }, [documents, setSelection, historyStore]);
+  }, [documents, setSelection, setView, historyStore]);
 
   const deleteDocument = useCallback((id: string) => {
     const wasActive = id === documents.activeId;

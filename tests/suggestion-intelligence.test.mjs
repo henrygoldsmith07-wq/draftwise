@@ -237,3 +237,58 @@ test("passage context is marked when no sentence boundary is reachable", () => {
   const context = state.displayed[0].context;
   assert.ok(context.startsWith("…") && context.endsWith("…"), `truncated context must say so, got ${JSON.stringify(context.slice(0, 12))}`);
 });
+
+test("the same draft always produces the same review list, whatever order the findings arrive in", () => {
+  // A long draft is analysed in chunks, and the chunks finish in whatever
+  // order the machine gets to them. The review list must not depend on that:
+  // the same words have to earn the same suggestions every time, or the list
+  // changes under the writer for no reason they can see.
+  //
+  // Every finding here is the same rule with the same severity and the same
+  // confidence, so they all rank equally and the order they are considered in
+  // is the only thing that decides which ones the caps keep.
+  const findings = [];
+  let text = "";
+  for (let index = 0; index < 30; index += 1) {
+    const prefix = `Block ${index + 1}. The manager `;
+    const original = `mispell${index}`;
+    const start = text.length + prefix.length;
+    text += `${prefix}${original} the update on Thursday. `;
+    findings.push(issue({
+      id: `typo-${index}`,
+      ruleId: "spelling-common-typo",
+      category: "spelling",
+      severity: "high",
+      confidence: 0.99,
+      start,
+      end: start + original.length,
+      original,
+      replacement: original.replace("mispell", "misspell"),
+      title: "Spelling",
+    }));
+  }
+  const options = { goals: goals("professional"), preferences: DEFAULT_STYLE_PREFERENCES, text };
+
+  const forwards = prioritiseSuggestions(findings, options);
+  const backwards = prioritiseSuggestions([...findings].reverse(), options);
+
+  // The budget really does bite, or this test would prove nothing.
+  assert.ok(forwards.displayed.length < findings.length, "the review list must be capped for this to mean anything");
+
+  assert.deepEqual(
+    forwards.displayed.map((item) => item.id),
+    backwards.displayed.map((item) => item.id),
+    "the order the findings arrive in must not change which ones are shown",
+  );
+  // With equal ranks, the findings kept are the earliest in the document.
+  assert.deepEqual(
+    forwards.displayed.map((item) => item.start),
+    [...forwards.displayed].map((item) => item.start).sort((left, right) => left - right),
+    "equal findings are kept in the order they appear in the draft",
+  );
+  assert.deepEqual(
+    forwards.displayed.map((item) => item.id),
+    forwards.displayed.map((item) => item.id).sort((left, right) => Number(left.slice(5)) - Number(right.slice(5))),
+    "the earliest findings in the draft are the ones that survive the budget",
+  );
+});

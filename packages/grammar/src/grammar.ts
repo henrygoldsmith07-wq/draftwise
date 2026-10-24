@@ -48,13 +48,102 @@ export function findConfusedWords(text: string, preferences: StylePreferences) {
     [/\b(their)\s+(is|are|was|were|has|have|a|an|not)\b/giu, "there", "grammar-confused-their", "There points to a place or introduces a statement."],
     [/\b(there)\s+(own|idea|ideas|team|house|car|name|responsibility)\b/giu, "their", "grammar-confused-there", "Their shows possession; there points to a place or introduces a statement."],
     [/\b(better|worse|more|less|rather|different)\s+(then)\b/giu, "than", "grammar-confused-than", "Than compares; then describes time or sequence.", 2],
+    // A modal verb is never followed by the preposition "of" ("should of
+    // called" is "should have called" misheard). The lookbehind keeps the
+    // noun reading: in "a must of modern life", must is the thing itself.
+    [/(?<!\b(?:a|the|this|that)\s)\b(could|should|would|might|must)\s+(of)\b/giu, "have", "grammar-confused-of", "After a modal verb the word is “have” (“should have called”), not “of”.", 2],
     [/\b(an?|the|this|that)\s+(affect)\b/giu, "effect", "grammar-confused-affect", "Effect is usually the noun for a result; affect is usually the verb.", 2],
     [/\b(to|will|can|may|might|could|does|did)\s+(effect)\b/giu, "affect", "grammar-confused-effect", "Affect is usually the verb meaning to influence; effect is usually the noun.", 2],
     [/\b(to)\s+(much|many|late|long|loud|quiet|far|quickly)\b/giu, "too", "grammar-confused-too", "Too means excessively or also; to usually introduces a destination or verb.", 1],
     [/\b(too)\s+(the|a|an|my|your|our|their)\b/giu, "to", "grammar-confused-to", "To usually introduces a destination or verb; too means excessively or also.", 1],
     [/\b(to)\s+(advice)\b/giu, "advise", "grammar-confused-advice", "Advise is the verb; advice is the noun.", 1],
-    [/\b(some|good|useful|professional)\s+(advise)\b/giu, "advice", "grammar-confused-advise", "Advice is the noun; advise is the verb.", 2],
+    [/\b(some|good|useful|professional|sound|bad|wise|best|practical|helpful|excellent|terrible|free|much|any|no|medical|legal|financial|expert|a|an|the|this|that)\s+(advise)\b/giu, "advice", "grammar-confused-advise", "Advice is the noun; advise is the verb.", 2],
     [/\b(to|will|can|may|might|could)\s+(loose)\b/giu, "lose", "grammar-confused-loose", "Lose means misplace or fail to win; loose means not tight.", 2],
+    // "ought of" is the same mishearing as "should of": the infinitive
+    // marker is "to".
+    [/\b(ought)\s+(of)\b/giu, "to", "grammar-confused-of", "After “ought” the word is “to” (“ought to go”), not “of”.", 2],
+    // "different than" with a determiner phrase takes "from" ("different
+    // from the others"). Bare pronoun and clause followers ("different than
+    // I expected") are left alone: the minimal swap would not be minimal.
+    [/\bdifferent\s+(than)(?=\s+(?:the|a|an|that|those|these|my|your|his|her|its|our|their)\b)/giu, "from", "grammar-confused-different", "In formal writing use “different from” (“different from the others”), not “different than”.", 1],
+    // "Who's car" is always "whose car": who is + noun never reads as
+    // who is. The list is possessible nouns only, never verb-forms.
+    [/\b(who's)\s+(car|cars|house|houses|home|name|names|idea|ideas|team|teams|fault|brother|sister|mother|father|wife|husband|son|daughter|friend|friends|turn|job|work|book|books|decision|decisions|choice|choices|office|desk|room|rooms|cat|dog|phone|phones|computer|computers|keys|wallet|bag|coat|shoes|responsibility|attitude|problem|problems)\b/giu, "whose", "grammar-confused-whose", "Whose shows possession; who’s means who is.", 1],
+    // "Bare with me" is always "bear with me" (endure). The lookahead
+    // pins the endure-readings; bare everywhere else (bare feet) is correct.
+    [/\b(bare)\b(?=\s+(?:with\s+(?:me|us)|in\s+mind|witness|the\s+(?:cost|burden|weight|pain|load|brunt)))/giu, "bear", "grammar-confused-bare", "“Bear with me” and “bear in mind” use bear (endure); bare means uncovered.", 1],
+    // Scholars pore over documents; cooks pour liquids. The object list
+    // keeps the study-reading unambiguous.
+    [/\b(pour)(?=\s+over\s+(?:the\s+)?(?:documents|books|records|files|data|details|manuscript|papers|evidence|accounts|reports|notes|ledgers)\b)/giu, "pore", "grammar-confused-pore", "Pore over writing means study it closely; pour is for liquids.", 1],
+    [/\b(tow)\s+the\s+line\b/giu, "toe", "grammar-confused-toe", "“Toe the line” means conform; tow means pull.", 1],
+    [/\b(free)\s+(reign)\b/giu, "rein", "grammar-confused-rein", "A free rein is permission to act; a reign is a monarch’s rule.", 2],
+    // "reign in spending" is always "rein in": reign (rule) takes places
+    // and periods (the reign in Spain), never budget nouns.
+    [/\b(reign)\s+(in)\s+(spending|costs|cost|budgets?|deficits?|debt|inflation|prices|excesses|impulses|emotions|appetites)\b/giu, "rein", "grammar-confused-rein", "To rein in spending is to restrain it, like a horse’s reins.", 1],
+    [/\b(peak|peek)\s+(my|your|his|her|its|our|their|the)\s+(interest|curiosity)\b/giu, "piqued", "grammar-confused-pique", "“Piqued my interest” (aroused) is the idiom; a peak is a summit.", 1],
+    // "phase me in/out" schedules someone, so the in/out follower keeps
+    // the legitimate phrasal verb. Without it, "didn't phase her" is faze.
+    [/\b(phase)(?=\s+(?:me|him|her|them|us|you)\b(?!\s+(?:in|out)\b))/giu, "faze", "grammar-confused-faze", "“Didn’t faze her” (disturb) is the verb; phase is a stage.", 1],
+    [/\b(phased)(?=\s+(?:me|him|her|them|us|you)\b(?!\s+(?:in|out)\b))/giu, "fazed", "grammar-confused-faze", "“Didn’t faze her” (disturb) is the verb; phase is a stage.", 1],
+    [/\b(hone\s+in\s+on)\b/giu, "home in on", "grammar-confused-home", "“Home in on” (move towards) is the idiom; hone means sharpen.", 1],
+    [/\b(deep[-\s]seeded)\b/giu, "deep-seated", "grammar-confused-seated", "“Deep-seated” (firmly established) is the idiom, not “deep-seeded”.", 1],
+    [/\b(baited)(?=\s+breath\b)/giu, "bated", "grammar-confused-bated", "“Bated breath” (held breath) is the idiom; bait is for traps.", 1],
+    [/\b(one\s+in\s+the\s+same)\b/giu, "one and the same", "grammar-confused-same", "The idiom is “one and the same”.", 1],
+    [/\bfor\s+all\s+(intensive)\s+purposes\b/giu, "intents and", "grammar-confused-intents", "The idiom is “for all intents and purposes”.", 1],
+    [/\b(extract)(?=\s+revenge\b)/giu, "exact", "grammar-confused-exact", "You exact revenge (demand it); extract means pull out.", 1],
+    [/\b(wreck)(?=\s+havoc\b)/giu, "wreak", "grammar-confused-wreak", "You wreak havoc (cause it); wreck means destroy.", 1],
+    [/\bof\s+(coarse)\b/giu, "course", "grammar-confused-coarse", "“Of course” is the phrase; coarse means rough.", 1],
+    [/\bgolf\s+(coarse)\b/giu, "course", "grammar-confused-coarse", "A golf course is the ground played on; coarse means rough.", 1],
+    [/\b(piece)(?=\s+of\s+mind\b)/giu, "peace", "grammar-confused-peace", "“Peace of mind” is calm; a piece is a part.", 1],
+    [/\b(piece)(?=\s+and\s+quiet\b)/giu, "peace", "grammar-confused-peace", "“Peace and quiet” is calm; a piece is a part.", 1],
+    [/\b(right)(?=\s+of\s+passage\b)/giu, "rite", "grammar-confused-rite", "A “rite of passage” is a ritual; right means correct.", 1],
+    // "play a roll" is never the bread: the play/starring frame pins the
+    // part-reading, while dinner and bakery rolls never match it.
+    [/\b(play|played|playing|plays)\s+((?:a|an|the|his|her|their|our|my|your|key|major|leading|starring|crucial|central|big|small|important|vital|pivotal|supporting|cameo)\s+){1,2}(roll)\b/giu, "role", "grammar-confused-roll", "A role is a part played; a roll is bread or a turn.", 3],
+    // "teaming up with" collaborates, so only a with-phrase naming a
+    // multitude (tourists, problems) reads as teeming (full of).
+    [/\b(teaming)(?=\s+with\s+(?:tourists?|visitors?|crowds?|fans?|people|problems?|errors?|mistakes?|issues?|cars?|bacteria|germs?|talent|options?|shoppers?|protesters?|wildlife|fish|birds?)\b)/giu, "teeming", "grammar-confused-teem", "“Teeming with” means full of; teaming up means collaborating.", 1],
+    [/\b(weather)(?=\s+(?:you|he|she|it|we|they|I|or\s+not)\b)/giu, "whether", "grammar-confused-weather", "“Whether you like it” gives alternatives; weather is atmospheric.", 1],
+    [/\b(sweet|chocolate)\s+(desert)\b/giu, "dessert", "grammar-confused-dessert", "Dessert is the sweet course; a desert is arid land.", 2],
+    [/\b(new|different|fresh|another)\s+(angel)(?=\s+on\b)/giu, "angle", "grammar-confused-angle", "A new angle on a problem is a perspective; an angel is celestial.", 2],
+    // "his medal collection" owns medals, so collection-words after medal
+    // keep the award-reading and never match.
+    [/\b(?:his|her|their|true)\s+(medal)\b(?!\s+(?:collection|collections|cabinet|cases?|ceremon(?:y|ies)|winners?|tables?|hopes?|tally|count|designs?)\b)/giu, "mettle", "grammar-confused-mettle", "Mettle is courage under test; a medal is an award.", 1],
+    [/\b(?:won|win|wins|earn|earns|earned|deserve|deserves|deserved|awarded)\s+(?:a|another|the|his|her|their)?\s*(mettle)\b/giu, "medal", "grammar-confused-medal", "A medal is the award; mettle is courage.", 1],
+    [/\b(meddle)\s+detector\b/giu, "metal", "grammar-confused-metal", "A metal detector finds metal; to meddle is to interfere.", 1],
+    [/\bcourt\s+(marshal)\b/giu, "martial", "grammar-confused-martial", "A court martial is a military trial; a marshal enforces law.", 1],
+    [/\b(too|very|so|quite|how)\s+(lose)\b/giu, "loose", "grammar-confused-loose", "Loose means not tight; lose means misplace or fail to win.", 2],
+    // "cut loose" and "let loose" end the phrase or continue with
+    // somewhere, never with these objects — so only these followers flip.
+    [/\b(loose)(?=\s+(?:weight|games?|match(?:es)?|keys|phone|job|temper|count|track|faith|hope|money|pounds|out)\b)/giu, "lose", "grammar-confused-loose", "Lose means misplace or fail to win; loose means not tight.", 1],
+    [/\b(a|one|deep|big|last|final|slow|shallow)\s+(breathe)\b/giu, "breath", "grammar-confused-breath", "Breath is the noun; breathe is the verb.", 2],
+    [/\bto\s+(breath)\b(?!\s+(?:mints?|fresheners?|tests?|alysers?|alyzers?))/giu, "breathe", "grammar-confused-breath", "Breathe is the verb; breath is the noun.", 1],
+    [/\b(a|an|the|this|that|clever|ingenious|new|electronic|useful|simple|literary)\s+(devise)\b/giu, "device", "grammar-confused-device", "A device is a gadget; devise is the verb (plan).", 2],
+    [/\b(these|those)\s+(devise)\b/giu, "devices", "grammar-confused-device", "Devices are gadgets; devise is the verb (plan).", 2],
+    // "a full complement of staff" is the complete crew; the praise
+    // reading needs a pay/give verb, which takes the reverse fix.
+    [/\b(full|complete)\s+(compliment)\s+of\b/giu, "complement", "grammar-confused-complement", "A full complement is the complete set; a compliment is praise.", 2],
+    [/\b(paid|pay|pays|paying|gave|give|gives|giving|offered|deserve|deserves|deserved)\b\s+(?:(?:him|her|them|me|us|you)\s+)?(?:a\s+)?(complement)\b/giu, "compliment", "grammar-confused-compliment", "A compliment is praise; a complement completes something.", 1],
+    [/\blet\s+me\s+(complement)\b/giu, "compliment", "grammar-confused-compliment", "A compliment is praise; a complement completes something.", 1],
+    [/\b(discreet)\s+(components?|parts?|variables?|units?|steps?|stages?|trials?|categor(?:y|ies)|entities|values|signals?|packets?|intervals?|models|systems)\b/giu, "discrete", "grammar-confused-discrete", "Discrete means separate; discreet means tactful.", 1],
+    [/\b(discrete)\s+(inquir(?:y|ies)|charm|meetings?|words?|envelopes?|packaging|locations?|affairs?|glances?|nods?)\b/giu, "discreet", "grammar-confused-discreet", "Discreet means tactful; discrete means separate.", 1],
+    [/\b(seek|seeks|sought|seeking)\s+(council)\b/giu, "counsel", "grammar-confused-counsel", "Counsel is advice; a council is an assembly.", 2],
+    [/\b(city|town|parish|county|district|borough|student|works)\s+(counsel)\b/giu, "council", "grammar-confused-council", "A council is an assembly; counsel is advice.", 2],
+    [/\b(moral|ethical|guiding|basic|core|general|key|first|fundamental|underlying|religious)\s+(principal)\b/giu, "principle", "grammar-confused-principle", "A principle is a rule; a principal heads a school.", 2],
+    [/\b(school|college)\s+(principle)\b/giu, "principal", "grammar-confused-principal", "The principal heads a school; a principle is a rule.", 2],
+    [/\b(stationery)\s+(bikes?|bicycles?|vehicles?|trains?|buses?|traffic|engines?|cars?)\b/giu, "stationary", "grammar-confused-stationary", "Stationary means not moving; stationery is writing paper.", 1],
+    [/\b(stationary)\s+(cupboards?|supplies|orders?)\b/giu, "stationery", "grammar-confused-stationery", "Stationery is writing paper; stationary means not moving.", 1],
+    [/\b(construction|building|web|website|internet|camp|campsite|caravan|heritage)\s+(sight)\b/giu, "site", "grammar-confused-site", "A site is a location; a sight is something seen.", 2],
+    [/\b(straight\s+jacket)\b/giu, "straitjacket", "grammar-confused-strait", "A straitjacket restrains; straight means not bent.", 1],
+    [/\b(apart\s+of)\b/giu, "a part of", "grammar-apart-of", "“Apart from” means except; “a part of” means belonging to.", 1],
+    // The adjective reading ("everyday life") never has a verb or
+    // this/that/it before it, so only those shapes flip to two words.
+    [/\b(go|goes|went|do|does|did|run|runs|ran|walk|walks|walked|eat|eats|ate|meet|meets|met|rain|rains|happen|happens|occur|occurs|arrive|arrives|work|works|play|plays|live|lives|lived|shop|shops|study|studies|drive|drives|train|trains|swim|swims)((?:\s+[\p{L}']+){0,2}?)\s+(everyday)(?!-)(?=\s*(?:$|[.,!?;:])|\s+(?:to|and|but|or|nor|for|before|after|while|when|because|if|with|on|in|at|from)\b(?!-))/giu, "every day", "grammar-everyday", "“Every day” (each day) is two words; everyday is an adjective (“everyday life”).", 3],
+    [/\b(this|that|it)\s+(everyday)(?!-)(?=\s*(?:$|[.,!?;:])|\s+(?:to|and|but|or|nor|for|before|after|while|when|because|if|with|on|in|at|from)\b(?!-))/giu, "every day", "grammar-everyday", "“Every day” (each day) is two words; everyday is an adjective (“everyday life”).", 2],
+    [/\b(irregardless)\b/giu, "regardless", "grammar-confused-regardless", "“Regardless” is the standard form.", 1],
+    // The literal ability-reading ("if you could care less, try harder")
+    // keeps the phrase; everywhere else it is the “couldn’t” idiom.
+    [/(?<!\bif\s+you\s+)(?<!\bwhether\s+you\s+)\b(could)\s+care\s+less\b/giu, "couldn't", "grammar-idiom-care-less", "The idiom is “couldn’t care less” (caring is impossible), not “could care less”.", 1],
   ];
   // In a draft written entirely without letter case the writer has abandoned
   // apostrophes along with capitals, so suggesting one back ("its" ->
@@ -541,6 +630,473 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     const demonstrativeEnd = demonstrativeStart + demonstrative.length;
     const capitalised = demonstrative.charAt(0).toLocaleUpperCase() + demonstrative.slice(1);
     pushIssue(issues, makeIssue("punctuation-comma-splice", commaPosition, demonstrativeEnd, text.slice(commaPosition, demonstrativeEnd), `. ${capitalised}`, "punctuation", "medium", "Possible comma splice", "Two complete sentences are joined by a comma. Start a new sentence here.", 0.8, preferences));
+  }
+  // Existential agreement ("There is three people", "There are a problem").
+  // There is a dummy subject: the verb agrees with the noun phrase after it.
+  // Only unambiguous shapes fire. The contracted "there's + plural" is
+  // idiomatic in casual speech and deliberately left alone (locked by an
+  // FP test); a bare "There is" has no such excuse. Mass and invariant
+  // nouns (fish, politics) and "no" determiners are never judged.
+  const EXISTENTIAL_PLURALS = new Set([
+    "these", "those", "several", "many", "few", "both", "multiple",
+    "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve",
+  ]);
+  for (const match of text.matchAll(/\b[Tt]here\s+(is)\s+([\p{L}'’-]+|\d+)/gu)) {
+    const verb = match[1] ?? "";
+    const followed = (match[2] ?? "").toLocaleLowerCase();
+    const isDigitPlural = /^\d+$/u.test(followed) && Number.parseInt(followed, 10) >= 2;
+    if (!isDigitPlural && !EXISTENTIAL_PLURALS.has(followed)
+      && !(nounLooksPlural(followed) && !AMBIGUOUS_NUMBER_NOUNS.test(followed))) continue;
+    const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+    pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, "are"), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.92, preferences));
+  }
+  // "There are a lot of reasons" and "a few/great many" are correct, so
+  // the a/an branch skips collective determiners; "one or two" takes the
+  // plural by proximity, so that "one" is skipped too.
+  const COLLECTIVE_AFTER_A = new Set([
+    "lot", "number", "couple", "few", "many", "group", "series", "range",
+    "total", "variety", "deal", "dozen", "hundred", "thousand", "million",
+  ]);
+  for (const match of text.matchAll(/\b[Tt]here\s+(are)\s+(a|an|one|each|every|this|that)\b/giu)) {
+    const verb = match[1] ?? "";
+    const determiner = (match[2] ?? "").toLocaleLowerCase();
+    const afterDeterminer = /^\s+([\p{L}'’-]+)/u.exec(text.slice((match.index ?? 0) + match[0].length))?.[1]?.toLocaleLowerCase() ?? "";
+    if ((determiner === "a" || determiner === "an") && COLLECTIVE_AFTER_A.has(afterDeterminer)) continue;
+    if (determiner === "one" && afterDeterminer === "or") continue;
+    const start = (match.index ?? 0) + (match[0].lastIndexOf(verb));
+    pushIssue(issues, makeIssue("grammar-subject-verb-agreement", start, start + verb.length, verb, preserveCase(verb, "is"), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.92, preferences));
+  }
+  // The object of a preposition coordinated with "I" ("between you and I",
+  // "he gave it to John and I"). A preposition always governs the objective
+  // case, so the stranded "I" is corrected to "me" — always lowercase, since
+  // a capitalised "I" never legitimately follows a coordinator here and
+  // preserveCase would produce "Me". When a verb follows the "I" the
+  // coordinator belongs to a new clause ("for work and I need a break"), so
+  // verb-followers are left alone.
+  const OBJECT_PREPOSITIONS = new Set([
+    "between", "for", "with", "to", "from", "by", "of", "about", "against",
+    "among", "around", "without", "toward", "towards", "upon", "via",
+    "including", "except", "besides",
+  ]);
+  for (const match of text.matchAll(/\b([\p{L}]+)\s+((?:you|me|him|her|us|them|[\p{L}][\p{L}'’-]*)(?:\s*,\s*[\p{L}][\p{L}'’-]*)*\s+(?:and|or)\s+)+(I)\b/gu)) {
+    if (!OBJECT_PREPOSITIONS.has((match[1] ?? "").toLocaleLowerCase())) continue;
+    const pronoun = match[3] ?? "";
+    if (pronoun !== "I") continue;
+    const afterPronoun = /^\s*([\p{L}']+)/u.exec(text.slice((match.index ?? 0) + match[0].length))?.[1]?.toLocaleLowerCase() ?? "";
+    if (verbLike(afterPronoun) || SUBJECT_SLOT_AUX.has(afterPronoun)) continue;
+    const start = (match.index ?? 0) + match[0].length - 1;
+    pushIssue(issues, makeIssue("grammar-object-pronoun", start, start + 1, "I", "me", "grammar", "high", "Check the pronoun case", "After a preposition, use “me” (“between you and me”), not “I”.", 0.9, preferences));
+  }
+  // Double comparatives and superlatives ("more better", "most biggest").
+  // "More"/"most" never precede an already-inflected form, so a curated
+  // set is enough — morphology alone would catch nouns like "water" and
+  // "power". Hyphenated compounds ("best-sellers") are excluded.
+  const DOUBLE_COMPARATIVES = new Set([
+    "better", "best", "worse", "worst", "lesser", "least",
+    "bigger", "biggest", "smaller", "smallest", "greater", "greatest",
+    "higher", "highest", "lower", "lowest", "larger", "largest",
+    "faster", "fastest", "stronger", "strongest", "longer", "longest",
+    "newer", "newest", "older", "oldest", "younger", "youngest",
+    "easier", "easiest", "happier", "happiest", "simpler", "simplest",
+    "earliest", "latest", "taller", "tallest", "shorter", "shortest",
+    "quicker", "quickest", "slower", "slowest", "sooner",
+    "louder", "loudest", "quieter", "quietest", "brighter",
+    "darker", "darkest", "warmer", "warmest", "colder", "coldest",
+    "harder", "hardest", "deeper", "deepest", "closer", "closest",
+    "wider", "widest", "cleaner", "cleanest", "cheaper", "cheapest",
+    "safer", "safest", "nicer", "nicest", "poorer", "poorest",
+    "richer", "richest",
+  ]);
+  for (const match of text.matchAll(/\b(more|most|less|least)\s+([\p{L}][\p{L}'’-]*)(?!-)/giu)) {
+    const trigger = match[1] ?? "";
+    const adjective = match[2] ?? "";
+    if (!DOUBLE_COMPARATIVES.has(adjective.toLocaleLowerCase())) continue;
+    const start = match.index ?? 0;
+    pushIssue(issues, makeIssue("grammar-double-comparative", start, start + match[0].length, match[0], preserveCase(trigger, adjective), "grammar", "high", "Remove the double comparative", `“${adjective}” already compares; drop “${trigger.toLocaleLowerCase()}”.`, 0.9, preferences));
+  }
+  // Perfect forms take the past participle, never the simple past ("I have
+  // went" -> "gone", "could have saw" -> "seen"). Only forms where past
+  // and participle differ are listed, so correct writing ("have taken",
+  // "have cut") never matches. Guarded readings: determiners before
+  // tool-nouns ("have a saw"), bit-parts, lay members, dove-grey paint,
+  // hyphenated compounds, and Titlecase proper nouns. "rose" is deliberately
+  // absent: after have it is far more often a flower. "gotten" maps to
+  // "got", the en-GB form.
+  const HAVE_TO_PARTICIPLE: Record<string, string> = {
+    went: "gone", came: "come", became: "become", overcame: "overcome",
+    saw: "seen", took: "taken", mistook: "mistaken", undertook: "undertaken",
+    shook: "shaken", stole: "stolen", spoke: "spoken", broke: "broken",
+    chose: "chosen", drove: "driven", wrote: "written", rode: "ridden",
+    tore: "torn", wore: "worn", swore: "sworn", bore: "borne", born: "borne",
+    fell: "fallen", forgot: "forgotten", gave: "given", hid: "hidden",
+    withdrew: "withdrawn", underwent: "undergone", overtook: "overtaken",
+    ate: "eaten", drank: "drunk", swam: "swum", began: "begun", ran: "run",
+    sang: "sung", rang: "rung", sank: "sunk", sprang: "sprung",
+    stank: "stunk", shrank: "shrunk", blew: "blown", drew: "drawn",
+    flew: "flown", froze: "frozen", grew: "grown", knew: "known",
+    threw: "thrown", did: "done", woke: "woken", beat: "beaten",
+    bit: "bitten", lay: "lain", dove: "dived", gotten: "got",
+  };
+  const HAVE_PAST_PATTERN = Object.keys(HAVE_TO_PARTICIPLE).sort((a, b) => b.length - a.length).join("|");
+  // A determiner just before the verb ("have a saw") is the noun reading,
+  // never the perfect tense.
+  const DETERMINER_BEFORE_NOUN = /(?:^|[^\p{L}])(?:a|an|the|this|that|these|those|my|your|his|her|its|our|their|some|any|no|every|each|several|many|few|two|three|four|five|six|seven|eight|nine|ten|both|all|other|another|such|what|which|whose)\s+$/iu;
+  const BIT_PART_FOLLOWERS = new Set(["part", "role", "parts", "roles"]);
+  const LAY_MEMBER_FOLLOWERS = new Set(["member", "members", "person", "people", "reader", "readers"]);
+  const isTitlecaseProperNoun = (word: string) => /^[A-Z][a-z]/u.test(word);
+  const nextWordAfter = (position: number) => /^\s*([\p{L}']+)/u.exec(text.slice(position))?.[1]?.toLocaleLowerCase() ?? "";
+  const pushHaveParticiple = (match: RegExpMatchArray) => {
+    const past = match[1] ?? "";
+    const pastLower = past.toLocaleLowerCase();
+    const participle = HAVE_TO_PARTICIPLE[pastLower];
+    if (!participle) return;
+    if (isTitlecaseProperNoun(past)) return;
+    const verbStart = (match.index ?? 0) + (match[0]?.lastIndexOf(past) ?? 0);
+    if (text[verbStart + past.length] === "-") return;
+    const before = text.slice(0, verbStart);
+    if (["saw", "bit", "spoke", "drove", "bore", "beat", "lay", "dove"].includes(pastLower) && DETERMINER_BEFORE_NOUN.test(before)) return;
+    const follower = nextWordAfter(verbStart + past.length);
+    if (pastLower === "bit" && BIT_PART_FOLLOWERS.has(follower)) return;
+    if (pastLower === "lay" && LAY_MEMBER_FOLLOWERS.has(follower)) return;
+    if (pastLower === "dove" && (follower === "grey" || follower === "gray")) return;
+    if (pastLower === "beat" && ["writer", "writers", "reporter", "reporters", "journalist", "journalists", "poet", "poets", "cop", "cops"].includes(follower)) return;
+    if (pastLower === "fell" && ["walk", "walks", "walking", "runner", "runners", "running", "race", "races"].includes(follower)) return;
+    if (pastLower === "spoke" && ["wheel", "wheels", "wrench", "wrenches"].includes(follower)) return;
+    pushIssue(issues, makeIssue("grammar-verb-participle", verbStart, verbStart + past.length, past, preserveCase(past, participle), "grammar", "high", "Check the verb form", `After “have”, use the past participle (“have ${participle}”), not the simple past (“${pastLower}”).`, 0.9, preferences));
+  };
+  for (const match of text.matchAll(new RegExp(`\\b(?:have|has|had|having|haven't|hasn't|hadn't)(?:\\s+not\\b)?(?:\\s+[\\p{L}][\\p{L}'’-]*\\b)?(?:\\s+(?:already|never|ever|just|recently|always|often|sometimes|rarely|still)\\b){0,2}\\s+(${HAVE_PAST_PATTERN})\\b`, "giu"))) pushHaveParticiple(match);
+  for (const match of text.matchAll(new RegExp(`\\b[\\p{L}]+(?:['’]ve|['’]s|['’]d)(?:\\s+not\\b)?(?:\\s+(?:already|never|ever|just|recently|always|often|sometimes|rarely|still)\\b){0,2}\\s+(${HAVE_PAST_PATTERN})\\b`, "giu"))) pushHaveParticiple(match);
+  // After do/does/did the verb is the base form ("didn't went" ->
+  // "didn't go"). Every key differs from its base, so correct writing
+  // never matches; Titlecase guards proper nouns ("Did Rose call?").
+  const DID_TO_BASE: Record<string, string> = {
+    went: "go", came: "come", saw: "see", took: "take", made: "make",
+    got: "get", knew: "know", thought: "think", felt: "feel",
+    became: "become", brought: "bring", began: "begin", kept: "keep",
+    held: "hold", wrote: "write", stood: "stand", heard: "hear",
+    meant: "mean", paid: "pay", met: "meet", ran: "run", sat: "sit",
+    spoke: "speak", drove: "drive", broke: "break", chose: "choose",
+    wore: "wear", tore: "tear", fell: "fall", forgot: "forget",
+    gave: "give", hid: "hide", rode: "ride", rang: "ring", rose: "rise",
+    sank: "sink", sang: "sing", shook: "shake", shot: "shoot",
+    slept: "sleep", slid: "slide", stole: "steal", stuck: "stick",
+    struck: "strike", swore: "swear", swept: "sweep", swung: "swing",
+    threw: "throw", woke: "wake", won: "win", lost: "lose", sold: "sell",
+    sent: "send", spent: "spend", built: "build", lent: "lend",
+    said: "say", did: "do", done: "do", had: "have",
+    has: "have", was: "be", were: "be", been: "be", ate: "eat",
+    drank: "drink", swam: "swim", blew: "blow", drew: "draw",
+    flew: "fly", froze: "freeze", grew: "grow", withdrew: "withdraw",
+    undertook: "undertake", mistook: "mistake", bore: "bear", bit: "bite",
+    dug: "dig", found: "find", founded: "found",
+    stung: "sting", strung: "string", flung: "fling",
+    clung: "cling", slung: "sling", hung: "hang", wept: "weep",
+    crept: "creep", dreamt: "dream", learnt: "learn", burnt: "burn",
+    spoilt: "spoil", spelt: "spell", spilt: "spill", smelt: "smell",
+    knelt: "kneel", dealt: "deal", shone: "shine", lit: "light",
+    led: "lead", laid: "lay", lain: "lie", dove: "dive", pled: "plead",
+    gotten: "get",
+  };
+  const DID_PAST_PATTERN = Object.keys(DID_TO_BASE).sort((a, b) => b.length - a.length).join("|");
+  for (const match of text.matchAll(new RegExp(`\\b(?:do|does|did|don't|doesn't|didn't|don’t|doesn’t|didn’t)(?:\\s+not\\b)?(?:\\s+[\\p{L}][\\p{L}'’-]*\\b)?\\s+(${DID_PAST_PATTERN})\\b`, "giu"))) {
+    const past = match[1] ?? "";
+    const pastLower = past.toLocaleLowerCase();
+    const base = DID_TO_BASE[pastLower];
+    if (!base || isTitlecaseProperNoun(past)) continue;
+    const verbStart = (match.index ?? 0) + (match[0]?.lastIndexOf(past) ?? 0);
+    const didFollower = nextWordAfter(verbStart + past.length);
+    if (pastLower === "bit" && BIT_PART_FOLLOWERS.has(didFollower)) continue;
+    if (pastLower === "dove" && (didFollower === "grey" || didFollower === "gray")) continue;
+    if (pastLower === "found" && ["objects", "items", "artefacts", "artifacts", "remains", "fossils"].includes(didFollower)) continue;
+    if (pastLower === "saw" && ["through", "off", "apart", "up", "down"].includes(didFollower)) continue;
+    pushIssue(issues, makeIssue("grammar-verb-base", verbStart, verbStart + past.length, past, preserveCase(past, base), "grammar", "high", "Check the verb form", `After “did”, use the base verb (“did ${base}”), not the past tense (“${pastLower}”).`, 0.9, preferences));
+  }
+  // A bare "seen" after a pronoun is nonstandard ("I seen" -> "I saw"):
+  // the participle needs its auxiliary. Adjacency is the whole test — "I
+  // have seen" and "rarely seen" never match because have (or an adverb)
+  // stands between.
+  for (const match of text.matchAll(/\b(i|you|he|she|it|we|they|who)\s+(seen)\b/giu)) {
+    const pronoun = match[1] ?? "";
+    const seen = match[2] ?? "";
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(seen) ?? 0);
+    pushIssue(issues, makeIssue("grammar-verb-participle", start, start + seen.length, seen, preserveCase(seen, "saw"), "grammar", "high", "Check the verb form", `“Seen” needs “have” (“have seen”); on its own, use “saw” (“${pronoun} saw”).`, 0.9, preferences));
+  }
+  // Singular distributives take singular verbs ("each have" -> "has",
+  // "everyone don't" -> "doesn't"). The verb list is closed: only plural
+  // verb forms match, so correct singulars never fire. Guards: time
+  // adverbials ("every day do your best"), reciprocals ("each other"),
+  // plural middle nouns (a determiner error, not a verb error), neither/nor
+  // inversion ("neither have I"), mandative subjunctives ("require each
+  // have"), and hypothetical "were".
+  const EACH_BASES = [
+    "want", "need", "like", "love", "hate", "know", "think", "feel",
+    "seem", "appear", "believe", "consider", "prefer", "remember",
+    "forget", "try", "study", "carry", "worry", "hurry", "cry",
+    "fly", "say", "pay", "play", "stay", "enjoy", "agree", "see",
+    "make", "take", "come", "run", "get", "find", "follow", "help",
+    "work", "move", "start", "end", "mean", "leave", "change",
+    "grow", "belong", "speak", "drive", "eat", "drink", "stand",
+    "cover", "vary", "require", "provide", "offer", "include",
+    "contain", "remain", "show", "tell", "use", "keep", "write", "build",
+  ];
+  const EACH_VERB_PATTERN = ["haven't", "don't", "have", "are", "were", "do", ...EACH_BASES].join("|");
+  const EACH_TIME_WORDS = new Set(["day", "days", "morning", "evening", "night", "week", "weeks", "month", "months", "year", "years", "time"]);
+  // Base verbs that double as attributive nouns ("study group", "work
+  // email", "think tank"). With no subject words between the keyword and
+  // the verb, such a match may be a noun compound, so it only fires when
+  // the follower proves a verb frame: a determiner, pronoun, preposition,
+  // relative, adverb, another verb, or the end of the clause. Other verbs
+  // (have, want, say) are never attributive nouns and always fire.
+  const NOUNY_VERBS = new Set([
+    "study", "work", "play", "show", "end", "change", "move", "drink",
+    "run", "love", "like", "need", "think", "help", "start", "try",
+    "cover", "take", "find", "drive", "stand", "offer", "keep", "use",
+    "mean", "leave", "build", "stay", "pay", "tell", "fly", "cry", "worry",
+  ]);
+  const EACH_SAFE_FOLLOWERS = new Set([
+    "a", "an", "the", "this", "that", "these", "those", "my", "your",
+    "his", "her", "its", "our", "their", "no", "any", "some", "every",
+    "each", "what", "which", "whose", "whom", "who", "to", "of", "in",
+    "on", "for", "with", "about", "at", "by", "from", "into", "over",
+    "after", "before", "than", "as", "against", "among", "between",
+    "without", "toward", "towards", "under", "through", "and", "or",
+    "but", "not", "never", "always", "often", "usually", "sometimes",
+    "rarely", "still", "just", "already", "ever", "here", "there",
+    "now", "then", "so", "too", "also", "hard", "fast", "well",
+    "better", "best", "worse", "worst", "early", "late", "soon",
+    "long", "far", "much", "more", "most", "less", "little",
+    "clearly", "carefully", "quietly", "quickly", "slowly", "deeply",
+    "highly", "fully", "truly", "really", "me", "you", "him", "us",
+    "them", "it", "nothing", "something", "anything", "everything",
+  ]);
+  const EACH_TO_SINGULAR: Record<string, string> = { have: "has", are: "is", were: "was", do: "does", "don't": "doesn't", "haven't": "hasn't" };
+  for (const match of text.matchAll(new RegExp(`\\b(each|everyone|everybody|anyone|anybody|someone|somebody|nobody|every\\s+one|no\\s+one|any\\s+one|either|neither)\\b((?:\\s+of\\b(?:\\s+(?:the\\b)?[\\p{L}']+){1,3})?)((?:\\s+[\\p{L}']+){0,2}?)\\s+(${EACH_VERB_PATTERN})\\b`, "giu"))) {
+    const keyword = (match[1] ?? "").toLocaleLowerCase().replace(/\s+/gu, " ");
+    const ofPhrase = match[2] ?? "";
+    const middleWords = (match[3] ?? "").trim().split(/\s+/u).filter(Boolean).map((word) => word.toLocaleLowerCase());
+    const verb = match[4] ?? "";
+    const verbLower = verb.toLocaleLowerCase();
+    if (middleWords.includes("other")) continue;
+    // A modal or auxiliary between the keyword and the verb ("nobody could
+    // say", "each will have") puts the verb in a verb phrase the
+    // distributive does not govern, so there is no agreement to judge.
+    if (middleWords.some((word) => SUBJECT_SLOT_AUX.has(word))) continue;
+    if ((keyword === "each" || keyword === "every") && middleWords.some((word) => EACH_TIME_WORDS.has(word))) continue;
+    const lastMiddle = middleWords[middleWords.length - 1] ?? "";
+    if (lastMiddle && (nounLooksPlural(lastMiddle) || PLURAL_OR_AMBIGUOUS_SUBJECTS.has(lastMiddle) || AMBIGUOUS_NUMBER_NOUNS.test(lastMiddle))) continue;
+    if ((keyword === "either" || keyword === "neither") && !ofPhrase && middleWords.length === 0 && ["have", "are", "were", "do"].includes(verbLower)
+      && ["i", "you", "he", "she", "it", "we", "they"].includes(nextWordAfter((match.index ?? 0) + match[0].length))) continue;
+    const tailWords = (text.slice(0, match.index ?? 0).toLocaleLowerCase().match(/[\p{L}']+/gu) ?? []).slice(-3);
+    if (tailWords.some((word) => MANDATIVE_GOVERNORS.has(word) || MANDATIVE_NOUNS.has(word))) continue;
+    const verbStart = (match.index ?? 0) + (match[0]?.lastIndexOf(verb) ?? 0);
+    if (verbLower === "were" && inHypotheticalClause(text, verbStart)) continue;
+    if (middleWords.length === 0 && NOUNY_VERBS.has(verbLower)) {
+      const follower = nextWordAfter((match.index ?? 0) + match[0].length);
+      if (follower && !EACH_SAFE_FOLLOWERS.has(follower) && !SUBJECT_SLOT_AUX.has(follower) && !verbLike(follower)) continue;
+    }
+    const fixed = EACH_TO_SINGULAR[verbLower] ?? toThirdSingular(verbLower);
+    pushIssue(issues, makeIssue("grammar-subject-verb-agreement", verbStart, verbStart + verb.length, verb, preserveCase(verb, fixed), "grammar", "high", "Check subject–verb agreement", "The verb should agree with the subject in number.", 0.9, preferences));
+  }
+  // Determiner–noun number agreement in three shapes: demonstratives with
+  // kind/sort/type ("these kind" -> "these kinds", "this kinds" ->
+  // "this kind"), "a" with a plural-only noun ("a phenomena" ->
+  // "a phenomenon"), and "one of the" with a singular ("one of the
+  // reason" -> "reasons"). Each map is closed, so correct pairings never
+  // match.
+  for (const match of text.matchAll(/\b(these|those|this|that)\s+(kind|sort|type|kinds|sorts|types)\s+of\b/giu)) {
+    const demonstrative = (match[1] ?? "").toLocaleLowerCase();
+    const noun = match[2] ?? "";
+    const nounLower = noun.toLocaleLowerCase();
+    const pluralDemonstrative = demonstrative === "these" || demonstrative === "those";
+    const pluralNoun = nounLower.endsWith("s");
+    if (pluralDemonstrative === pluralNoun) continue;
+    const fixed = pluralDemonstrative ? `${nounLower}s` : nounLower.slice(0, -1);
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(noun) ?? 0);
+    pushIssue(issues, makeIssue("grammar-determiner-agreement", start, start + noun.length, noun, preserveCase(noun, fixed), "grammar", "high", "Check determiner–noun agreement", `“${demonstrative}” needs the ${pluralDemonstrative ? "plural" : "singular"} (“${pluralDemonstrative ? "these kinds" : "this kind"} of …”).`, 0.9, preferences));
+  }
+  const PLURAL_ONLY_TO_SINGULAR: Record<string, string> = {
+    phenomena: "phenomenon", criteria: "criterion", theses: "thesis",
+    analyses: "analysis", hypotheses: "hypothesis", parentheses: "parenthesis",
+    strata: "stratum", oases: "oasis",
+  };
+  for (const match of text.matchAll(/\b(a|an)\s+(phenomena|criteria|theses|analyses|hypotheses|parentheses|strata|oases)\b/giu)) {
+    const noun = match[2] ?? "";
+    const fixed = PLURAL_ONLY_TO_SINGULAR[noun.toLocaleLowerCase()] ?? noun;
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(noun) ?? 0);
+    pushIssue(issues, makeIssue("grammar-determiner-agreement", start, start + noun.length, noun, preserveCase(noun, fixed), "grammar", "high", "Check determiner–noun agreement", `“A” takes the singular (“a ${fixed.toLocaleLowerCase()}”), not the plural.`, 0.9, preferences));
+  }
+  const ONE_OF_THE_TO_PLURAL: Record<string, string> = {
+    reason: "reasons", problem: "problems", issue: "issues", thing: "things",
+    way: "ways", day: "days", week: "weeks", month: "months", year: "years",
+    man: "men", woman: "women", child: "children", mistake: "mistakes",
+    factor: "factors", cause: "causes", feature: "features", benefit: "benefits",
+    risk: "risks", challenge: "challenges", question: "questions",
+    book: "books", film: "films", song: "songs", student: "students",
+    member: "members", employee: "employees", customer: "customers",
+    company: "companies", city: "cities", country: "countries", place: "places",
+    time: "times", part: "parts", aspect: "aspects",
+  };
+  for (const match of text.matchAll(/\bone\s+of\s+the\s+(reason|problem|issue|thing|way|day|week|month|year|man|woman|child|mistake|factor|cause|feature|benefit|risk|challenge|question|book|film|song|student|member|employee|customer|company|city|country|place|time|part|aspect)\b/giu)) {
+    const noun = match[1] ?? "";
+    const fixed = ONE_OF_THE_TO_PLURAL[noun.toLocaleLowerCase()] ?? noun;
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(noun) ?? 0);
+    pushIssue(issues, makeIssue("grammar-determiner-agreement", start, start + noun.length, noun, preserveCase(noun, fixed), "grammar", "high", "Check determiner–noun agreement", `After “one of the”, use the plural (“one of the ${fixed.toLocaleLowerCase()}”).`, 0.9, preferences));
+  }
+  // In a caseless draft the writer has abandoned standard register along
+  // with capitals ("me and jake left"), so correcting pronoun case there
+  // corrects the voice, not the writing — the same doctrine that keeps
+  // comma splices and your/its out of such drafts. The whom fix follows
+  // the same rule.
+  const registerVoiceFixesSkip = isUncasedDraft(text);
+  // Formal "whom" after a preposition ("the person to who I spoke" ->
+  // "whom"). A following apostrophe ("who's", "who'd") is never this
+  // construction.
+  for (const match of text.matchAll(/\b(to|for|with|by|from|of|about|on|upon|against|among|between|without|toward|towards|under|over)\s+(who)\b(?!['’])/giu)) {
+    if (registerVoiceFixesSkip) break;
+    const who = match[2] ?? "";
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(who) ?? 0);
+    pushIssue(issues, makeIssue("grammar-object-pronoun", start, start + who.length, who, preserveCase(who, "whom"), "grammar", "high", "Check the pronoun case", "After a preposition, use “whom” (“to whom I spoke”) in formal writing, not “who”.", 0.88, preferences));
+  }
+  // The subject mirror of the between-you-and-I rule: "John and me went"
+  // and clause-initial "Me and John went" take "I", as does the
+  // hypercorrect "John and myself attended". Prepositional objects ("for
+  // John and me, yesterday was hard") and transitive governors ("tell John
+  // and me lies") are skipped by checking what stands before the name; a
+  // verb must follow the pronoun, otherwise the phrase is a fragment.
+  const SUBJECT_PRONOUN_GOVERNORS = new Set([
+    ...TRANSITIVE_GOVERNORS, "tell", "told", "show", "showed", "teach",
+    "taught", "offer", "offered", "promise", "promised", "pay", "paid",
+    "wish", "grant", "granted",
+  ]);
+  const subjectNameIsGoverned = (nameStart: number) => {
+    if (isPrepositionalObject(text, nameStart)) return true;
+    const previousRaw = /([\p{L}']+)\s*$/u.exec(text.slice(0, nameStart))?.[1] ?? "";
+    const previous = previousRaw.toLocaleLowerCase();
+    if (!previous) return false;
+    if (SUBJECT_SLOT_AUX.has(previous) || SUBJECT_PRONOUN_GOVERNORS.has(previous)) return true;
+    if (/(ed|ing)$/u.test(previous)) return true;
+    return verbLike(previous) && !nounLooksPlural(previous);
+  };
+  const followsVerb = (position: number) => {
+    const next = nextWordAfter(position);
+    return SUBJECT_SLOT_AUX.has(next) || verbLike(next) || IRREGULAR_PAST_VERBS.has(next);
+  };
+  for (const match of text.matchAll(/\b([\p{L}][\p{L}'’-]*)\s+and\s+(me)\b/giu)) {
+    if (registerVoiceFixesSkip) break;
+    const name = match[1] ?? "";
+    const me = match[2] ?? "";
+    const nameStart = (match.index ?? 0) + (match[0]?.indexOf(name) ?? 0);
+    if (subjectNameIsGoverned(nameStart)) continue;
+    if (!followsVerb((match.index ?? 0) + match[0].length)) continue;
+    const meStart = (match.index ?? 0) + (match[0]?.lastIndexOf(me) ?? 0);
+    pushIssue(issues, makeIssue("grammar-subject-pronoun", meStart, meStart + me.length, me, "I", "grammar", "high", "Check the pronoun case", `Use “I” as part of the subject (“${name} and I”), not “me”.`, 0.9, preferences));
+  }
+  for (const match of text.matchAll(/(^|[.!?…;:\n]\s*|[—–-]\s*)(me)\s+and\s+([\p{L}][\p{L}'’-]*)/giu)) {
+    if (registerVoiceFixesSkip) break;
+    const prefix = match[1] ?? "";
+    const meStart = (match.index ?? 0) + prefix.length;
+    const name = match[3] ?? "";
+    const phraseEnd = (match.index ?? 0) + match[0].length;
+    if (!followsVerb(phraseEnd) && !reflexiveFollowedByVerb(text, phraseEnd)) continue;
+    const original = text.slice(meStart, phraseEnd);
+    pushIssue(issues, makeIssue("grammar-subject-pronoun", meStart, phraseEnd, original, `${name} and I`, "grammar", "high", "Check the pronoun case", `Start with “${name} and I” as the subject, not “me”.`, 0.9, preferences));
+  }
+  for (const match of text.matchAll(/\b([\p{L}][\p{L}'’-]*)\s+and\s+(myself)\b/giu)) {
+    if (registerVoiceFixesSkip) break;
+    const nameStart = (match.index ?? 0) + (match[0]?.indexOf(match[1] ?? "") ?? 0);
+    if (subjectNameIsGoverned(nameStart)) continue;
+    const myself = match[2] ?? "";
+    const myselfStart = (match.index ?? 0) + (match[0]?.lastIndexOf(myself) ?? 0);
+    if (!followsVerb(myselfStart + myself.length) && !reflexiveFollowedByVerb(text, myselfStart + myself.length)) continue;
+    pushIssue(issues, makeIssue("grammar-subject-pronoun", myselfStart, myselfStart + myself.length, myself, "I", "grammar", "high", "Check the pronoun case", `“Myself” needs its antecedent (“I myself”); as part of the subject, use “I”.`, 0.9, preferences));
+  }
+  for (const match of text.matchAll(/(^|[.!?…;:\n]\s*|[—–-]\s*)(myself)\s+and\s+([\p{L}][\p{L}'’-]*)/giu)) {
+    if (registerVoiceFixesSkip) break;
+    const prefix = match[1] ?? "";
+    const myselfStart = (match.index ?? 0) + prefix.length;
+    const name = match[3] ?? "";
+    const phraseEnd = (match.index ?? 0) + match[0].length;
+    if (!followsVerb(phraseEnd) && !reflexiveFollowedByVerb(text, phraseEnd)) continue;
+    const original = text.slice(myselfStart, phraseEnd);
+    pushIssue(issues, makeIssue("grammar-subject-pronoun", myselfStart, phraseEnd, original, `${name} and I`, "grammar", "high", "Check the pronoun case", `Start with “${name} and I” as the subject, not “myself”.`, 0.9, preferences));
+  }
+  // Redundant prepositions: "off of", "inside of", "outside of", and
+  // "where is the station at". The where-pattern needs a verb in the
+  // clause ("where the party at" is a different register, left alone) and
+  // skips the idiom "where it's at". The removed space must be a plain
+  // space, never a line break, so lines never join.
+  for (const match of text.matchAll(/\b(off|inside|outside)\s+(of)\b/giu)) {
+    const word = (match[1] ?? "").toLocaleLowerCase();
+    const of = match[2] ?? "";
+    const ofStart = (match.index ?? 0) + (match[0]?.lastIndexOf(of) ?? 0);
+    if (text[ofStart - 1] !== " ") continue;
+    pushIssue(issues, makeIssue("grammar-redundant-preposition", ofStart - 1, ofStart + of.length, text.slice(ofStart - 1, ofStart + of.length), "", "grammar", "high", "Remove the redundant word", `“Of” adds nothing after “${word}” (“${word} the table”, not “${word} of the table”).`, 0.88, preferences));
+  }
+  for (const match of text.matchAll(/\b[Ww]here\b([^?.!\n]{0,80}?)\s+(at)(?=\s*[?.!])/gu)) {
+    const clause = match[1] ?? "";
+    if (!/\b(is|are|was|were|be|been|do|does|did|have|has|had|can|could|will|would|shall|should|may|might|must)\b/i.test(clause)) continue;
+    if (/(?:it's|it\s+is)\s*$/i.test(clause)) continue;
+    const at = match[2] ?? "";
+    const atStart = (match.index ?? 0) + (match[0]?.lastIndexOf(at) ?? 0);
+    if (text[atStart - 1] !== " ") continue;
+    pushIssue(issues, makeIssue("grammar-redundant-preposition", atStart - 1, atStart + at.length, text.slice(atStart - 1, atStart + at.length), "", "grammar", "high", "Remove the redundant word", `In “where” questions the “at” adds nothing (“Where is the station?”).`, 0.88, preferences));
+  }
+  // "The reason is because" doubles the explanation: reason already says
+  // why, so the clause takes "that".
+  for (const match of text.matchAll(/\breasons?\s+(is|are|was|were)\s+(because)\b/giu)) {
+    const because = match[2] ?? "";
+    const start = (match.index ?? 0) + (match[0]?.lastIndexOf(because) ?? 0);
+    pushIssue(issues, makeIssue("grammar-reason-is-because", start, start + because.length, because, preserveCase(because, "that"), "grammar", "high", "Check the sentence structure", `Use “that” after “the reason is” (“the reason is that …”), not “because”.`, 0.88, preferences));
+  }
+  // Possessive pronouns never take an apostrophe ("its'" -> "its"). A
+  // word that directly follows an opening quote ('its') is quoted speech —
+  // writers quote a word to discuss it — not a typo, so it is left alone.
+  // A genuine typo never abuts an opening quote.
+  const POSSESSIVE_NO_APOSTROPHE: Record<string, string> = {
+    "its'": "its", "your's": "yours", "our's": "ours", "their's": "theirs", "her's": "hers",
+  };
+  const QUOTE_CHARS = new Set(["'", "’", '"', "“", "”", "‘", "«", "»"]);
+  for (const match of text.matchAll(/\b(its'|your's|our's|their's|her's)(?![\p{L}])/giu)) {
+    const original = match[1] ?? "";
+    const start = (match.index ?? 0) + (match[0]?.indexOf(original) ?? 0);
+    const previousChar = text[start - 1] ?? "";
+    if (QUOTE_CHARS.has(previousChar)) continue;
+    const fixed = POSSESSIVE_NO_APOSTROPHE[original.toLocaleLowerCase()] ?? original;
+    pushIssue(issues, makeIssue("grammar-possessive-apostrophe", start, start + original.length, original, preserveCase(original, fixed), "grammar", "high", "Check the apostrophe", `Possessive pronouns never take an apostrophe (“${fixed.toLocaleLowerCase()}”, not “${original.toLocaleLowerCase()}”).`, 0.95, preferences));
+  }
+  // Countable nouns take "fewer"/"many"/"number", not "less"/
+  // "much"/"amount". The noun list is closed, mass nouns never match, and
+  // the idiomatic frames ("less than five", "one less thing", "much
+  // less", "a less ...") are skipped.
+  const COUNTABLE_PLURALS = ["people", "children", "men", "women", "cars", "mistakes", "errors", "problems", "issues", "options", "choices", "things", "items", "cases", "members", "workers", "students", "pupils", "patients", "customers", "clients", "guests", "visitors", "words", "pages", "minutes", "hours", "days", "weeks", "months", "years", "deaths", "injuries", "accidents", "crimes", "jobs", "houses", "homes", "shops", "stores", "schools", "hospitals", "dogs", "cats", "birds", "trees", "flowers", "books", "films", "songs", "girls", "boys"];
+  const COUNTABLE_PATTERN = COUNTABLE_PLURALS.join("|");
+  for (const match of text.matchAll(new RegExp(`\\b(less)\\s+(${COUNTABLE_PATTERN})\\b`, "giu"))) {
+    const less = match[1] ?? "";
+    const before = text.slice(0, match.index ?? 0);
+    if (/\b(?:one|much|a|an)\s+$/i.test(before)) continue;
+    const afterLess = /^\s*([\p{L}']+)/u.exec(text.slice((match.index ?? 0) + less.length))?.[1]?.toLocaleLowerCase() ?? "";
+    if (afterLess === "than" || afterLess === "of") continue;
+    pushIssue(issues, makeIssue("grammar-fewer-less", match.index ?? 0, (match.index ?? 0) + less.length, less, preserveCase(less, "fewer"), "grammar", "high", "Check less vs fewer", `Use “fewer” with countable nouns (“fewer ${match[2]?.toLocaleLowerCase() ?? "items"}”); “less” is for uncountable amounts (“less money”).`, 0.9, preferences));
+  }
+  for (const match of text.matchAll(new RegExp(`\\b(amount)\\s+of\\s+(${COUNTABLE_PATTERN})\\b`, "giu"))) {
+    const amount = match[1] ?? "";
+    pushIssue(issues, makeIssue("grammar-amount-number", match.index ?? 0, (match.index ?? 0) + amount.length, amount, preserveCase(amount, "number"), "grammar", "high", "Check amount vs number", `Use “number” with countable nouns (“number of ${match[2]?.toLocaleLowerCase() ?? "items"}”); “amount” is for uncountables (“amount of money”).`, 0.9, preferences));
+  }
+  for (const match of text.matchAll(new RegExp(`\\b(much)\\s+(of\\s+)?(${COUNTABLE_PATTERN})\\b`, "giu"))) {
+    const much = match[1] ?? "";
+    const ofPart = match[2] ?? "";
+    if (/\b(a|an)\b/i.test(ofPart)) continue;
+    pushIssue(issues, makeIssue("grammar-many-much", match.index ?? 0, (match.index ?? 0) + much.length, much, preserveCase(much, "many"), "grammar", "high", "Check much vs many", `Use “many” with countable nouns (“many ${(match[3] ?? "items").toLocaleLowerCase()}”); “much” is for uncountables (“much time”).`, 0.9, preferences));
+  }
+  const UNCOUNTABLE_TO_SINGULAR: Record<string, string> = {
+    informations: "information", advices: "advice", furnitures: "furniture", equipments: "equipment", luggages: "luggage",
+  };
+  for (const match of text.matchAll(/\b(many)\s+(informations|advices|furnitures|equipments|luggages)\b/giu)) {
+    const many = match[1] ?? "";
+    const noun = match[2] ?? "";
+    const singular = UNCOUNTABLE_TO_SINGULAR[noun.toLocaleLowerCase()] ?? noun;
+    pushIssue(issues, makeIssue("grammar-many-much", match.index ?? 0, (match.index ?? 0) + match[0].length, match[0], `${preserveCase(many, "much")} ${preserveCase(noun, singular)}`, "grammar", "high", "Check much vs many", `“${singular}” is uncountable: “much ${singular}”, not “many ${noun.toLocaleLowerCase()}”.`, 0.9, preferences));
   }
   const trimmed = text.trim();
   const lastSentence = document.sentences[document.sentences.length - 1];

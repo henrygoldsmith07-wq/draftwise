@@ -39,6 +39,11 @@ jobs:
       - run: npm run lint
       - run: npm run extension:build
       - run: git diff --exit-code -- extension/shared-analysis.js extension/shared-provider.js
+      # The extension is loaded unpacked by developers and zipped for the
+      # store. Both break the same way: the manifest names a file that is
+      # not there, and the extension loads with a dead toolbar button and
+      # nothing in the test suite to say so.
+      - run: npm run extension:package
       - name: Run production build
         id: build
         shell: bash

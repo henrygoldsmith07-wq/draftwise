@@ -339,7 +339,7 @@
     panel.style.top = `${top}px`; panel.style.left = `${left}px`;
   }
 
-  function applyIssue(item) {
+  function applyIssue(item, options) {
     if (!item || !activeField) return;
     if (activeField.isContentEditable) {
       const map = dom.buildEditableTextMap(activeField);
@@ -354,7 +354,11 @@
       if (value.slice(item.start, item.end) !== item.original) return;
       activeField.focus(); activeField.setRangeText(item.replacement, item.start, item.end, "end"); activeField.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    panel.hidden = true; window.setTimeout(() => scan(activeField), 80);
+    panel.hidden = true;
+    // The popup asks for the state straight after applying, so it does not
+    // wait for this rescan — it runs one itself, and the two agree.
+    if (options && options.rescan === false) return;
+    window.setTimeout(() => scan(activeField), 80);
   }
 
   /**
@@ -512,10 +516,11 @@
     element.addEventListener("blur", () => {
       window.setTimeout(() => {
         if (document.activeElement !== element && panel) panel.hidden = true;
-        // The badge describes the field the writer is in. Once they have
-        // left it the count is about nothing, and a stale number on the
-        // toolbar is worse than no number at all.
-        if (document.activeElement !== element) reportBadge(0);
+        // The badge is left alone here, on purpose. The floating button keeps
+        // showing its count after the writer looks away, so the badge has to
+        // agree with it — and clearing it on blur meant the number vanished
+        // from the toolbar at the exact moment the writer reached for the
+        // icon to open the popup.
       }, 120);
     });
   }
@@ -578,6 +583,101 @@
       }
     });
   }
+
+  /**
+   * Answer the toolbar popup.
+   *
+   * The popup is the extension's front door, so it asks this script what it
+   * has found rather than working it out for itself: the findings live here,
+   * in the page, where the text is.
+   *
+   * Three messages, and nothing else. Each one is a question about the
+   * current field; none of them can reach anything the writer has not
+   * already allowed, and none of them read the text of the field beyond the
+   * matched suggestion the writer is being shown anyway.
+   */
+  function popupState() {
+    if (siteIsDisabled()) return { ok: false, code: "disabled", reason: "Draftwise is switched off for this site." };
+    if (!activeField) return { ok: false, code: "no-field", reason: "Click into a text field and Draftwise will check what you write.", source: aiStateLabel() };
+    const { items } = prioritiseActive();
+    return {
+      ok: true,
+      source: aiStateLabel(),
+      host: host(),
+      fieldHint: fieldHint(),
+      findings: items.map((item) => ({
+        ruleId: item.ruleId || "",
+        title: item.title || "Writing suggestion",
+        category: item.category || "style",
+        severity: item.severity || "low",
+        explanation: item.explanation || "",
+        original: String(item.original || ""),
+        replacement: String(item.replacement || ""),
+        tier: item.tier || "improve",
+        start: item.start,
+        end: item.end,
+      })),
+    };
+  }
+
+  /**
+   * A description of the field being checked, for the popup's header.
+   *
+   * It is the field's own label — a name attribute, an aria-label, or the
+   * placeholder — and never its value. The value is the writer's draft, and
+   * the popup does not need it to say which field it is talking about.
+   */
+  function fieldHint() {
+    const element = activeField;
+    if (!element) return "";
+    const label = element.getAttribute?.("aria-label") || element.getAttribute?.("name") || element.getAttribute?.("placeholder") || "";
+    return String(label || "").trim();
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // Only the extension's own pages may ask. A web page cannot reach this
+    // listener at all, and this check makes the boundary explicit.
+    if (!sender || sender.id !== chrome.runtime.id) return false;
+    if (!message || typeof message.type !== "string") return false;
+    if (message.type === "draftwise-popup-state") {
+      sendResponse(popupState());
+      return true;
+    }
+    if (message.type === "draftwise-popup-apply") {
+      const finding = message.finding;
+      if (finding && typeof finding === "object") {
+        applyIssue(finding, { rescan: false });
+        // The field has already been written, so the local analysis can run
+        // straight away and the popup gets the real state rather than one
+        // that is a moment out of date.
+        if (activeField) scan(activeField);
+      }
+      sendResponse(popupState());
+      return true;
+    }
+    if (message.type === "draftwise-popup-dismiss") {
+      const finding = message.finding;
+      if (finding && typeof finding === "object") {
+        dismissedKeys = [...new Set([...dismissedKeys, dismissalKey(finding)])];
+        chrome.storage.local.set({ dismissedKeys: dismissedKeys.slice(-200) });
+        render();
+      }
+      sendResponse(popupState());
+      return true;
+    }
+    if (message.type === "draftwise-popup-disable-site") {
+      // The popup cannot name the page — it has no permission to read the
+      // tab's address, and it should not have one. This script already
+      // knows which host it is running on, so the switch is flipped here,
+      // exactly as the in-page panel flips it.
+      settings.disabledSites = [...new Set([...settings.disabledSites, host()])];
+      chrome.storage.local.set({ disabledSites: settings.disabledSites });
+      deactivateCurrentPage();
+      sendResponse({ ok: true, disabled: true });
+      return true;
+    }
+    return false;
+  });
 
   chrome.storage.local.get(["excludedSites", "disabledSites", "disabledFields", "siteAccess", "aiEnabled", "goals", "style", "seenOnboarding", "dismissedKeys"], init);
 })();

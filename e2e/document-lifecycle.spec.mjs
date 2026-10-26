@@ -21,15 +21,25 @@ async function openApp(page) {
   await expect(editor(page)).toBeVisible();
 }
 
-async function newDocument(page) {
-  await page.getByRole("button", { name: "Documents" }).click({ force: true });
+// The rail's "Documents" button is clicked the way a writer clicks it.
+//
+// It used to be a forced click, which skips the check that the element
+// actually receives the click. That is how a real defect stayed hidden: the
+// sticky header can cover the top of the rail once the page scrolls, and a
+// forced click lands on the header instead of the button — the app then
+// quietly stays where it was, and the test fails somewhere else entirely.
+async function openLibrary(page) {
+  await page.getByRole("button", { name: "Documents" }).click();
   await waitForAppReady(page);
+}
+
+async function newDocument(page) {
+  await openLibrary(page);
   await page.getByRole("button", { name: "New document" }).click();
 }
 
 async function openDocumentByTitle(page, title) {
-  await page.getByRole("button", { name: "Documents" }).click({ force: true });
-  await waitForAppReady(page);
+  await openLibrary(page);
   await page.locator(".document-card-main", { hasText: title }).first().click();
 }
 
@@ -77,8 +87,7 @@ test("library search finds a phrase in the middle of a draft", async ({ page }) 
   await titleInput(page).fill("Long draft");
   await page.waitForTimeout(700);
 
-  await page.getByRole("button", { name: "Documents" }).click({ force: true });
-  await waitForAppReady(page);
+  await openLibrary(page);
   const search = page.getByLabel("Search documents");
 
   // The phrase is past the card's opening excerpt, which is all the dashboard

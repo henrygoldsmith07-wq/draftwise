@@ -3808,7 +3808,7 @@ function prioritiseSuggestions(issues, options = {}) {
     const repeatAllowance = Math.max(0, Math.min(12, Math.floor(wordCount / 180) - 1));
     const grouped = [];
     for (const bucket of groups.values()) {
-        const [first, ...rest] = bucket.sort((left, right) => right.rank - left.rank);
+        const [first, ...rest] = bucket.sort((left, right) => right.rank - left.rank || left.issue.start - right.issue.start);
         if (first.issue.ruleId === "spelling-common-typo" || first.issue.ruleId === "spelling-lexicon" || first.issue.ruleId === "consistency-preferred-term") {
             // Spelling and terminology findings are distinct locations of a genuine
             // mistake; each one is a separate fix, so keep them individually.
@@ -3842,7 +3842,15 @@ function prioritiseSuggestions(issues, options = {}) {
     }
     // A rule that keeps firing in one draft is offering the same advice again and
     // again. Show its strongest instances, then stop.
-    grouped.sort((left, right) => right.rank - left.rank);
+    //
+    // Findings that rank the same are ordered by where they sit in the document,
+    // and that tiebreaker is load-bearing rather than cosmetic. The caps below
+    // are spent in this order, so the order decides WHICH findings the writer
+    // sees. A long draft is analysed in chunks that finish in whatever order the
+    // machine gets to them, so without a tiebreaker the same draft could show a
+    // different set of suggestions on a fast laptop than on a slow one — the
+    // review list would change under the writer for no reason they could see.
+    grouped.sort((left, right) => right.rank - left.rank || left.issue.start - right.issue.start);
     const perRuleShown = new Map();
     const tierShown = { "fix-first": 0, improve: 0, optional: 0 };
     const displayed = [];

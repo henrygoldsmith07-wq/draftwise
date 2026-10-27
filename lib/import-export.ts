@@ -7,7 +7,7 @@
  * is rejected before it reaches the editor.
  */
 
-import { exportAsPDF } from "./export-pdf";
+import { exportAsPDF } from "./export-pdf.ts";
 
 /**
  * Two bounds, and the character one is usually tighter: 500,000 ASCII

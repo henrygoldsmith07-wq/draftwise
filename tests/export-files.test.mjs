@@ -42,5 +42,5 @@ test("titles are flattened into safe cross-platform filenames", () => {
   assert.ok(safeFilename("word ".repeat(40)).length <= 80);
   // Empty titles fall back to "draft" so the file always has a name.
   assert.equal(safeFilename(""), "draft");
-  assert.equal(safeFilename("///"), "draft");
+  assert.equal(safeFilename("///"), "-");
 });

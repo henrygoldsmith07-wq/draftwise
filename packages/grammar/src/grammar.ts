@@ -147,8 +147,8 @@ export function findConfusedWords(text: string, preferences: StylePreferences) {
     // the engine tries a lookbehind at every position inside a long
     // non-matching run (a 32 KB whitespace paragraph took ~3.4s here and
     // dominated analyzeLocally), while \b fails first for free. The match
-    // text and capture group are unchanged — verified case-for-case against
-    // the previous pattern in tests/analysis-performance.test.mjs.
+    // text and capture group are unchanged (zero-width assertions at the
+    // same position commute).
     [/\b(?<!\bif\s+you\s+)(?<!\bwhether\s+you\s+)(could)\s+care\s+less\b/giu, "couldn't", "grammar-idiom-care-less", "The idiom is “couldn’t care less” (caring is impossible), not “could care less”.", 1],
   ];
   // In a draft written entirely without letter case the writer has abandoned

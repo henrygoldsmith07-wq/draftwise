@@ -195,9 +195,6 @@ function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
     ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
       ? { preferredReplacements: cleanPreferredReplacements(isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {}) }
       : {}),
-    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
-      ? { preferredReplacements: isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {} }
-      : {}),
   };
 }
 

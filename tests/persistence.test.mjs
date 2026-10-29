@@ -158,6 +158,26 @@ test("an accepted-pattern entry keeps its kind across a reload", () => {
   assert.equal(loaded.style.learned?.[0].kind, "accepted-pattern");
 });
 
+test("persisted document word swaps are cleaned before they return to analysis", () => {
+  const initial = DEFAULT_WORKSPACE();
+  const loaded = readWorkspaceFromStorage(initial, storage({
+    "draftwise:workspace:v2": JSON.stringify({
+      ...initial,
+      goals: {
+        ...initial.goals,
+        preferredReplacements: {
+          " Login ": " sign in ",
+          login: "log in",
+          same: "SAME",
+          ["x".repeat(81)]: "use",
+        },
+      },
+    }),
+  }));
+
+  assert.deepEqual(loaded.goals.preferredReplacements, { Login: "sign in" });
+});
+
 test("failed local writes return an error instead of a false saved state", () => {  const initial = DEFAULT_WORKSPACE();
   const result = writeWorkspaceToStorage(initial, {
     ...storage(),

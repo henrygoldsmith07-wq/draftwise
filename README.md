@@ -102,6 +102,10 @@ evaluation/           Small rule-quality corpus and precision/recall report
 
 Read [docs/architecture.md](docs/architecture.md), [docs/privacy-model.md](docs/privacy-model.md), and [docs/threat-model.md](docs/threat-model.md) before changing the provider or extension boundary.
 
+## Repository hygiene
+
+A number of files in `lib/` (for example `export-multi-format.ts`, `plugin-system.ts`, `realtime-sync.ts`, `emotion-analysis.ts`, `handwriting-recognition.ts`, `word-cloud.ts`) are currently unreferenced: no component, hook, script, or test imports them. They are kept out of the browser bundle by tree-shaking, but `tsc --noEmit` still type-checks them. When touching them, do not assume their exports are wired into the UI — check for importers first (`grep -r "<module-name>" --include=*.ts --include=*.tsx app components hooks lib tests`).
+
 ## Privacy and limitations
 
 Draftwise has no account or server-side draft store in this repository. Local checks never make a network call. If AI is enabled, the selected provider receives the text required for the current analysis or rewrite, plus the configured goals/style context. The provider’s own retention and training policies still apply.

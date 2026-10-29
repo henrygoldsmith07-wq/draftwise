@@ -130,7 +130,11 @@ function goalAlignmentEstimate(text: string, stats: WritingStats, goals?: Writin
   const sentenceFit = Math.max(0, 10 - Math.abs(stats.averageSentenceLength - sentenceMidpoint[goals.audience]) * 0.55);
   const terminologyDensity = words.filter((word) => terminology.has(word)).length / Math.max(1, words.length);
   const terminologyFit = goals.audience === "technical" ? Math.min(7, terminologyDensity * 100) : goals.audience === "academic" ? Math.min(5, terminologyDensity * 65) : Math.max(0, 3 - terminologyDensity * 12);
-  const directWords = words.filter((word) => ["you", "your", "we", "our", "us"].includes(word)).length;
+  // Set membership and a single pass instead of a fresh array plus an
+  // includes-scan per token on the keystroke path.
+  const directAddress = new Set(["you", "your", "we", "our", "us"]);
+  let directWords = 0;
+  for (const word of words) if (directAddress.has(word)) directWords += 1;
   const directness = directWords / Math.max(1, words.length);
   const directAddressFit = ["casual", "general"].includes(goals.audience) || ["friendly", "casual"].includes(goals.tone) ? Math.min(6, directness * 100) : Math.max(0, 3 - directness * 8);
   const contractionCount = words.filter((word) => word.includes("'") || word.includes("’")).length;
@@ -142,7 +146,11 @@ function goalAlignmentEstimate(text: string, stats: WritingStats, goals?: Writin
 function engagementEstimate(text: string, stats: WritingStats, document = parseDocument(text)) {
   if (!stats.words) return 0;
   const words = document.tokens.map((token) => token.lower);
-  const directWords = words.filter((word) => ["you", "your", "we", "our", "us"].includes(word)).length;
+  // Set membership and a single pass instead of a fresh array plus an
+  // includes-scan per token on the keystroke path.
+  const directAddress = new Set(["you", "your", "we", "our", "us"]);
+  let directWords = 0;
+  for (const word of words) if (directAddress.has(word)) directWords += 1;
   const directness = Math.min(15, (directWords / Math.max(1, stats.words)) * 100);
   const sentenceVariety = Math.min(10, new Set(stats.sentenceLengths).size * 1.5);
   const questions = (text.match(/[?]/gu) ?? []).length;

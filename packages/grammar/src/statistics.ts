@@ -82,10 +82,20 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
     ? clamp(206.835 - 1.015 * (words / sentences.length) - 84.6 * (syllables / words))
     : 0;
   const sentenceWordValues = sentences.flatMap((sentence) => sentence.tokens.map((token) => token.lower));
-  const repeatedWords = frequency(sentenceWordValues.filter((word) => !COMMON_WORDS.has(word)));
+  // One pass partitions the words instead of re-scanning the list per
+  // frequency table: the non-common words feed repeatedWords, the common ones
+  // feed commonWords, and the filler scan has to run anyway for fillerWords.
+  const repeatedWordValues: string[] = [];
+  const commonWordValues: string[] = [];
+  for (const word of sentenceWordValues) {
+    if (COMMON_WORDS.has(word)) commonWordValues.push(word);
+    else repeatedWordValues.push(word);
+  }
+  const repeatedWords = frequency(repeatedWordValues);
   const repeatedPhrases = rankByCount(repeatedPhraseCounts(sentences));
-  const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
-  const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
+  const fillerWordValues = sentenceWordValues.filter((word) => FILLER_WORDS.has(word));
+  const fillerWordFrequency = frequency(fillerWordValues);
+  const commonWords = frequency(commonWordValues).slice(0, 8);
   const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] } as SentenceSpan);
   const passiveVoicePattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
   const passiveVoice = [...text.matchAll(/\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu)].length;
@@ -98,7 +108,7 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
     readingTime: words ? Math.max(1, Math.ceil(words / 200)) : 0,
     readability,
     longSentences: sentenceLengths.filter((length) => length > 32).length,
-    fillerWords: sentenceWordValues.filter((word) => FILLER_WORDS.has(word)).length,
+    fillerWords: fillerWordValues.length,
     passiveVoice,
     passiveVoicePercentage: sentences.length ? Math.round((passiveVoiceSentences / sentences.length) * 100) : 0,
     averageSentenceLength: sentenceLengths.length ? Math.round((words / sentenceLengths.length) * 10) / 10 : 0,
@@ -115,9 +125,21 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
 
 export function inferTone(text: string, document = parseDocument(text)): string[] {
   const words = document.tokens.map((token) => token.lower);
-  const confident = words.filter((word) => ["clear", "strong", "will", "can", "decisive", "proven"].includes(word)).length;
-  const cautious = words.filter((word) => ["might", "maybe", "perhaps", "could", "possibly", "uncertain"].includes(word)).length;
-  const direct = words.filter((word) => ["we", "you", "your", "our"].includes(word)).length;
+  // Set membership instead of an array scan per word; the Set literals are
+  // built once per call rather than a fresh array per word. The lists are
+  // disjoint, so one pass with else-if counts exactly what the three filters
+  // counted.
+  const confidentWords = new Set(["clear", "strong", "will", "can", "decisive", "proven"]);
+  const cautiousWords = new Set(["might", "maybe", "perhaps", "could", "possibly", "uncertain"]);
+  const directWordsSet = new Set(["we", "you", "your", "our"]);
+  let confident = 0;
+  let cautious = 0;
+  let direct = 0;
+  for (const word of words) {
+    if (confidentWords.has(word)) confident += 1;
+    else if (cautiousWords.has(word)) cautious += 1;
+    else if (directWordsSet.has(word)) direct += 1;
+  }
   const tone: string[] = [];
   if (confident > cautious) tone.push("confident");
   if (cautious > 0) tone.push("thoughtful");

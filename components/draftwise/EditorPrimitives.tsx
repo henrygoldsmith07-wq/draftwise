@@ -46,12 +46,19 @@ export function HighlightLayer({ text, issues, activeIssueId, spokenRange }: {
     const points = [...boundaries].sort((left, right) => left - right);
 
     const output: ReactNode[] = [];
+    let issueCursor = 0;
     for (let index = 0; index < points.length - 1; index += 1) {
       const start = points[index];
       const end = points[index + 1];
       if (end <= start) continue;
       const slice = text.slice(start, end);
-      const issue = safeIssues.find((item) => item.start <= start && item.end >= end);
+      // The runs are visited left to right, so the owning issue is found by
+      // advancing one cursor instead of rescanning the whole list for each
+      // run: the rescan made the layer O(points × issues) on every keystroke.
+      while (issueCursor < safeIssues.length && safeIssues[issueCursor].end < end) issueCursor += 1;
+      const issue = issueCursor < safeIssues.length && safeIssues[issueCursor].start <= start && safeIssues[issueCursor].end >= end
+        ? safeIssues[issueCursor]
+        : undefined;
       const isSpoken = spoken ? start >= spoken.start && end <= spoken.end : false;
       if (issue) {
         output.push(

@@ -89,6 +89,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
 
   const segmentsRef = useRef<SpeechSegment[]>([]);
   const runRef = useRef(0);
+  const statusRef = useRef<ReadAloudStatus>("idle");
   const spokenTextRef = useRef<string | null>(null);
 
   const cancelEngine = useCallback(() => {
@@ -101,6 +102,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
     spokenTextRef.current = null;
     segmentsRef.current = [];
     cancelEngine();
+    statusRef.current = "idle";
     setStatus("idle");
     setPosition(0);
     setRange(null);
@@ -130,7 +132,10 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
       }
       utterance.onstart = () => {
         if (run !== runRef.current) return;
-        setStatus("speaking");
+        if (statusRef.current !== "paused") {
+          statusRef.current = "speaking";
+          setStatus("speaking");
+        }
         setPosition(current + 1);
         setRange({ start: segment.start, end: segment.end });
       };
@@ -165,6 +170,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
     setTotal(segments.length);
     setPosition(0);
     setRange(null);
+    statusRef.current = "speaking";
     setStatus("speaking");
     setMessage(`Reading ${segments.length} ${segments.length === 1 ? "passage" : "passages"} aloud.`);
     // Cancelling the previous run and speaking in the same task makes Chrome
@@ -176,6 +182,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
   const pause = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.pause();
+    statusRef.current = "paused";
     setStatus("paused");
     setMessage("Reading paused.");
   }, []);
@@ -183,6 +190,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
   const resume = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.resume();
+    statusRef.current = "speaking";
     setStatus("speaking");
     setMessage("Reading resumed.");
   }, []);

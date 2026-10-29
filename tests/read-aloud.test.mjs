@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { chooseVoice, speakableText, speechSegments } from "../lib/read-aloud.ts";
+
+const hookSource = await readFile(new URL("../hooks/useReadAloud.ts", import.meta.url), "utf8");
 
 // Read aloud is only useful if the highlight and the voice agree on what is
 // being said, so the tests are mostly about offsets: every segment must be a
 // contiguous piece of the draft, in order, covering the prose and nothing else.
+
+test("a queued utterance does not undo a pause requested before it starts", () => {
+  const onstart = hookSource.match(/utterance\.onstart = \(\) => \{([\s\S]*?)\n      \};/u)?.[1];
+  assert.ok(onstart, "utterance start handler should exist");
+  assert.match(onstart, /statusRef\.current !== "paused"/u,
+    "the deferred utterance must preserve a pause requested before its onstart event");
+  assert.match(hookSource, /statusRef\.current = "paused";[\s\S]*?setStatus\("paused"\)/u,
+    "pause must update the synchronous status before the queued onstart callback runs");
+});
 
 test("segments are ordered, contiguous pieces of the draft", () => {
   const text = "The first sentence is here. The second one follows it! Is there a third?";

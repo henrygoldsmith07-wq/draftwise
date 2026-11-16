@@ -225,3 +225,15 @@ test("pre-hydration edits win over a late local-storage read", () => {
   assert.equal(resolveHydratedWorkspace(current, loaded, true).activeDocumentId, "typed-before-hydration");
   assert.equal(resolveHydratedWorkspace(current, loaded, false).activeDocumentId, "older-saved-id");
 });
+
+test("workspace sticky defaults clean hostile preferred replacements on hydration", () => {
+  // A second, identical spread used to overwrite the cleaned map with the raw
+  // value, so an oversized stored map reached regex construction and prompts.
+  const initial = DEFAULT_WORKSPACE();
+  const hostile = Object.fromEntries(
+    Array.from({ length: 200 }, (_, index) => [`from${index}`, `to${index}`]));
+  const saved = { ...initial, version: 2, goals: { ...initial.goals, preferredReplacements: hostile } };
+  const loaded = readWorkspaceFromStorage(initial,
+    storage({ [WORKSPACE_STORAGE_KEY]: JSON.stringify(saved) }));
+  assert.equal(Object.keys(loaded.goals.preferredReplacements ?? {}).length, 50);
+});

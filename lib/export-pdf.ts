@@ -5,12 +5,14 @@
  * print dialog, allowing users to save as PDF with zero dependencies.
  */
 
-export async function exportAsPDF(title: string, draft: string, options = {}) {
+import type { PdfExportOptions } from "./export-types.ts";
+
+export async function exportAsPDF(title: string, draft: string, options: PdfExportOptions = {}) {
   const {
     paperSize = 'A4',
     margins = { top: 20, bottom: 20, left: 20, right: 20 },
     fontScale = 1,
-  } = typeof options === 'object' ? options : {};
+  } = options;
 
   // Create unique iframe ID to avoid conflicts
   const iframeId = `pdf-preview-${Date.now()}`;
@@ -22,7 +24,7 @@ export async function exportAsPDF(title: string, draft: string, options = {}) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${escapeHtml(title)}</title>
   <style>
     @page {
       size: ${paperSize};
@@ -80,9 +82,10 @@ export async function exportAsPDF(title: string, draft: string, options = {}) {
 </html>`;
 
   return new Promise((resolve, reject) => {
+    let iframe: HTMLIFrameElement | null = null;
     try {
       // Create iframe to render content
-      const iframe = document.createElement('iframe');
+      iframe = document.createElement('iframe');
       iframe.id = iframeId;
       iframe.style.position = 'fixed';
       iframe.style.top = '-9999px';
@@ -93,20 +96,22 @@ export async function exportAsPDF(title: string, draft: string, options = {}) {
       document.body.appendChild(iframe);
 
       // Write content to iframe
-      const iframeDoc = (iframe.contentWindow || iframe.contentDocument?.document).document;
+      const iframeDoc = iframe.contentDocument ?? iframe.contentWindow?.document;
+      if (!iframeDoc) throw new Error('Unable to access the print iframe document');
       iframeDoc.open();
       iframeDoc.write(htmlContent);
       iframeDoc.close();
 
-      // Clean up iframe after print dialog closes
+      // Clean up after the print dialog closes. Removing through the element
+      // avoids depending on a global document that may be gone by then.
       iframe.onload = () => {
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-        }, 1000);
+        setTimeout(() => iframe?.remove(), 1000);
       };
 
       resolve({ success: true });
     } catch (error) {
+      // A failed print must not leave a hidden, off-screen iframe in the page.
+      iframe?.remove();
       console.error('PDF export failed:', error);
       reject(error);
     }

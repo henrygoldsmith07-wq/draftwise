@@ -729,6 +729,29 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * When every chunk fails, a soft "invalid-json" failure is not a reason to
+ * alarm the writer — local analysis stays available. A hard failure among the
+ * other chunks (auth, rate limit, timeout, CORS, bad model) is: checking only
+ * the first rejection used to hide it behind a harmless-looking JSON error.
+ */
+function rethrowHardProviderFailure(results: Array<PromiseSettledResult<unknown>>) {
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  const hard = failures.filter((reason) =>
+    !(reason instanceof ProviderError && reason.code === "invalid-json"));
+  if (!hard.length) return;
+  const priority = ["unauthorized", "rate-limited", "invalid-model", "timeout", "cors"];
+  const rank = (reason: unknown) => {
+    if (!(reason instanceof ProviderError)) return 0;
+    const index = priority.indexOf(reason.code);
+    return index === -1 ? 1 : index;
+  };
+  hard.sort((left, right) => rank(left) - rank(right));
+  throw hard[0];
+}
+
 export interface ProviderRequestMetrics {
   requests: number;
   httpRequests: number;
@@ -881,10 +904,7 @@ export async function analyzeWithProvider(
   }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
-  if (!successful.length) {
-    const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
-  }
+  if (!successful.length) rethrowHardProviderFailure(settled);
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
       .map((issue) => mapChunkIssue(issue, chunk, text))
@@ -1011,13 +1031,25 @@ function rangesOverlap(left: ProtectedRange, right: ProtectedRange) {
 function protectedKindsAllowedByInstruction(instruction: string) {
   const value = String(instruction || "");
   const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
-  const directNegation = String.raw`\b(?:do\s+not|don't|dont|never)\s+(?:change|update|replace|adjust|convert|reformat|correct)\b(?:(?![,.;!?]).){0,100}`;
-  const withoutChange = String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting)\b(?:(?![,.;!?]).){0,100}`;
+  const gap = String.raw`(?:(?![,.;!?]).){0,100}`;
+  // Negation must win wherever it appears. Previously only "do not change X"
+  // and "without changing X" were recognised, so "change the wording but not
+  // the dates" still allowed the provider to rewrite a protected date.
+  const denialScopes = [
+    String.raw`\b(?:do\s+not|don't|dont|never|does\s+not|doesn't|must\s+not|mustn't|should\s+not|shouldn't)\s+(?:change|update|replace|adjust|convert|reformat|correct|touch|alter|edit)\b`,
+    String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting|touching|altering|editing)\b`,
+    String.raw`\b(?:but\s+)?not\b(?:(?:the|any|those|these)\s+)?`,
+    String.raw`\bexcept(?:\s+for)?\b`,
+    String.raw`\bother\s+than\b`,
+    String.raw`\bkeep\b`,
+    String.raw`\b(?:preserve|retain)\b`,
+  ];
+  const leaveTail = String.raw`(?:(?![,.;!?]).){0,60}\b(?:untouched|unchanged|alone|as\s+is)\b`;
   const allowed = new Set<ProtectedTokenKind>();
-  const permits = (target: string) => {
-    const denied = new RegExp(directNegation + target, "iu").test(value) || new RegExp(withoutChange + target, "iu").test(value);
-    return !denied && new RegExp(edit + target, "iu").test(value);
-  };
+  const denies = (target: string) =>
+    denialScopes.some((scope) => new RegExp(scope + gap + target, "iu").test(value))
+    || new RegExp(String.raw`\bleave\b` + gap + target + leaveTail, "iu").test(value);
+  const permits = (target: string) => !denies(target) && new RegExp(edit + target, "iu").test(value);
   if (permits(String.raw`\bdates?\b`)) allowed.add("date");
   if (permits(String.raw`\b(?:percentage|percent)s?\b`)) allowed.add("percentage");
   if (permits(String.raw`\bcurrenc(?:y|ies)\b`)) allowed.add("currency");
@@ -2040,10 +2072,7 @@ export async function analyzeWithTriage(
   }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
-  if (!successful.length) {
-    const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
-  }
+  if (!successful.length) rethrowHardProviderFailure(settled);
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
       .map((issue) => mapChunkIssue(issue, chunk, text))

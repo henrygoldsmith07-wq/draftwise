@@ -37,7 +37,7 @@ import { buildBackup, readRawActivityLog, serializeBackup, type RestorableBackup
 import { shouldShowBackupReminder } from "@/lib/backup-reminder";
 import { resolveDocumentStyle } from "@/lib/documents";
 import { WritingActivityStore } from "@/lib/activity-store";
-import { downloadFile, exportAsMarkdown, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
+import { downloadFile, exportAsMarkdown, exportAsPDFWrapper, exportAsText, importDocument, oversizedImport } from "@/lib/import-export";
 import { useDocuments } from "@/hooks/useDocuments";
 import { useAnalysis } from "@/hooks/useAnalysis";
 import { useDraftPersistence } from "@/hooks/useDraftPersistence";
@@ -49,7 +49,7 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { noteServiceWorkerUnavailable, registerServiceWorker, shouldRegisterServiceWorker } from "@/lib/service-worker";
 import { getAiReviewStatus, type Dialect, type PrioritisedIssue, type ProviderSettings, type StylePreferences, type WritingGoals, type WritingIssue } from "@/packages/types/src";
 import { DEFAULT_WORKSPACE } from "@/packages/types/src";
-import { ToastProvider } from "@/components/draftwise/utilities/Toast";
+import { showToast, ToastProvider } from "@/components/draftwise/utilities/Toast";
 
 const SAMPLE_DOCUMENT = `The best writing systems make the next sentence easier to write. Draftwise keeps your words private by default, then gives you a clear path from rough idea to finished copy.
 
@@ -128,15 +128,6 @@ export default function Home() {
   // Loading state tracking for progressive UX
   const [loadingState, setLoadingState] = useState<'splash' | 'documents' | 'editor' | 'ready'>('splash');
   
-  // Track hydration states progressively
-  useEffect(() => {
-    if (hydrated && !documents.hydrated) {
-      setLoadingState('documents');
-    } else if (hydrated && documents.hydrated) {
-      setLoadingState('ready');
-    }
-  }, [hydrated, documents.hydrated]);
-  
   // Initial splash for first render
   useEffect(() => {
     if (!hydrated) {
@@ -152,6 +143,17 @@ export default function Home() {
   // explicit action (loadSampleDocument); it is never persisted uninvited.
   const documents = useDocuments({ title: "Untitled draft", draft: "" }, hydrated, workspace.activeDocumentId);
   const draftText = documents.active?.draft ?? "";
+
+  // Track hydration states progressively. This must run after useDocuments:
+  // the dependency array reads documents during render, so declaring it above
+  // throws a temporal-dead-zone ReferenceError on the first render.
+  useEffect(() => {
+    if (hydrated && !documents.hydrated) {
+      setLoadingState('documents');
+    } else if (hydrated && documents.hydrated) {
+      setLoadingState('ready');
+    }
+  }, [hydrated, documents.hydrated]);
   const draftTitle = documents.active?.title ?? "Untitled draft";
   // Goals belong to the document being written, not to the app globally: an
   // academic essay and a casual email need different audiences, intents and
@@ -647,11 +649,13 @@ export default function Home() {
    * surfaces confirm their writes; a failure on either reports failure while
    * the text stays in memory and retryable.
    */
-  const saveAll = useCallback(() => {
+  const saveAll = useCallback(async () => {
+    // Await the document writes: saveStatus is React state updated by flush(),
+    // so reading it on the next line used to report success for a failed write.
+    const writesSucceeded = await documents.flush();
     const settingsResult = saveNow();
-    void documents.flush();
     if (!settingsResult.ok) return settingsResult;
-    if (documents.saveStatus === "error") return { ok: false as const, error: "Could not save the document locally." };
+    if (!writesSucceeded) return { ok: false as const, error: "Could not save the document locally." };
     return { ok: true as const };
   }, [documents, saveNow]);
 
@@ -735,9 +739,15 @@ export default function Home() {
     });
   }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
-  const exportDocument = useCallback((id: string, format: "txt" | "md") => {
+  const exportDocument = useCallback((id: string, format: "txt" | "md" | "pdf") => {
     const target = documents.documents.find((document) => document.id === id);
     if (!target) return;
+    if (format === "pdf") {
+      void exportAsPDFWrapper(target.title, target.draft).then((result) => {
+        if (!result.success) showToast({ message: result.error ?? "PDF export failed", type: "error" });
+      });
+      return;
+    }
     const file = format === "md" ? exportAsMarkdown(target.title, target.draft) : exportAsText(target.title, target.draft);
     downloadFile(file);
   }, [documents.documents]);
@@ -920,15 +930,14 @@ export default function Home() {
     return { ok: true as const };
   }, [activityStore, cancelRewrite, documents, saveNow, setWorkspace]);
 
-  const clearLocalData = useCallback(() => {
+  const clearLocalData = useCallback(async () => {
     cancelRewrite();
-    void clearAllLocalData({
-      documentBackend: documents.backend,
-      onClearMemory: () => {
-        clearPersistedData();
-        void documents.clearAll({ title: "Untitled draft", draft: "" });
-      },
-    });
+    // Reset the live store first and await it. A fire-and-forget clear could
+    // persist its fresh seed after the sweep below removed the fallback key,
+    // leaving a document behind after "cleared everything".
+    await documents.clearAll({ title: "Untitled draft", draft: "" });
+    clearPersistedData();
+    await clearAllLocalData({ documentBackend: documents.backend });
     // Clearing local data clears every undo history too.
     historyStore.clear();
     setSettingsOpen(false);
@@ -1099,7 +1108,7 @@ export default function Home() {
             {shouldShowDashboardSkeleton ? (
               <DocumentDashboardSkeleton />
             ) : (
-              view === "home" ? <DocumentDashboard summaries={documents.summaries} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null
+              view === "home" ? <DocumentDashboard summaries={documents.summaries} documents={documents.documents} activeId={documents.activeId} importError={importError} loading={loading} onOpen={openDocument} onNew={startNewDocument} onSample={loadSampleDocument} onDuplicate={duplicateDocument} onDelete={deleteDocument} onImport={importFromFile} onExport={exportDocument} onHistory={(id) => { documents.open(id); setView("history"); }} /> : null
             )}
             
             {shouldShowEditorSkeleton ? (
@@ -1109,14 +1118,14 @@ export default function Home() {
             )}
             
             {view === "insights" ? <InsightsView analysis={analysis} goals={activeGoals} style={activeStyle} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={() => setSettingsOpen(true)} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
-            {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { documents.restoreSnapshot(documents.activeId, snapshot.id); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
+            {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { const before = documents.active?.draft ?? ""; documents.restoreSnapshot(documents.activeId, snapshot.id); historyStore.reset(documents.activeId, [before, snapshot.text]); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
             {view === "extension" ? <ExtensionGuide onOpenSettings={() => setSettingsOpen(true)} /> : null}
           </main>
         </div>
         </>
       )}
       
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} theme={themeName} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
       <KeyboardShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <NewDraftDialogComponent open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
       <ClearDataDialogComponent open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />

@@ -52,6 +52,7 @@ export function DocumentDashboard({ summaries, documents, activeId, importError,
 }) {
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [openExportId, setOpenExportId] = useState<string | null>(null);
   // Fresh installs (and writers who deleted everything) own no words yet.
   // That is the moment for an explicit choice — blank page or sample —
   // instead of foreign prose or a bare empty state.
@@ -88,34 +89,60 @@ export function DocumentDashboard({ summaries, documents, activeId, importError,
   <Button size="sm" variant="ghost" aria-label={`Duplicate ${document.title}`} onClick={() => onDuplicate(document.id)}>
     <Copy size={13} />
   </Button>
-  <div className="export-dropdown">
-    <Button 
-      size="sm" 
-      variant="ghost" 
+  <div
+    className={`export-dropdown${openExportId === document.id ? " open" : ""}`}
+    onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpenExportId(null);
+    }}
+    onKeyDown={(event) => {
+      if (event.key === "Escape" && openExportId === document.id) {
+        event.stopPropagation();
+        setOpenExportId(null);
+        event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    }}
+  >
+    <Button
+      size="sm"
+      variant="ghost"
       aria-label={`Export ${document.title}`}
+      aria-haspopup="menu"
+      aria-expanded={openExportId === document.id}
+      aria-controls={`export-menu-${document.id}`}
       title="Export options"
+      onClick={() => setOpenExportId((current) => current === document.id ? null : document.id)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          const trigger = event.currentTarget;
+          setOpenExportId(document.id);
+          requestAnimationFrame(() => {
+            trigger.closest(".export-dropdown")?.querySelector<HTMLButtonElement>(".dropdown-item")?.focus();
+          });
+        }
+      }}
     >
       <Download size={13} />
     </Button>
-    <div className="dropdown-menu" role="menu">
-      <button 
-        className="dropdown-item" 
+    <div className="dropdown-menu" role="menu" id={`export-menu-${document.id}`}>
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "md")}
+        onClick={() => { onExport(document.id, "md"); setOpenExportId(null); }}
       >
         Export as Markdown (.md)
       </button>
-      <button 
-        className="dropdown-item" 
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "txt")}
+        onClick={() => { onExport(document.id, "txt"); setOpenExportId(null); }}
       >
         Export as Plain Text (.txt)
       </button>
-      <button 
-        className="dropdown-item" 
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "pdf")}
+        onClick={() => { onExport(document.id, "pdf"); setOpenExportId(null); }}
       >
         Export as PDF (.pdf)
       </button>

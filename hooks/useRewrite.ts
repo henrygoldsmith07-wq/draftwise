@@ -103,10 +103,11 @@ export function useRewrite() {
    *
    * A suggested rewrite is a draft, not an instruction. Being able to take it
    * and finish it by hand is the difference between a preview the writer
-   * approves and a preview the writer works around. The edited text goes
-   * through exactly the same validation as the suggestion on the way out, so a
-   * writer cannot apply an empty replacement or reintroduce the original text
-   * by accident.
+   * approves and a preview the writer works around. Hand-edited text is
+   * checked for being empty or identical to the original before it can be
+   * applied; the provider-output validation (markup, protected tokens) has
+   * already run on the suggestion and does not need repeating on the writer's
+   * own wording.
    */
   const editReplacement = useCallback((value: string) => {
     setPreview((current) => {

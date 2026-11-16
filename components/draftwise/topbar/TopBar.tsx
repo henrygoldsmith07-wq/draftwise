@@ -10,7 +10,7 @@ interface TopBarProps {
   saveError?: string | null;
   onSaveTitle: (title: string) => void;
   onOpenSettings: () => void;
-  isPrivate: boolean;
+  isPrivate?: boolean;
 }
 
 export function TopBar({ 

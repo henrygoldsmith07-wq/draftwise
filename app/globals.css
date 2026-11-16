@@ -556,6 +556,7 @@ button { cursor: pointer; }
 }
 
 .export-dropdown:hover .dropdown-menu,
+.export-dropdown.open .dropdown-menu,
 .dropdown-menu:focus-within {
   display: block;
 }

@@ -7,7 +7,7 @@
  * is rejected before it reaches the editor.
  */
 
-import { exportAsPDF } from "./export-pdf";
+import { exportAsPDF } from "./export-pdf.ts";
 
 /**
  * Two bounds, and the character one is usually tighter: 500,000 ASCII
@@ -105,5 +105,7 @@ export function downloadFile({ filename, content, type }: { filename: string; co
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  // Revoking in the same task can cancel the download before the browser has
+  // started it. Release the URL on the next task instead; nothing else uses it.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

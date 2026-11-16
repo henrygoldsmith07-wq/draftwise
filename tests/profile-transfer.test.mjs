@@ -127,3 +127,14 @@ test("enormous files are bounded, not trusted", () => {
   assert.equal(result.ok, true);
   assert.ok(result.merged.personalDictionary.length <= 2000);
 });
+
+test("an additive import never overwrites the writer's own dialect", () => {
+  // The promise is "nothing already here was changed"; dialect is part of the
+  // existing profile, even though it travels in the export for validation.
+  const current = profiled({ dialect: "en-GB" });
+  const incoming = exportProfile(profiled({ dialect: "en-US", personalDictionary: ["newterm"] }));
+  const result = importProfile(current, JSON.stringify(incoming));
+  assert.equal(result.ok, true);
+  assert.equal(result.merged.dialect, "en-GB");
+  assert.match(result.message, /Nothing already here was changed/u);
+});

@@ -64,3 +64,25 @@ test("motion respects prefers-reduced-motion", async () => {
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
   assert.match(css, /\.loading-pulse, \.status-spinner \{ animation: none;/u);
 });
+
+test("the export menu opens by keyboard, not only by hover", async () => {
+  const dashboard = await readFile(
+    new URL("../components/draftwise/DocumentDashboard.tsx", import.meta.url), "utf8");
+  const css = await readFile(cssUrl, "utf8");
+
+  // The menu was display:none until :hover, and its trigger had no click or key
+  // handler. A keyboard user could focus the button but could never reach the
+  // three export formats, so a core journey was mouse-only.
+  const trigger = dashboard.match(
+    /<Button[\s\S]*?aria-label=\{`Export \$\{document\.title\}`\}[\s\S]*?<\/Button>/u);
+  assert.ok(trigger, "export trigger should exist");
+  assert.match(trigger[0], /aria-haspopup="menu"/u);
+  assert.match(trigger[0], /aria-expanded=\{openExportId === document\.id\}/u);
+  assert.match(trigger[0], /onClick=\{\(\) => setOpenExportId/u);
+  assert.match(trigger[0], /event\.key === "ArrowDown"/u);
+
+  const container = dashboard.match(/<div\s+className=\{`export-dropdown[\s\S]*?event\.key === "Escape"/u);
+  assert.ok(container, "the dropdown should close on Escape");
+  assert.match(css, /\.export-dropdown\.open \.dropdown-menu/u,
+    "the click/keyboard-opened menu must be visible, not just the hovered one");
+});

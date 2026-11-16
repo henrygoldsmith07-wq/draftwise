@@ -450,17 +450,42 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
   private current: DocumentStoreBackend;
   private storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   private fallbackKey: string;
+  private tierKey: string;
+  private usedTiers: DocumentStoreBackend[] = [];
   private memory = new MemoryDocumentBackend();
   private demoted = false;
 
   constructor(storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">, fallbackKey = "draftwise:documents:v1") {
     this.storage = storage;
     this.fallbackKey = fallbackKey;
-    this.current = typeof indexedDB !== "undefined"
-      ? new IndexedDbDocumentBackend()
-      : storage
-        ? new LocalStorageDocumentBackend(storage, fallbackKey)
-        : this.memory;
+    this.tierKey = `${fallbackKey}:tier`;
+    let remembered: string | null = null;
+    try {
+      remembered = storage?.getItem(this.tierKey) ?? null;
+    } catch {
+      // A storage object that cannot be read can hardly be trusted; fall
+      // through to the normal tier selection and let the failure surface.
+    }
+    this.current = remembered === "localstorage" && storage
+      ? new LocalStorageDocumentBackend(storage, fallbackKey)
+      : typeof indexedDB !== "undefined"
+        ? new IndexedDbDocumentBackend()
+        : storage
+          ? new LocalStorageDocumentBackend(storage, fallbackKey)
+          : this.memory;
+    this.trackCurrent();
+  }
+
+  private trackCurrent() {
+    if (!this.usedTiers.includes(this.current)) this.usedTiers.push(this.current);
+  }
+
+  private rememberLocalStorageTier() {
+    try {
+      this.storage?.setItem(this.tierKey, "localstorage");
+    } catch {
+      // The tier is already in use; only the cross-reload hint is unavailable.
+    }
   }
 
   get mode(): DocumentBackendMode {
@@ -483,12 +508,17 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
       try {
         for (const document of documents) await localTier.put(document);
         this.current = localTier;
+        this.trackCurrent();
+        // Remember the choice: a fresh backend must not prefer an older,
+        // still-readable IndexedDB copy over the newer localStorage library.
+        this.rememberLocalStorageTier();
         return;
       } catch {
         // Fall through to memory; the document set is retried there.
       }
     }
     this.current = this.memory;
+    this.trackCurrent();
     for (const document of documents) {
       await this.memory.put(document);
     }
@@ -537,6 +567,8 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
           const localTier = new LocalStorageDocumentBackend(this.storage, this.fallbackKey);
           await localTier.remove(id);
           this.current = localTier;
+          this.trackCurrent();
+          this.rememberLocalStorageTier();
           return;
         } catch {
           // fall through to memory attempt below
@@ -553,7 +585,7 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
   }
 
   async close(): Promise<void> {
-    await this.current.close?.();
+    for (const tier of this.tiers()) await tier.close?.();
   }
 
   /**
@@ -572,16 +604,22 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
         failures.push(error);
       }
     }
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) {
+    if (failures.length) {
+      if (failures.length === 1) throw failures[0];
       throw new Error(`Failed to clear ${failures.length} document storage tiers.`);
+    }
+    try {
+      this.storage?.removeItem(this.tierKey);
+    } catch {
+      // The documents are gone; a stale tier hint would only change which
+      // empty tier is tried first after a reload.
     }
   }
 
   private tiers(): DocumentStoreBackend[] {
-    const tiers: DocumentStoreBackend[] = [this.current];
-    if (this.memory && this.memory !== this.current) tiers.push(this.memory);
-    return tiers;
+    const all = [...this.usedTiers];
+    if (!all.includes(this.memory)) all.push(this.memory);
+    return all.filter((tier, index) => all.indexOf(tier) === index);
   }
 }
 

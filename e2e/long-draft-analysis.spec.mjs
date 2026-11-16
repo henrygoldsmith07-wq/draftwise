@@ -136,11 +136,16 @@ test("a long draft is analysed across the whole document, not just near the edit
   });
   expect(activeIndex).toBe(cards - 1);
 
-  // And the caret must have moved forward into the document at some point
-  // along the way, so the findings are not all clustered near the edit that
-  // triggered the analysis.
+  // The review list is ranked by severity first, and by position within a
+  // tier, so the caret does not advance at every step: the walk moves on to
+  // the next tier of findings when the current tier runs out, and the review
+  // cursor wraps at the end of the list.
+  //
+  // What has to hold is that the walk reaches a long way into the draft. The
+  // findings shown come from all over the document, not from around the edit
+  // that triggered the analysis.
   expect(firstCaret).toBeGreaterThan(0);
-  expect(furthestCaret).toBeGreaterThan(firstCaret);
+  expect(furthestCaret).toBeGreaterThan(draft.length / 4);
 
   // Suppressed findings are still accounted for, so the writer is told the
   // difference between "clean" and "more than we are showing you".

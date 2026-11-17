@@ -24,7 +24,7 @@ function fail(message) {
 }
 
 function collectFiles(manifest) {
-  const files = new Set(["manifest.json", manifest.background?.service_worker, manifest.options_ui?.page]);
+  const files = new Set(["manifest.json", manifest.background?.service_worker, manifest.options_ui?.page, manifest.action?.default_popup]);
   for (const icon of [...Object.values(manifest.icons ?? {}), ...Object.values(manifest.action?.default_icon ?? {})]) {
     files.add(icon);
   }

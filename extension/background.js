@@ -232,7 +232,11 @@ chrome.permissions.onRemoved.addListener(() => {
     .catch(() => syncRegisteredSites());
 });
 
-chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+// The toolbar button opens the popup, which shows what Draftwise has found
+// in the field the writer is in. It used to open the options page in a new
+// tab, which took the writer away from what they were writing to show them
+// a settings form. `chrome.action.onClicked` does not fire while a popup is
+// declared, so there is nothing to listen for here.
 
 // A badge belongs to the page that produced it. When the writer navigates,
 // the count they were looking at is about a document they have left, so it

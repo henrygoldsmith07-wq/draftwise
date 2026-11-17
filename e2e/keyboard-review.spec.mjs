@@ -42,8 +42,10 @@ test("ctrl+arrow moves the review cursor through suggestions", async ({ page }) 
   await expect(cards.nth(0)).toHaveClass(/is-active/);
 
   // A live-region announcement is the only feedback a keyboard user gets.
-  await expect(page.locator("p.sr-only[role=\"status\"]")).toContainText(/of \d+/u);
-  await expect(page.locator("p.sr-only[role=\"status\"]")).toContainText(/Enter to accept/u);
+  // The page-level live region is the single announcer; the editor's duplicate
+  // was removed so screen readers do not hear every review move twice.
+  await expect(page.locator("div[role=\"status\"].sr-only")).toContainText(/of \d+/u);
+  await expect(page.locator("div[role=\"status\"].sr-only")).toContainText(/Enter to accept/u);
 
   await page.keyboard.press("Control+ArrowDown");
   await expect(cards.nth(1)).toHaveClass(/is-active/);
@@ -176,8 +178,8 @@ test("the shortcuts dialog documents every review binding it implements", async 
   for (const label of [
     /Next suggestion/u,
     /Previous suggestion/u,
-    /Accept the current suggestion/u,
-    /Ignore the current suggestion/u,
+    /Accept suggestion/u,
+    /Dismiss suggestion/u,
   ]) {
     await expect(dialog).toContainText(label);
   }

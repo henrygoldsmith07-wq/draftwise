@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
+import { readFile } from "node:fs/promises";
 import {
   analyzeWithProvider,
   fetchWithRetry,
@@ -627,5 +629,97 @@ test("negating one protected kind does not authorize it when another kind is cha
     assert.equal(result.replacement, replacement);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+// Prototype-chain category keys ("__proto__", "constructor", "toString", ...)
+// must never resolve through Object.prototype. A bare CATEGORY_ALIASES[key]
+// lookup would return an object/function, which later crashes React when the
+// category is rendered and corrupts category lookups and filters.
+const VALID_ISSUE_CATEGORIES = new Set([
+  "spelling", "grammar", "punctuation", "clarity", "conciseness", "word choice",
+  "repetition", "tone", "formality", "readability", "fluency", "passive voice",
+  "sentence structure", "consistency", "capitalization",
+]);
+
+test("provider issues with prototype-chain categories are rejected while legitimate aliases survive", () => {
+  const source = "A repeatd and recieve test.";
+  const base = {
+    start: 2, end: 9, original: "repeatd", replacement: "repeated",
+    severity: "high", confidence: 0.99, ruleId: "spelling-common-typo",
+    title: "Spelling", explanation: "Fix it.",
+  };
+
+  // Every Object.prototype key must be rejected rather than leaking an
+  // inherited (non-string) value into a WritingIssue.
+  for (const category of ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf", "__defineGetter__"]) {
+    const issues = parseAnalysisIssues({ issues: [{ ...base, category }] }, source);
+    assert.deepEqual(issues, [], `category "${category}" must be rejected`);
+  }
+
+  // Unknown but harmless-looking categories remain rejected.
+  assert.deepEqual(parseAnalysisIssues({ issues: [{ ...base, category: "not-a-category" }] }, source), []);
+
+  // Legitimate aliases (and case/whitespace variants) still normalise to valid
+  // IssueCategory values.
+  const aliases = [
+    ["style", "clarity"],
+    ["wordiness", "conciseness"],
+    ["grammar", "grammar"],
+    ["capitalization", "capitalization"],
+    ["passive voice", "passive voice"],
+    ["  STYLE  ", "clarity"],
+  ];
+  for (const [alias, expected] of aliases) {
+    const issues = parseAnalysisIssues({ issues: [{ ...base, category: alias }] }, source);
+    assert.equal(issues.length, 1, `alias "${alias}" should survive`);
+    assert.equal(issues[0].category, expected);
+    assert.ok(VALID_ISSUE_CATEGORIES.has(issues[0].category));
+    assert.equal(typeof issues[0].category, "string");
+  }
+});
+
+test("generated provider bundle rejects prototype-chain categories identically to source", async () => {
+  const bundle = await readFile(new URL("../extension/shared-provider.js", import.meta.url), "utf8");
+
+  // The generated artefact must carry the same hardening, not just the source.
+  assert.match(bundle, /hasOwnProperty\.call\(CATEGORY_ALIASES, key\)/u);
+  assert.match(bundle, /VALID_CATEGORIES\.has\(category\)/u);
+
+  // Use a word local analysis will not flag, so an otherwise-valid AI issue
+  // survives the local/AI merge. That makes category validation the only
+  // reason an issue can be dropped, and lets the legitimate alias act as a
+  // positive control.
+  const source = "A simple sentence.";
+  const issue = (category) => ({
+    start: 2, end: 8, original: "simple", replacement: "plain", category,
+    severity: "high", confidence: 0.99, ruleId: "word-choice",
+    title: "Word choice", explanation: "Consider a simpler word.",
+  });
+
+  for (const category of ["__proto__", "constructor", "toString", "style"]) {
+    const context = {
+      URL, console, DOMException, AbortController, setTimeout, clearTimeout, TextDecoder, TextEncoder,
+      fetch: async () => new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ issues: [issue(category)], tone: [], scores: {} }) } }],
+      }), { status: 200 }),
+    };
+    vm.runInNewContext(bundle, context, { filename: "shared-provider.js" });
+    assert.equal(typeof context.DraftwiseProvider?.analyzeWithProvider, "function");
+
+    const result = await context.DraftwiseProvider.analyzeWithProvider(source, goals, settings, { maxChunkChars: 2000, contextWindow: 0 });
+    const aiIssues = result.issues.filter((candidate) => candidate.source === "ai");
+    if (category === "style") {
+      assert.equal(aiIssues.length, 1, "legitimate alias must survive in the bundle");
+      assert.equal(aiIssues[0].category, "clarity");
+    } else {
+      // aiIssues is created inside the vm realm, so compare length rather than
+      // using deepEqual (strict) across realms' distinct Array prototypes.
+      assert.equal(aiIssues.length, 0, `bundle must reject category "${category}"`);
+    }
+    for (const candidate of aiIssues) {
+      assert.equal(typeof candidate.category, "string");
+      assert.ok(VALID_ISSUE_CATEGORIES.has(candidate.category));
+    }
   }
 });

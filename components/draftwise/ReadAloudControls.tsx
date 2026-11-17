@@ -42,18 +42,25 @@ export function ReadAloudControls({ controller, hasText, disabled }: {
         // The accessible name starts with the visible word on purpose: axe's
         // label-content-name-mismatch requires the name to contain the button's
         // visible text, and "Listen" alone does not say what will be read.
-        <Button
-          className="read-aloud-start"
-          variant="ghost"
-          size="sm"
-          disabled={disabled || Boolean(unavailable)}
-          title={unavailable}
-          aria-label="Listen to the draft"
-          onClick={controller.start}
-        >
-          <Headphones size={14} aria-hidden="true" />
-          <span>Listen</span>
-        </Button>
+        // A disabled button does not show its own title tooltip in most
+        // browsers, so mirror the reason onto the wrapper as well: hovering the
+        // dead button now reveals why it cannot be used. Keep the button's own
+        // title too (tests and assistive tech still read it) — the wrapper is
+        // what makes the explanation discoverable to a mouse user.
+        <span title={unavailable}>
+          <Button
+            className="read-aloud-start"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || Boolean(unavailable)}
+            title={unavailable}
+            aria-label="Listen to the draft"
+            onClick={controller.start}
+          >
+            <Headphones size={14} aria-hidden="true" />
+            <span>Listen</span>
+          </Button>
+        </span>
       ) : (
         <>
           <Button

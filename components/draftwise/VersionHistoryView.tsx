@@ -95,7 +95,7 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
             <Button size="sm" variant="ghost" onClick={() => setPreviewId(previewId === snapshot.id ? null : snapshot.id)}>{previewId === snapshot.id ? "Hide preview" : "Preview"}</Button>
             {confirmRestoreId === snapshot.id ? (
               <>
-                <Button size="sm" variant="ghost" onClick={() => { onRestore(snapshot); setConfirmRestoreId(null); }}>Confirm restore</Button>
+                <Button size="sm" variant="default" onClick={() => { onRestore(snapshot); setConfirmRestoreId(null); }}>Confirm restore</Button>
                 <Button size="sm" variant="ghost" onClick={() => setConfirmRestoreId(null)}>Cancel</Button>
               </>
             ) : (
@@ -108,7 +108,7 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
     </div>
 
     {preview ? (
-      <div ref={previewDialogRef} className="history-preview" role="dialog" aria-modal="true" tabIndex={-1} aria-label="Version preview">
+      <div ref={previewDialogRef} className="history-preview" role="dialog" tabIndex={-1} aria-label="Version preview">
         <div className="history-preview-header">
           <strong>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</strong>
           <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)}><X size={15} /></button>

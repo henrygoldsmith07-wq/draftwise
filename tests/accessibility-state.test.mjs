@@ -52,7 +52,7 @@ test("mobile layout hides labels visually without removing them from the a11y tr
   assert.match(css, /clip-path: inset\(50%\)/u);
   // Inside a zero-sized container the absolute utility collapses, so it is
   // reverted to static there and clipped by the container instead.
-  assert.match(css, /\.toolbar-text \.sr-only, \.analysis-status \.sr-only \{ position: static; \}/u);
+  assert.match(css, /\.toolbar-text \.sr-only, \.analysis-status \.sr-only \{ position: static; font-size: 11px; \}/u);
 });
 
 test("motion respects prefers-reduced-motion", async () => {
@@ -63,6 +63,35 @@ test("motion respects prefers-reduced-motion", async () => {
   // their OS to reduce motion still got continuous animation.
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
   assert.match(css, /\.loading-pulse, \.status-spinner \{ animation: none;/u);
+});
+
+test("rail 'new' badges clear once their views have been visited", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const rail = await readFile(
+    new URL("../components/draftwise/navigation/RailNavigation.tsx", import.meta.url), "utf8");
+
+  // These flags were computed but never passed, so the badge and its
+  // accessible name stayed "new" forever, including on later visits.
+  assert.match(page, /showInsightsNew=\{showInsightsNew\}/u);
+  assert.match(page, /showExtensionNew=\{showExtensionNew\}/u);
+  assert.match(page, /if \(next === "insights"\) openInsights\(\)/u);
+  assert.match(rail, /aria-label=\{showInsightsNew \? "Insights new" : "Insights"\}/u);
+  assert.match(rail, /aria-label=\{showExtensionNew \? "Extension new" : "Extension"\}/u);
+});
+
+test("the theme has a reachable control and reaches portaled dialogs", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const topBar = await readFile(
+    new URL("../components/draftwise/topbar/TopBar.tsx", import.meta.url), "utf8");
+  const layout = await readFile(
+    new URL("../components/draftwise/PageLayout.tsx", import.meta.url), "utf8");
+  const css = await readFile(cssUrl, "utf8");
+
+  assert.match(topBar, /<ThemeToggle darkMode=\{darkMode\} onThemeChange=\{onThemeChange\} \/>/u);
+  assert.match(page, /darkMode=\{darkMode\}/u);
+  assert.match(page, /onThemeChange=\{\(dark\) => updateWorkspace\(\{ theme: dark \? "dark" : "light" \}\)\}/u);
+  assert.match(layout, /document\.documentElement\.dataset\.theme = theme/u);
+  assert.match(css, /html\[data-theme="dark"\] \[data-slot="dialog-content"\]/u);
 });
 
 test("the export menu opens by keyboard, not only by hover", async () => {

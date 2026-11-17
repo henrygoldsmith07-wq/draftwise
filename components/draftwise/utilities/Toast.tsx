@@ -44,8 +44,8 @@ export function ToastProvider() {
       }, detail.duration || 4000);
     };
 
-    window.addEventListener("draftwise-toast" as any, handleToast);
-    return () => window.removeEventListener("draftwise-toast" as any, handleToast);
+    window.addEventListener("draftwise-toast", handleToast);
+    return () => window.removeEventListener("draftwise-toast", handleToast);
   }, []);
 
   if (toasts.length === 0) return null;

@@ -149,6 +149,36 @@ test("replaceAll swaps the whole library and persists it", async () => {
   });
 });
 
+test("a failed replaceAll preserves the original library in storage and memory", async () => {
+  class FailSecondPutBackend extends MemoryDocumentBackend {
+    puts = 0;
+    async put(document) {
+      this.puts += 1;
+      if (this.puts === 2) throw new Error("disk is full");
+      return super.put(document);
+    }
+  }
+  const backend = new FailSecondPutBackend();
+  const lifecycle = new DocumentLifecycle(backend, seed);
+  await lifecycle.load();
+  backend.puts = 0; // arm the failure for the 2nd put of the restore itself
+  const original = lifecycle.getActive();
+  const originalIds = lifecycle.documents.map((document) => document.id).sort();
+
+  const result = await lifecycle.replaceAll(sampleBackup().documents);
+  assert.equal(result.ok, false, "the partial restore must be reported as a failure");
+
+  // In-memory state is unchanged: the writer still sees their own library.
+  assert.deepEqual(lifecycle.documents.map((document) => document.id).sort(), originalIds);
+  assert.equal(lifecycle.activeId, original.id);
+
+  // Storage was rolled back to the original library, not left erased/partial.
+  assert.deepEqual((await backend.list()).map((document) => document.id).sort(), originalIds);
+  const reloaded = new DocumentLifecycle(backend, seed);
+  await reloaded.load();
+  assert.deepEqual(reloaded.documents.map((document) => document.id).sort(), originalIds);
+});
+
 test("mergeAll adds alongside current work without touching it", async () => {
   const backend = new MemoryDocumentBackend();
   const lifecycle = new DocumentLifecycle(backend, seed);

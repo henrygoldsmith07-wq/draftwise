@@ -1,7 +1,6 @@
 "use client";
 
 import { CircleHelp } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface KeyboardShortcutsOverlayProps {
@@ -9,13 +8,16 @@ interface KeyboardShortcutsOverlayProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// Every binding here is implemented by the single global keydown handler in
+// app/page.tsx (review keys mapped in lib/review-navigation.ts). Nothing in this
+// list is aspirational — a shortcut that does not exist is worse than none.
 const SHORTCUT_GROUPS = [
   {
     title: "Document",
     shortcuts: [
       ["Save locally", "⌘ + S / Ctrl + S"],
-      ["New document", "⌘ + N / Ctrl + N"],
-      ["Import file", "⌘ + O / Ctrl + O"],
+      ["Undo", "⌘ + Z / Ctrl + Z"],
+      ["Redo", "⌘ + Shift + Z / Ctrl + Y"],
     ],
   },
   {
@@ -24,16 +26,15 @@ const SHORTCUT_GROUPS = [
       ["Next suggestion", "⌘ + ↓ / Ctrl + ↓"],
       ["Previous suggestion", "⌘ + ↑ / Ctrl + ↑"],
       ["Accept suggestion", "⌘ + Enter / Ctrl + Enter"],
-      ["Dismiss suggestion", "⌘ + D / Ctrl + D"],
+      ["Accept all visible suggestions", "⌘ + Enter / Ctrl + Enter"],
+      ["Dismiss suggestion", "⌘ + Backspace / Ctrl + Backspace"],
     ],
   },
   {
-    title: "Navigation",
+    title: "General",
     shortcuts: [
-      ["Documents view", "1"],
-      ["Write view", "2"],
-      ["Insights view", "3"],
-      ["Toggle suggestions", "5"],
+      ["Close rewrite preview", "Esc"],
+      ["Open shortcuts", "?"],
     ],
   },
 ];
@@ -55,7 +56,7 @@ export function KeyboardShortcutsOverlay({ open, onOpenChange }: KeyboardShortcu
         <div className="grid gap-6 py-4">
           {SHORTCUT_GROUPS.map((group) => (
             <div key={group.title}>
-              <h4 className="font-semibold mb-2">{group.title}</h4>
+              <h3 className="font-semibold mb-2">{group.title}</h3>
               <div className="grid gap-2">
                 {group.shortcuts.map(([action, shortcut]) => (
                   <div key={action} className="flex justify-between items-center">

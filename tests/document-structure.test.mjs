@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { findDocumentStructure } from "../packages/grammar/src/structure.ts";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
+import { getWritingStats } from "../packages/grammar/src/statistics.ts";
 import { DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
 
 const style = DEFAULT_STYLE_PREFERENCES;
@@ -127,4 +128,36 @@ test("structural notes are editorial judgement, not objective errors", () => {
     assert.ok(issue.confidence < 0.9, "structural confidence stays below objective rules");
     assert.equal(issue.replacement, "", "structural notes have no auto-replacement");
   }
+});
+
+test("short sentences with irregular past verbs are not fragments", () => {
+  // hasVerb used to accept only suffix forms, so "went" and "left" made
+  // perfectly complete sentences read as missing a verb.
+  for (const text of ["Jane went home.", "He left early.", "She made the call."]) {
+    const issues = analyzeLocally(text, {}, goals).issues
+      .filter((issue) => issue.ruleId === "structure-fragment");
+    assert.deepEqual(issues, [], `${text} is a complete sentence`);
+  }
+});
+
+test("abbreviation remnants are not reported as sentence fragments", () => {
+  const issues = analyzeLocally("e.g. this one works.", {}, goals).issues
+    .filter((issue) => issue.ruleId === "structure-fragment");
+  assert.deepEqual(issues, []);
+});
+
+test("stative adjectives do not inflate the passive rate or clarity score", () => {
+  const text = "The door is open. The sky is green. He was keen.";
+  const stats = getWritingStats(text);
+  assert.equal(stats.passiveVoice, 0);
+  assert.equal(stats.passiveVoicePercentage, 0);
+  const result = analyzeLocally(text, {}, goals);
+  assert.equal(result.issues.length, 0, "clean prose stays issue-free");
+  assert.ok(result.scores.clarity >= 95, `clarity should not be penalised: ${result.scores.clarity}`);
+});
+
+test("genuine passives are still counted", () => {
+  const stats = getWritingStats("The report was written by the team. The letters were sent yesterday.");
+  assert.ok(stats.passiveVoice >= 2);
+  assert.ok(stats.passiveVoicePercentage >= 50);
 });

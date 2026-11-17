@@ -1,58 +1,22 @@
 import type { WritingIssue } from "@/packages/types/src";
+import { anchorMatches, fingerprintText } from "../packages/grammar/src/index.ts";
+import {
+  DISMISSAL_ANCHOR_CHARS,
+  decodeDismissalKey,
+  encodeDismissalKey,
+  issueAnchors,
+  semanticKeyForIssue,
+  semanticKeyFromDismissal,
+} from "./dismissal-key.ts";
 
-/**
- * How much draft text either side of a finding is kept to recognise it later.
- *
- * Long enough to be distinctive, short enough that an ordinary edit elsewhere
- * in the paragraph does not break the anchor.
- */
-export const DISMISSAL_ANCHOR_CHARS = 48;
-
-export function issueAnchors(text: string, issue: WritingIssue) {
-  return {
-    before: text.slice(Math.max(0, issue.start - DISMISSAL_ANCHOR_CHARS), issue.start),
-    after: text.slice(issue.end, Math.min(text.length, issue.end + DISMISSAL_ANCHOR_CHARS)),
-  };
-}
+export { DISMISSAL_ANCHOR_CHARS, issueAnchors };
 
 export function getIssueDismissalKey(issue: WritingIssue, text?: string) {
-  const anchors = text === undefined ? null : issueAnchors(text, issue);
-  return JSON.stringify([
-    issue.id,
-    issue.ruleId,
-    issue.source,
-    issue.start,
-    issue.end,
-    issue.original,
-    issue.replacement,
-    anchors?.before ?? null,
-    anchors?.after ?? null,
-  ]);
-}
-
-function getSemanticDismissalKey(issue: WritingIssue) {
-  return JSON.stringify([
-    issue.ruleId,
-    issue.start,
-    issue.end,
-    issue.original,
-    issue.replacement,
-  ]);
+  return encodeDismissalKey(issue, text);
 }
 
 function getSemanticDismissalKeyFromStoredKey(key: string) {
-  try {
-    const parsed = JSON.parse(key);
-    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
-    const [, ruleId, , start, end, original, replacement] = parsed;
-    if (!Number.isSafeInteger(start)
-      || !Number.isSafeInteger(end)
-      || typeof original !== "string"
-      || typeof replacement !== "string") return null;
-    return JSON.stringify([ruleId, start, end, original, replacement]);
-  } catch {
-    return null;
-  }
+  return semanticKeyFromDismissal(key);
 }
 
 export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterable<string>, text?: string) {
@@ -63,7 +27,7 @@ export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterab
     if (semanticKey !== null) semanticallyDismissed.add(semanticKey);
   }
   return issues.filter((issue) => !dismissed.has(getIssueDismissalKey(issue))
-    && !semanticallyDismissed.has(getSemanticDismissalKey(issue))
+    && !semanticallyDismissed.has(semanticKeyForIssue(issue))
     // Anchored match. An exact key match fails as soon as anything above the
     // finding changes length, because the id carries the offsets. Without
     // this, rewriting a paragraph at the top of a long draft brought back
@@ -73,18 +37,20 @@ export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterab
 
 function isSameDismissal(key: string, issue: WritingIssue, text?: string) {
   if (text === undefined) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(key);
-  } catch {
-    return false;
-  }
-  if (!Array.isArray(parsed) || parsed.length !== 9) return false;
-  const [, ruleId, , , , original, replacement, before, after] = parsed;
-  if (ruleId !== issue.ruleId || original !== issue.original || replacement !== issue.replacement) return false;
-  if (typeof before !== "string" || typeof after !== "string") return false;
+  const parsed = decodeDismissalKey(key);
+  if (!parsed || parsed.ruleId !== issue.ruleId || parsed.before === undefined || parsed.after === undefined) return false;
+
+  const sameText = parsed.originalFingerprint
+    ? parsed.originalFingerprint === fingerprintText(issue.original)
+    : parsed.original === issue.original;
+  const sameReplacement = parsed.replacementFingerprint
+    ? parsed.replacementFingerprint === fingerprintText(issue.replacement)
+    : parsed.replacement === issue.replacement;
+  if (!sameText || !sameReplacement) return false;
+
   const live = issueAnchors(text, issue);
-  return live.before.endsWith(before) && live.after.startsWith(after);
+  return anchorMatches(live.before, parsed.before, "before")
+    && anchorMatches(live.after, parsed.after, "after");
 }
 
 export function hasActionableReplacement(issue: WritingIssue) {

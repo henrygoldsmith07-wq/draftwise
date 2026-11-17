@@ -87,9 +87,18 @@ export function getWritingStats(text: string, document = parseDocument(text)): W
   const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
   const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
   const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] } as SentenceSpan);
-  const passiveVoicePattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
-  const passiveVoice = [...text.matchAll(/\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu)].length;
-  const passiveVoiceSentences = sentences.filter((sentence) => passiveVoicePattern.test(sentence.text)).length;
+  // This statistic feeds the clarity score, so it must agree with the
+  // passive-voice rule in style.ts. A bare -en suffix matched "are open" and
+  // "is green", and a bare -ed suffix matched "was tired", inflating the
+  // passive rate to 100% on clean prose and costing 12 clarity points.
+  const passiveParticiple = String.raw`(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))`;
+  const passiveVoicePattern = new RegExp(String.raw`\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?${passiveParticiple}\b`, "giu");
+  const passiveVoiceSentencePattern = new RegExp(passiveVoicePattern.source, "iu");
+  const stativeEdAdjectives = new Set(
+    "red tired naked sacred beloved aged wicked learned crooked jagged ragged blessed cursed diseased supposed used pleased prepared concerned involved married unmarried talented gifted limited unlimited reserved content confident silent violent".split(" "));
+  const passiveVoice = [...text.matchAll(passiveVoicePattern)]
+    .filter((match) => !stativeEdAdjectives.has(match[0].replace(/^\S+\s+/u, "").toLocaleLowerCase())).length;
+  const passiveVoiceSentences = sentences.filter((sentence) => passiveVoiceSentencePattern.test(sentence.text)).length;
   return {
     words,
     characters: text.length,

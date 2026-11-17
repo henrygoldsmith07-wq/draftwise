@@ -2,8 +2,9 @@
  * Registering the service worker.
  *
  * The worker itself lives in `public/sw.js` and is plain JavaScript on
- * purpose: it has to be served from the site root so its scope covers the
- * whole app, and it must not depend on the framework's bundling.
+ * purpose: it is served at the app's base path (the root when there is none)
+ * so its scope covers the whole app, and it must not depend on the framework's
+ * bundling.
  *
  * Registration is deliberately quiet. A browser that refuses the worker
  * (private windows, an enterprise policy, a storage quota error) must not
@@ -13,6 +14,38 @@
  */
 
 export const SERVICE_WORKER_URL = "/sw.js";
+
+/**
+ * Normalise a configured base path into either "" (served from the root) or a
+ * leading-slash, no-trailing-slash prefix such as "/app".
+ */
+function normalizedBasePath(raw: string | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim().replace(/\/+$/u, "");
+  if (!trimmed || trimmed === "/") return "";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+/**
+ * The path prefix the app is deployed under, when one is configured.
+ *
+ * Next.js inlines NEXT_PUBLIC_* variables at build time, so this is how a
+ * client module learns the base path without the page having to pass it in.
+ * Served from the root, the value is empty and the worker keeps the root
+ * scope it has always had.
+ */
+const configuredBasePath: string = typeof process !== "undefined"
+  ? normalizedBasePath(process.env.NEXT_PUBLIC_BASE_PATH)
+  : "";
+
+/**
+ * The worker script and its scope follow the base path. A worker cannot
+ * control a scope broader than its own script URL, so both move together.
+ */
+const serviceWorkerPath = configuredBasePath
+  ? `${configuredBasePath}${SERVICE_WORKER_URL}`
+  : SERVICE_WORKER_URL;
+const serviceWorkerScope = configuredBasePath ? `${configuredBasePath}/` : "/";
 
 /**
  * What the app knows about its own offline readiness.
@@ -145,7 +178,9 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
   }
   setState("registering");
   try {
-    const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL, { scope: "/" });
+    const registration = await navigator.serviceWorker.register(serviceWorkerPath, {
+      scope: serviceWorkerScope,
+    });
     // The worker is only useful once it is active: an installing worker
     // cannot yet serve the app shell, and reporting "ready" before then
     // would be a promise the app cannot keep.

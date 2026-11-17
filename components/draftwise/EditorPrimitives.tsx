@@ -8,6 +8,80 @@ import { Button } from "@/components/ui/button";
 import { buildExplanation, categoryColors } from "@/packages/grammar/src";
 import type { PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
+export type HighlightSegment = {
+  start: number;
+  end: number;
+  text: string;
+  issue: WritingIssue | null;
+  isSpoken: boolean;
+};
+
+// <highlight-segments-helper>
+/**
+ * Split `text` into the runs the mirror layer paints, without producing JSX.
+ *
+ * Every range boundary (findings plus the optional read-aloud passage) becomes
+ * a cut point, so overlapping/nested findings can share characters: a run that
+ * sits inside several findings is attributed to the first one in
+ * (start, end) order — the same one Array.find used to return.
+ *
+ * Work is linear in the number of findings: they are sorted once, then a single
+ * cursor sweeps them as the cut points advance. There is no per-segment search
+ * of the issue list (the old O(N^2) behaviour).
+ */
+export function buildHighlightSegments(
+  text: string,
+  issues: WritingIssue[],
+  spokenRange?: { start: number; end: number } | null,
+): HighlightSegment[] {
+  const safeIssues = issues
+    .filter((item) => item.start >= 0 && item.end <= text.length && item.end > item.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const spoken = spokenRange && spokenRange.start >= 0 && spokenRange.end <= text.length && spokenRange.end > spokenRange.start
+    ? spokenRange
+    : null;
+
+  const boundaries = new Set<number>([0, text.length]);
+  for (const item of safeIssues) {
+    boundaries.add(item.start);
+    boundaries.add(item.end);
+  }
+  if (spoken) {
+    boundaries.add(spoken.start);
+    boundaries.add(spoken.end);
+  }
+  const points = [...boundaries].sort((left, right) => left - right);
+
+  const segments: HighlightSegment[] = [];
+  // Index of the first issue whose end is still beyond the current cut point.
+  // Issues before it end at or before `start`, so they cannot cover this run or
+  // any later one and are retired permanently. This cursor only ever moves
+  // forward, which is what makes the sweep linear.
+  let cursor = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (end <= start) continue;
+    const slice = text.slice(start, end);
+
+    while (cursor < safeIssues.length && safeIssues[cursor].end <= start) {
+      cursor += 1;
+    }
+    // Every surviving issue ends at a boundary strictly after `start`, hence
+    // at or after `end` (the next boundary). So the first survivor that begins
+    // at or before `start` is exactly the first issue Array.find would have
+    // matched — preserving nested/overlapping and active/ignored behaviour.
+    const issue = cursor < safeIssues.length && safeIssues[cursor].start <= start
+      ? safeIssues[cursor]
+      : null;
+    const isSpoken = spoken ? start >= spoken.start && end <= spoken.end : false;
+
+    segments.push({ start, end, text: slice, issue, isSpoken });
+  }
+  return segments;
+}
+// </highlight-segments-helper>
+
 /**
  * The mirror layer behind the transparent textarea: everything visible in the
  * editor that is not the text itself.
@@ -27,34 +101,11 @@ export function HighlightLayer({ text, issues, activeIssueId, spokenRange }: {
   spokenRange?: { start: number; end: number } | null;
 }) {
   const nodes = useMemo<ReactNode[]>(() => {
-    const safeIssues = issues
-      .filter((item) => item.start >= 0 && item.end <= text.length && item.end > item.start)
-      .sort((a, b) => a.start - b.start || a.end - b.end);
-    const spoken = spokenRange && spokenRange.start >= 0 && spokenRange.end <= text.length && spokenRange.end > spokenRange.start
-      ? spokenRange
-      : null;
-
-    const boundaries = new Set<number>([0, text.length]);
-    for (const item of safeIssues) {
-      boundaries.add(item.start);
-      boundaries.add(item.end);
-    }
-    if (spoken) {
-      boundaries.add(spoken.start);
-      boundaries.add(spoken.end);
-    }
-    const points = [...boundaries].sort((left, right) => left - right);
-
-    const output: ReactNode[] = [];
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const start = points[index];
-      const end = points[index + 1];
-      if (end <= start) continue;
-      const slice = text.slice(start, end);
-      const issue = safeIssues.find((item) => item.start <= start && item.end >= end);
-      const isSpoken = spoken ? start >= spoken.start && end <= spoken.end : false;
+    const segments = buildHighlightSegments(text, issues, spokenRange);
+    return segments.map((segment) => {
+      const { start, text: slice, issue, isSpoken } = segment;
       if (issue) {
-        output.push(
+        return (
           <mark
             key={`issue-${start}`}
             className={`editor-highlight ${activeIssueId === issue.id ? "is-active" : ""} ${isSpoken ? "is-spoken" : ""}`}
@@ -62,15 +113,14 @@ export function HighlightLayer({ text, issues, activeIssueId, spokenRange }: {
             style={{ "--issue-color": categoryColors[issue.category] } as CSSProperties}
           >
             {slice}
-          </mark>,
+          </mark>
         );
-      } else if (isSpoken) {
-        output.push(<span key={`spoken-${start}`} className="editor-spoken">{slice}</span>);
-      } else {
-        output.push(slice);
       }
-    }
-    return output;
+      if (isSpoken) {
+        return <span key={`spoken-${start}`} className="editor-spoken">{slice}</span>;
+      }
+      return slice;
+    });
   }, [activeIssueId, issues, spokenRange, text]);
 
   return <div aria-hidden="true" className="editor-highlights">{nodes}</div>;

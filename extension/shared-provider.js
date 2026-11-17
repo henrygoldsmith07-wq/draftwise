@@ -1269,6 +1269,17 @@ function findSpelling(text, preferences, document = parseDocument(text)) {
     }
     return issues;
 }
+// Shared with the structure rules: a short sentence whose only verb is an
+// irregular past form ("Jane went home.") is complete, not a fragment.
+const IRREGULAR_PAST_VERBS = new Set([
+    "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
+    "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
+    "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
+    "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
+    "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
+    "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
+    "sold", "sent", "spent", "built", "lent", "said",
+]);
 function findConfusedWords(text, preferences) {
     const issues = [];
     const patterns = [
@@ -1860,15 +1871,6 @@ function findPrecisionGrammarIssues(text, preferences, document = parseDocument(
     // — greetings and fragments ("Yes, this is fine") have none and are left
     // alone. A preceding colon properly introduces the clause, and "that is
     // to say" parentheticals are idiomatic, so both are excluded.
-    const IRREGULAR_PAST_VERBS = new Set([
-        "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
-        "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
-        "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
-        "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
-        "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
-        "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
-        "sold", "sent", "spent", "built", "lent", "said",
-    ]);
     const FINITE_VERB_BEFORE_COMMA = /\b(am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|shall|should|will|would|may|might|must)\b|[\p{L}]ed\b/iu;
     // A message written entirely without letter case has no sentence
     // conventions either (the terminal-stop rule already treats it that way),
@@ -2750,12 +2752,20 @@ function findStructureIssues(text, preferences, document = parseDocument(text)) 
         }
         const hasVerb = sentence.tokens.some((token) => {
             const base = token.lower.split(/[’']/u)[0];
-            return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base) || /(?:ed|ing|s)$/u.test(token.lower);
+            return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base)
+                || IRREGULAR_PAST_VERBS.has(token.lower)
+                || /(?:ed|ing|s)$/u.test(token.lower);
         });
         // Every token capitalised or numeric is a name, label or heading ("Daniel",
         // "Roughly 1."), not a missing-verb fragment.
         const labelLike = sentence.tokens.length > 0 && sentence.tokens.every((token) => token.value[0] !== token.value[0].toLocaleLowerCase());
-        if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !labelLike && !/[!?]$/u.test(sentence.text)) {
+        // A dotted abbreviation split by the sentence parser ("e.g." -> "g.")
+        // leaves a one-token span that is not a prose fragment at all.
+        const abbrevSpan = sentence.text.trim();
+        const abbreviationRemnant = sentence.tokens.length === 1
+            && /^[\p{L}.]+\.$/u.test(abbrevSpan)
+            && (abbrevSpan.length <= 2 || abbrevSpan.replace(/\.$/u, "").includes("."));
+        if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !labelLike && !abbreviationRemnant && !/[!?]$/u.test(sentence.text)) {
             pushIssue(issues, makeIssue("structure-fragment", sentence.start, sentence.end, sentence.text, "", "sentence structure", "low", "Possible sentence fragment", "This short sentence may be missing a verb. Keep it if the fragment is intentional.", 0.65, preferences));
         }
     }
@@ -4307,7 +4317,8 @@ function prioritiseSuggestions(issues, options = {}) {
             byRule.push(entry);
         else
             dismissalByRule.set(entry.ruleId, [entry]);
-        const textKey = entry.original.trim().toLocaleLowerCase();
+        const textKey = entry.normalisedFingerprint
+            ?? fingerprintText(normaliseDismissalText(entry.original ?? ""));
         const byText = dismissalByText.get(textKey);
         if (byText)
             byText.push(entry);
@@ -4329,18 +4340,21 @@ function prioritiseSuggestions(issues, options = {}) {
         const anchored = (entry) => entry.before !== undefined
             && entry.after !== undefined
             && live !== undefined
-            && live.before.endsWith(entry.before)
-            && live.after.startsWith(entry.after);
+            && anchorMatches(live.before, entry.before, "before")
+            && anchorMatches(live.after, entry.after, "after");
+        const sameText = (entry) => entry.originalFingerprint
+            ? entry.originalFingerprint === fingerprintText(issue.original)
+            : entry.original === issue.original;
         const exact = dismissalByRule.get(issue.ruleId);
         if (exact) {
             for (const entry of exact) {
-                if (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original)
+                if (entry.start === issue.start && entry.end === issue.end && sameText(entry))
                     return true;
                 if (anchored(entry))
                     return true;
             }
         }
-        const similar = dismissalByText.get(issue.original.trim().toLocaleLowerCase());
+        const similar = dismissalByText.get(fingerprintText(normaliseDismissalText(issue.original)));
         if (!similar)
             return false;
         for (const entry of similar) {
@@ -4683,9 +4697,17 @@ function getWritingStats(text, document = parseDocument(text)) {
     const fillerWordFrequency = frequency(sentenceWordValues.filter((word) => FILLER_WORDS.has(word)));
     const commonWords = frequency(sentenceWordValues.filter((word) => COMMON_WORDS.has(word))).slice(0, 8);
     const longest = sentences.reduce((current, sentence) => sentence.tokens.length > current.tokens.length ? sentence : current, { text: "", start: 0, end: 0, tokens: [] });
-    const passiveVoicePattern = /\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/iu;
-    const passiveVoice = [...text.matchAll(/\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?[\p{L}]+(?:ed|en)\b/giu)].length;
-    const passiveVoiceSentences = sentences.filter((sentence) => passiveVoicePattern.test(sentence.text)).length;
+    // This statistic feeds the clarity score, so it must agree with the
+    // passive-voice rule in style.ts. A bare -en suffix matched "are open" and
+    // "is green", and a bare -ed suffix matched "was tired", inflating the
+    // passive rate to 100% on clean prose and costing 12 clarity points.
+    const passiveParticiple = String.raw `(?:\p{L}+ed|\p{L}*(?:aken|idden|iven|oken|olen|osen|rozen|ritten|roken|hosen|riven|oven|eaten|beaten|fallen|known|grown|shown|thrown|seen|gone|done|built|spent|sent|kept|left|lost|held|made|paid|said|sold|told|found|bound|ground|wound|lent|bent|felt|dealt|swept|crept))`;
+    const passiveVoicePattern = new RegExp(String.raw `\b(?:was|were|is|are|be|been|being)\s+(?:being\s+)?${passiveParticiple}\b`, "giu");
+    const passiveVoiceSentencePattern = new RegExp(passiveVoicePattern.source, "iu");
+    const stativeEdAdjectives = new Set("red tired naked sacred beloved aged wicked learned crooked jagged ragged blessed cursed diseased supposed used pleased prepared concerned involved married unmarried talented gifted limited unlimited reserved content confident silent violent".split(" "));
+    const passiveVoice = [...text.matchAll(passiveVoicePattern)]
+        .filter((match) => !stativeEdAdjectives.has(match[0].replace(/^\S+\s+/u, "").toLocaleLowerCase())).length;
+    const passiveVoiceSentences = sentences.filter((sentence) => passiveVoiceSentencePattern.test(sentence.text)).length;
     return {
         words,
         characters: text.length,
@@ -5072,6 +5094,27 @@ const CATEGORY_ALIASES = {
     fluency: "fluency",
     consistency: "consistency",
 };
+// Explicit allowlist of the IssueCategory values we accept from a provider.
+// CATEGORY_ALIASES is a plain object, so a bare lookup would fall through to
+// Object.prototype for keys such as "__proto__", "constructor" or "toString"
+// and return a non-string value that later breaks React rendering.
+const VALID_CATEGORIES = new Set([
+    "spelling",
+    "grammar",
+    "punctuation",
+    "clarity",
+    "conciseness",
+    "word choice",
+    "repetition",
+    "tone",
+    "formality",
+    "readability",
+    "fluency",
+    "passive voice",
+    "sentence structure",
+    "consistency",
+    "capitalization",
+]);
 const VALID_SEVERITIES = new Set(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 const MAX_PROVIDER_ISSUES_PER_RESPONSE = 250;
@@ -5600,7 +5643,13 @@ ${chunk.text.slice(chunk.text.length - trailingLength)}
 --- CONTEXT END ---`;
 }
 function normaliseCategory(value) {
-    return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
+    if (typeof value !== "string")
+        return null;
+    const key = value.toLocaleLowerCase().trim();
+    if (!Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key))
+        return null;
+    const category = CATEGORY_ALIASES[key];
+    return VALID_CATEGORIES.has(category) ? category : null;
 }
 function aiIssueFingerprint(ruleId, original, replacement) {
     const value = `${ruleId}\u001f${original}\u001f${replacement}`;

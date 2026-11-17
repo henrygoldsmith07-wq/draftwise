@@ -59,7 +59,6 @@ interface EditorWorkspaceProps {
   analysisError?: string | null;
   savedLabel: string;
   /** Live-region text for keyboard review moves; empty when not reviewing by keyboard. */
-  reviewAnnouncement: string;
   saveError?: string | null;
   selection: { start: number; end: number };
   selectedText: string;
@@ -230,11 +229,9 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       : "A few useful changes";
   return (
     <div className={`workspace-grid ${props.focusMode ? "is-focus-mode" : ""}`}>
-      {/* Spoken confirmation for keyboard review. Visually hidden but in the
-          accessibility tree: a keyboard writer gets no hover state, so this is
-          the only signal that Tab moved the review cursor and what it landed
-          on. */}
-      <p className="sr-only" role="status" aria-live="polite">{props.reviewAnnouncement}</p>
+      {/* Review announcements have one owner: page.tsx renders
+          LiveRegionAnnouncer with the same message. A second live region here
+          made screen readers announce every review step twice. */}
       <section className="editor-column">
         <div className="workspace-heading">
           <div>
@@ -348,13 +345,17 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
                 scroll without this. A plain anchor needs no state and moves
                 focus nowhere it should not go. */}
             {props.suggestionsOpen && props.visibleIssues.length > 0 ? (
-              <a className="editor-jump" href="#suggestions">↓ {props.visibleIssues.length} suggestion{props.visibleIssues.length === 1 ? "" : "s"}</a>
+              <a className="editor-jump" href="#suggestions"><span aria-hidden="true">↓</span> {props.visibleIssues.length} suggestion{props.visibleIssues.length === 1 ? "" : "s"}</a>
             ) : null}
           </div>
         </div>
 
-        {props.analysisError ? <div className="analysis-error" role="status"><span>AI analysis paused: {props.analysisError}</span><button onClick={props.onOpenSettings} type="button">Review settings</button></div> : null}
-        <div className="workspace-footnote"><span><ShieldCheck size={14} /> No account required</span><span role={props.saveError ? "status" : undefined} title={props.saveError ?? undefined}>{props.saveError ? "Could not save locally" : props.savedLabel}</span><button onClick={props.onOpenSettings} type="button">Privacy controls</button></div>
+        {/* The live region stays mounted so a screen reader announces the text
+            when it changes; the visible strip owns the recovery action so a
+            button is never inside an atomic live region. */}
+        <p className="sr-only" role="alert">{props.analysisError ? `Error: AI analysis paused: ${props.analysisError}` : ""}</p>
+        {props.analysisError ? <div className="analysis-error"><span>AI analysis paused: {props.analysisError}</span><button onClick={props.onOpenSettings} type="button">Review settings</button></div> : null}
+        <div className="workspace-footnote"><span><ShieldCheck size={14} /> No account required</span><span title={props.saveError ?? undefined}>{props.saveError ? "Could not save locally" : props.savedLabel}</span><button onClick={props.onOpenSettings} type="button">Privacy controls</button></div>
       </section>
 
       {props.suggestionsOpen ? (
@@ -455,7 +456,7 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
           </div>
           <SuppressedFindings suppressed={props.suggestions.suppressed} report={props.suggestions.report} onSelectIssue={props.onSelectIssue} onDismissMany={props.onDismissGroup} />
           {props.reviewedCount > 0 ? <div className="review-completion" role="status">{props.reviewedCount} important change{props.reviewedCount === 1 ? "" : "s"} reviewed.</div> : null}
-          <div className="suggestions-footer"><span role="status" aria-live="polite"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
+          <div className="suggestions-footer"><span aria-hidden="true"><Zap size={14} /> {props.analysisStatusLabel}</span><button onClick={props.onOpenSettings} type="button">Configure AI <ArrowDown size={13} /></button></div>
         </aside>
       ) : (
         <aside className="suggestions-collapsed"><Button size="sm" variant="outline" aria-label="Show suggestions" aria-expanded={false} onClick={props.onToggleSuggestions}><PanelRight size={15} /> Show suggestions</Button></aside>

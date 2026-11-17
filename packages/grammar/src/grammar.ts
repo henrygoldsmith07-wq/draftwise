@@ -18,6 +18,33 @@ import {
   preserveCase,
 } from "./util.ts";
 
+/**
+ * End- and start-anchored context regexes only need the words adjacent to a
+ * match. Slicing the whole draft for every finding made long documents
+ * quadratic in the number of findings: 700 findings in a 20k-word draft meant
+ * tens of megabytes of prefix copies per pass. A bounded window keeps the
+ * same answers for these local patterns.
+ */
+const CONTEXT_WINDOW_CHARS = 160;
+function contextBefore(text: string, position: number) {
+  return text.slice(Math.max(0, position - CONTEXT_WINDOW_CHARS), position);
+}
+function contextAfter(text: string, position: number) {
+  return text.slice(position, position + CONTEXT_WINDOW_CHARS);
+}
+
+// Shared with the structure rules: a short sentence whose only verb is an
+// irregular past form ("Jane went home.") is complete, not a fragment.
+export const IRREGULAR_PAST_VERBS = new Set([
+  "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
+  "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
+  "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
+  "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
+  "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
+  "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
+  "sold", "sent", "spent", "built", "lent", "said",
+]);
+
 export function findConfusedWords(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
   const patterns: Array<[RegExp, string, string, string, number?]> = [
@@ -203,7 +230,7 @@ const TRANSITIVE_GOVERNORS = new Set([
  * position by elimination.
  */
 function reflexiveSlotCase(text: string, keywordStart: number): "subject" | "object" {
-  const before = text.slice(0, keywordStart);
+  const before = contextBefore(text, keywordStart);
   if (PREPOSITION_BEFORE.test(before)) return "object";
   const previous = /([\p{L}']+)\s*$/u.exec(before)?.[1]?.toLocaleLowerCase();
   if (!previous || SUBJECT_SLOT_AUX.has(previous)) return "subject";
@@ -345,7 +372,7 @@ export function isUncasedDraft(text: string) {
 const PREPOSITION_BEFORE = /(?:^|[^\p{L}])(?:about|above|across|against|along|among|around|at|behind|below|beneath|beside|between|beyond|by|despite|during|except|for|from|in|inside|into|near|of|off|on|onto|outside|over|past|per|through|throughout|to|toward|towards|under|upon|via|with|within|without)\s+$/iu;
 
 function isPrepositionalObject(text: string, position: number) {
-  return position > 0 && PREPOSITION_BEFORE.test(text.slice(0, position));
+  return position > 0 && PREPOSITION_BEFORE.test(contextBefore(text, position));
 }
 
 /**
@@ -411,6 +438,11 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     const start = (match.index ?? 0) + (match[0].toLocaleLowerCase().indexOf(article));
     pushIssue(issues, makeIssue("grammar-article-agreement", start, start + article.length, match[1] ?? article, preserveCase(match[1] ?? article, expected), "grammar", "medium", "Check the article", `Use “${expected}” before “${match[2]}” in this context.`, 0.9, preferences));
   }
+  // Plural-looking nouns that are singular or number-ambiguous in ordinary
+  // prose: academic fields take singular agreement, and "data"/"media" are
+  // correctly plural in technical and academic registers. A precision rule
+  // declines to judge them rather than "fixing" correct prose.
+  const AMBIGUOUS_NUMBER_NOUNS = /(?:headquarters|means|economics|statistics|politics|ethics|linguistics|classics|data|media)$/iu;
   const agreementPatterns: Array<[RegExp, Record<string, string>]> = [
     [/\b(he|she|it)\s+(are|were|have|do)\b/giu, { are: "is", were: "was", have: "has", do: "does" }],
     [/\b(they|we|you)\s+(is|was|has|does)\b/giu, { is: "are", was: "were", has: "have", does: "do" }],
@@ -433,6 +465,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
       // is always wrong.
       const pronounSubject = ["he", "she", "it", "they", "we", "you"].includes(subject.toLocaleLowerCase());
       if (determinerLed && pronounSubject) continue;
+      if (determinerLed && AMBIGUOUS_NUMBER_NOUNS.test(subject)) continue;
       const subjectIsPlural = nounLooksPlural(subject);
       const pluralVerb = ["are", "were", "have", "do"].includes(verb.toLocaleLowerCase());
       const singularVerb = ["is", "was", "has", "does"].includes(verb.toLocaleLowerCase());
@@ -447,11 +480,6 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
   // results is" and "The results has" are already reported with the right
   // fix, so this loop only sees lexical verbs.
   const AUXILIARY_VERB_FORMS = new Set(["is", "are", "was", "were", "has", "have", "does", "do", "am"]);
-  // Plural-looking nouns that are singular or number-ambiguous in ordinary
-  // prose: academic fields take singular agreement ("statistics shows" is
-  // correct for the discipline), and headquarters/means can be either, so a
-  // precision rule declines to judge them.
-  const AMBIGUOUS_NUMBER_NOUNS = /(?:headquarters|means|economics|statistics|politics|ethics|linguistics|classics)$/iu;
   for (const match of text.matchAll(/\b(?:the|this|that|my|your|our|their)\s+([\p{L}][\p{L}'’-]*)\s+([\p{L}]+s)\b/giu)) {
     const subject = match[1] ?? "";
     const verb = match[2] ?? "";
@@ -554,7 +582,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     if (/ed$/u.test(subjectLower) || EN_PARTICIPLES.has(subjectLower)) continue;
     if (preferences.dialect !== "en-US" && COLLECTIVE_NOUNS_GB.has(subjectLower)) continue;
     const matchStart = match.index ?? 0;
-    const beforeText = text.slice(0, matchStart);
+    const beforeText = contextBefore(text, matchStart);
     const previousWord = /([\p{L}]+)\s*$/u.exec(beforeText)?.[1]?.toLocaleLowerCase() ?? "";
     if (MANDATIVE_GOVERNORS.has(previousWord)) continue;
     if (previousWord === "that") {
@@ -562,7 +590,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
       if (MANDATIVE_GOVERNORS.has(governor) || MANDATIVE_NOUNS.has(governor)) continue;
     }
     if (isPrepositionalObject(text, matchStart)) continue;
-    const afterText = text.slice(matchStart + match[0].length);
+    const afterText = contextAfter(text, matchStart + match[0].length);
     const afterMatch = /^\s*([\p{L}']+)([\s\S]*)$/u.exec(afterText);
     const nextWord = (afterMatch?.[1] ?? "").toLocaleLowerCase();
     if (NOUN_PROVING_FOLLOWERS.has(nextWord) || SUBJECT_SLOT_AUX.has(nextWord)) continue;
@@ -586,15 +614,6 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
   // — greetings and fragments ("Yes, this is fine") have none and are left
   // alone. A preceding colon properly introduces the clause, and "that is
   // to say" parentheticals are idiomatic, so both are excluded.
-  const IRREGULAR_PAST_VERBS = new Set([
-    "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
-    "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
-    "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
-    "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
-    "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
-    "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
-    "sold", "sent", "spent", "built", "lent", "said",
-  ]);
   const FINITE_VERB_BEFORE_COMMA = /\b(am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|shall|should|will|would|may|might|must)\b|[\p{L}]ed\b/iu;
   // A message written entirely without letter case has no sentence
   // conventions either (the terminal-stop rule already treats it that way),
@@ -754,7 +773,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     if (isTitlecaseProperNoun(past)) return;
     const verbStart = (match.index ?? 0) + (match[0]?.lastIndexOf(past) ?? 0);
     if (text[verbStart + past.length] === "-") return;
-    const before = text.slice(0, verbStart);
+    const before = contextBefore(text, verbStart);
     if (["saw", "bit", "spoke", "drove", "bore", "beat", "lay", "dove"].includes(pastLower) && DETERMINER_BEFORE_NOUN.test(before)) return;
     const follower = nextWordAfter(verbStart + past.length);
     if (pastLower === "bit" && BIT_PART_FOLLOWERS.has(follower)) return;
@@ -887,7 +906,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
     if (lastMiddle && (nounLooksPlural(lastMiddle) || PLURAL_OR_AMBIGUOUS_SUBJECTS.has(lastMiddle) || AMBIGUOUS_NUMBER_NOUNS.test(lastMiddle))) continue;
     if ((keyword === "either" || keyword === "neither") && !ofPhrase && middleWords.length === 0 && ["have", "are", "were", "do"].includes(verbLower)
       && ["i", "you", "he", "she", "it", "we", "they"].includes(nextWordAfter((match.index ?? 0) + match[0].length))) continue;
-    const tailWords = (text.slice(0, match.index ?? 0).toLocaleLowerCase().match(/[\p{L}']+/gu) ?? []).slice(-3);
+    const tailWords = (contextBefore(text, match.index ?? 0).toLocaleLowerCase().match(/[\p{L}']+/gu) ?? []).slice(-3);
     if (tailWords.some((word) => MANDATIVE_GOVERNORS.has(word) || MANDATIVE_NOUNS.has(word))) continue;
     const verbStart = (match.index ?? 0) + (match[0]?.lastIndexOf(verb) ?? 0);
     if (verbLower === "were" && inHypotheticalClause(text, verbStart)) continue;
@@ -971,7 +990,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
   ]);
   const subjectNameIsGoverned = (nameStart: number) => {
     if (isPrepositionalObject(text, nameStart)) return true;
-    const previousRaw = /([\p{L}']+)\s*$/u.exec(text.slice(0, nameStart))?.[1] ?? "";
+    const previousRaw = /([\p{L}']+)\s*$/u.exec(contextBefore(text, nameStart))?.[1] ?? "";
     const previous = previousRaw.toLocaleLowerCase();
     if (!previous) return false;
     if (SUBJECT_SLOT_AUX.has(previous) || SUBJECT_PRONOUN_GOVERNORS.has(previous)) return true;
@@ -1073,7 +1092,7 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
   const COUNTABLE_PATTERN = COUNTABLE_PLURALS.join("|");
   for (const match of text.matchAll(new RegExp(`\\b(less)\\s+(${COUNTABLE_PATTERN})\\b`, "giu"))) {
     const less = match[1] ?? "";
-    const before = text.slice(0, match.index ?? 0);
+    const before = contextBefore(text, match.index ?? 0);
     if (/\b(?:one|much|a|an)\s+$/i.test(before)) continue;
     const afterLess = /^\s*([\p{L}']+)/u.exec(text.slice((match.index ?? 0) + less.length))?.[1]?.toLocaleLowerCase() ?? "";
     if (afterLess === "than" || afterLess === "of") continue;

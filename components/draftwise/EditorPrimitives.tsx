@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { ArrowDown, Check, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { buildHighlightSegments } from "@/lib/highlight-segments";
 import { buildExplanation, categoryColors } from "@/packages/grammar/src";
 import type { PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
@@ -27,50 +28,25 @@ export function HighlightLayer({ text, issues, activeIssueId, spokenRange }: {
   spokenRange?: { start: number; end: number } | null;
 }) {
   const nodes = useMemo<ReactNode[]>(() => {
-    const safeIssues = issues
-      .filter((item) => item.start >= 0 && item.end <= text.length && item.end > item.start)
-      .sort((a, b) => a.start - b.start || a.end - b.end);
-    const spoken = spokenRange && spokenRange.start >= 0 && spokenRange.end <= text.length && spokenRange.end > spokenRange.start
-      ? spokenRange
-      : null;
-
-    const boundaries = new Set<number>([0, text.length]);
-    for (const item of safeIssues) {
-      boundaries.add(item.start);
-      boundaries.add(item.end);
-    }
-    if (spoken) {
-      boundaries.add(spoken.start);
-      boundaries.add(spoken.end);
-    }
-    const points = [...boundaries].sort((left, right) => left - right);
-
-    const output: ReactNode[] = [];
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const start = points[index];
-      const end = points[index + 1];
-      if (end <= start) continue;
-      const slice = text.slice(start, end);
-      const issue = safeIssues.find((item) => item.start <= start && item.end >= end);
-      const isSpoken = spoken ? start >= spoken.start && end <= spoken.end : false;
+    const segments = buildHighlightSegments(text, issues, spokenRange, activeIssueId);
+    return segments.map(({ start, text: slice, issue, isSpoken, isActive }) => {
       if (issue) {
-        output.push(
+        return (
           <mark
             key={`issue-${start}`}
-            className={`editor-highlight ${activeIssueId === issue.id ? "is-active" : ""} ${isSpoken ? "is-spoken" : ""}`}
+            className={`editor-highlight ${isActive ? "is-active" : ""} ${isSpoken ? "is-spoken" : ""}`}
             data-category={issue.category}
             style={{ "--issue-color": categoryColors[issue.category] } as CSSProperties}
           >
             {slice}
-          </mark>,
+          </mark>
         );
-      } else if (isSpoken) {
-        output.push(<span key={`spoken-${start}`} className="editor-spoken">{slice}</span>);
-      } else {
-        output.push(slice);
       }
-    }
-    return output;
+      if (isSpoken) {
+        return <span key={`spoken-${start}`} className="editor-spoken">{slice}</span>;
+      }
+      return slice;
+    });
   }, [activeIssueId, issues, spokenRange, text]);
 
   return <div aria-hidden="true" className="editor-highlights">{nodes}</div>;
@@ -83,7 +59,7 @@ export function Metric({ label, value, note, color = "mint" }: { label: string; 
 export function ScoreRing({ score }: { score: number }) {
   const circumference = 2 * Math.PI * 44;
   const offset = circumference - (Math.max(0, Math.min(100, score)) / 100) * circumference;
-  return <div className="score-ring" aria-label={`Overall writing score ${score} out of 100`}><svg viewBox="0 0 110 110" aria-hidden="true"><circle className="score-ring-track" cx="55" cy="55" r="44" /><circle className="score-ring-progress" cx="55" cy="55" r="44" strokeDasharray={circumference} strokeDashoffset={offset} /></svg><span><strong>{score}</strong><small>/100</small></span></div>;
+  return <div className="score-ring" role="img" aria-label={`Overall writing score ${score} out of 100`}><svg viewBox="0 0 110 110" aria-hidden="true"><circle className="score-ring-track" cx="55" cy="55" r="44" /><circle className="score-ring-progress" cx="55" cy="55" r="44" strokeDasharray={circumference} strokeDashoffset={offset} /></svg><span><strong>{score}</strong><small>/100</small></span></div>;
 }
 
 export function GoalSelect({ label, value, options, onChange }: { label: string; value: string; options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) {

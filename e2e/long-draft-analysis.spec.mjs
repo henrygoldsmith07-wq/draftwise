@@ -102,7 +102,12 @@ test("a long draft is analysed across the whole document, not just near the edit
 
   // Stepping forward must move the caret through the document, so the findings
   // displayed are not all clustered around the edit that triggered analysis.
-  const caretAt = () => page.evaluate(() => document.querySelector("textarea.editor-input")?.selectionStart ?? -1);
+  // The app defers caret placement to a timeout so the next review key still
+  // works (see app/page.tsx). Read the settled value, not the previous one.
+  const caretAt = async () => {
+    await page.waitForTimeout(40);
+    return page.evaluate(() => document.querySelector("textarea.editor-input")?.selectionStart ?? -1);
+  };
   await page.keyboard.press("Control+ArrowDown");
   const firstCaret = await caretAt();
 

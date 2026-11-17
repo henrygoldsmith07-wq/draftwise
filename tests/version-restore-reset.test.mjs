@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 // Version restore replaces a document's text in place, keeping the same document
 // id. These tests pin what the store guarantees about that, because the UI relies
@@ -78,4 +79,14 @@ test("restoring twice is stable and does not accumulate drift", () => {
 
   assert.equal(first, second, "restoring the same snapshot must be deterministic");
   assert.equal(second, "baseline text");
+});
+
+test("the app resets undo history when a checkpoint is restored", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const restore = page.match(/onRestore=\{\(snapshot\) => \{[\s\S]*?\}\}/u);
+  assert.ok(restore, "the version history view should have a restore handler");
+  // Without this, the undo stack still points at the abandoned draft, so the
+  // next Undo resurrects it and persists it as the writer's current text.
+  assert.match(restore[0], /const before = documents\.active\?\.draft \?\? ""/u);
+  assert.match(restore[0], /historyStore\.reset\(documents\.activeId, \[before, snapshot\.text\]\)/u);
 });

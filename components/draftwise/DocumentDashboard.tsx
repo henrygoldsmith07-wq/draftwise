@@ -5,7 +5,7 @@ import { Copy, FilePlus2, FileText, History, Search, Trash2, Upload, Download } 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { documentMatchesQuery, matchingExcerpt, type DocumentReview, type DocumentSummary, type StoredDocument } from "@/lib/documents";
+import { documentMatchesQuery, type DocumentReview, type DocumentSummary, type StoredDocument } from "@/lib/documents";
 import { formatRelativeTime as formatRelative } from "@/lib/time";
 
 /**
@@ -52,6 +52,7 @@ export function DocumentDashboard({ summaries, documents, activeId, importError,
 }) {
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [openExportId, setOpenExportId] = useState<string | null>(null);
   // Fresh installs (and writers who deleted everything) own no words yet.
   // That is the moment for an explicit choice — blank page or sample —
   // instead of foreign prose or a bare empty state.
@@ -76,46 +77,87 @@ export function DocumentDashboard({ summaries, documents, activeId, importError,
   // With a query, the card shows the passage that matched rather than the
   // opening line, which is the one part of the draft search already found.
   const excerptFor = (summary: DocumentSummary) => {
-    if (!deferredQuery.trim()) return summary.excerpt;
-    const source = documentsById.get(summary.id);
-    return (source ? matchingExcerpt(source, deferredQuery) : null) ?? summary.excerpt;
+    const plain = <>{summary.excerpt || "Empty draft"}</>;
+    const needle = deferredQuery.trim();
+    const source = needle ? documentsById.get(summary.id) : undefined;
+    if (!source) return plain;
+    const index = source.draft.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+    if (index < 0) return plain;
+    // Render the matched passage as a real <mark> element (React text nodes,
+    // never HTML injection) so a full-text search visibly lands somewhere.
+    const radius = 60;
+    const from = Math.max(0, index - radius);
+    const to = Math.min(source.draft.length, index + needle.length + radius);
+    return <>
+      {from > 0 ? "…" : ""}
+      {source.draft.slice(from, index).replace(/\s+/gu, " ")}
+      <mark>{source.draft.slice(index, index + needle.length)}</mark>
+      {source.draft.slice(index + needle.length, to).replace(/\s+/gu, " ")}
+      {to < source.draft.length ? "…" : ""}
+    </>;
   };
 
-  return <section className="full-view"><div className="full-view-heading"><div><p className="eyebrow">Your drafts</p><h1>Everything you have written, on this device.</h1><p>Drafts are stored locally in your browser. No account, no sync, no upload.</p></div><div className="heading-actions"><Button onClick={onNew}><FilePlus2 size={15} /> New document</Button></div></div><div className="dashboard-toolbar"><label className="dashboard-search"><Search size={15} /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles and text" aria-label="Search documents" /></label><label className="dashboard-import"><Upload size={14} /> Import .txt or .md<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = ""; }} /></label></div>{importError ? <div className="import-error" role="alert">{importError}</div> : null}{loading ? (<><p className="sr-only" role="status">Loading your drafts…</p><div className="document-grid" aria-hidden="true">{[0, 1, 2].map((index) => (<div key={index} className="document-card skeleton-card" data-testid={`skeleton-document-${index}`}><span className="skeleton-line skeleton-line-title" data-testid="skeleton-line-title" /><span className="skeleton-line" data-testid="skeleton-line-excerpt" /><span className="skeleton-line skeleton-line-short" data-testid="skeleton-line-meta" /></div>))}</div></>) : null}{!loading && isFresh ? (<div className="welcome-panel"><h2>Start with a blank page.</h2><p>Draftwise opens here, on your documents — never inside sample text pretending to be your draft. Write something of your own, or load the sample to see what analysis looks like.</p><div className="welcome-actions"><Button onClick={onNew}><FilePlus2 size={15} /> Start writing</Button><Button variant="outline" onClick={onSample}>Try the sample text</Button></div></div>) : null}{!loading ? <div className="document-grid">{filtered.map((document) => <article key={document.id} className={`document-card ${document.id === activeId ? "is-active" : ""}`}><button type="button" className="document-card-main" onClick={() => onOpen(document.id)}><span className="document-card-title"><FileText size={15} /> {document.title}</span><span className="document-card-excerpt">{document.excerpt || "Empty draft"}</span><span className="document-card-meta">{document.wordCount.toLocaleString("en-GB")} words · edited {formatRelative(document.updatedAt)}</span>{document.goals || document.dialect ? <span className="document-card-meta">Goals: {[document.goals?.audience, document.goals?.intent, document.goals?.tone].filter(Boolean).join(" · ")}{document.dialect ? ` · ${document.dialect === "en-GB" ? "British English" : "American English"}` : ""}</span> : null}<span className={document.review && document.review.worthMaking > 0 ? "document-card-review has-work" : "document-card-review"}>{reviewLabel(document.review)}</span>{document.id === activeId ? <Badge className="local-badge">Open</Badge> : null}</button><div className="document-card-actions">
+  return <section className="full-view"><div className="full-view-heading"><div><p className="eyebrow">Your drafts</p><h1>Everything you have written, on this device.</h1><p>Drafts are stored locally in your browser. No account, no sync, no upload.</p></div><div className="heading-actions"><Button onClick={onNew}><FilePlus2 size={15} /> New document</Button></div></div><div className="dashboard-toolbar"><label className="dashboard-search"><Search size={15} /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles and text" aria-label="Search documents" /></label><label className="dashboard-import"><Upload size={14} /> Import .txt or .md<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { const file = event.target.files?.[0]; if (file) onImport(file); event.target.value = ""; }} /></label></div><p className="sr-only" role="alert">{importError ?? ""}</p>{importError ? <div className="import-error">{importError}</div> : null}{loading ? (<><p className="sr-only" role="status">Loading your drafts…</p><div className="document-grid" aria-hidden="true">{[0, 1, 2].map((index) => (<div key={index} className="document-card skeleton-card" data-testid={`skeleton-document-${index}`}><span className="skeleton-line skeleton-line-title" data-testid="skeleton-line-title" /><span className="skeleton-line" data-testid="skeleton-line-excerpt" /><span className="skeleton-line skeleton-line-short" data-testid="skeleton-line-meta" /></div>))}</div></>) : null}{!loading && isFresh ? (<div className="welcome-panel"><h2>Start with a blank page.</h2><p>Draftwise opens here, on your documents — never inside sample text pretending to be your draft. Write something of your own, or load the sample to see what analysis looks like.</p><div className="welcome-actions"><Button onClick={onNew}><FilePlus2 size={15} /> Start writing</Button><Button variant="outline" onClick={onSample}>Try the sample text</Button></div></div>) : null}{!loading ? <div className="document-grid">{filtered.map((document) => <article key={document.id} className={`document-card ${document.id === activeId ? "is-active" : ""}`}><button type="button" className="document-card-main" onClick={() => onOpen(document.id)}><span className="document-card-title"><FileText size={15} /> {document.title}</span><span className="document-card-excerpt">{excerptFor(document)}</span><span className="document-card-meta">{document.wordCount.toLocaleString("en-GB")} words · edited {formatRelative(document.updatedAt)}</span>{document.goals || document.dialect ? <span className="document-card-meta">Goals: {[document.goals?.audience, document.goals?.intent, document.goals?.tone].filter(Boolean).join(" · ")}{document.dialect ? ` · ${document.dialect === "en-GB" ? "British English" : "American English"}` : ""}</span> : null}<span className={document.review && document.review.worthMaking > 0 ? "document-card-review has-work" : "document-card-review"}>{reviewLabel(document.review)}</span>{document.id === activeId ? <Badge className="local-badge">Open</Badge> : null}</button><div className="document-card-actions">
   <Button size="sm" variant="ghost" aria-label={`Version history for ${document.title}`} onClick={() => onHistory(document.id)}>
     <History size={13} />
   </Button>
   <Button size="sm" variant="ghost" aria-label={`Duplicate ${document.title}`} onClick={() => onDuplicate(document.id)}>
     <Copy size={13} />
   </Button>
-  <div className="export-dropdown">
-    <Button 
-      size="sm" 
-      variant="ghost" 
+  <div
+    className={`export-dropdown${openExportId === document.id ? " open" : ""}`}
+    onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpenExportId(null);
+    }}
+    onKeyDown={(event) => {
+      if (event.key === "Escape" && openExportId === document.id) {
+        event.stopPropagation();
+        setOpenExportId(null);
+        event.currentTarget.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    }}
+  >
+    <Button
+      size="sm"
+      variant="ghost"
       aria-label={`Export ${document.title}`}
+      aria-haspopup="menu"
+      aria-expanded={openExportId === document.id}
+      aria-controls={`export-menu-${document.id}`}
       title="Export options"
+      onClick={() => setOpenExportId((current) => current === document.id ? null : document.id)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          const trigger = event.currentTarget;
+          setOpenExportId(document.id);
+          requestAnimationFrame(() => {
+            trigger.closest(".export-dropdown")?.querySelector<HTMLButtonElement>(".dropdown-item")?.focus();
+          });
+        }
+      }}
     >
       <Download size={13} />
     </Button>
-    <div className="dropdown-menu" role="menu">
-      <button 
-        className="dropdown-item" 
+    <div className="dropdown-menu" role="menu" id={`export-menu-${document.id}`}>
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "md")}
+        onClick={() => { onExport(document.id, "md"); setOpenExportId(null); }}
       >
         Export as Markdown (.md)
       </button>
-      <button 
-        className="dropdown-item" 
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "txt")}
+        onClick={() => { onExport(document.id, "txt"); setOpenExportId(null); }}
       >
         Export as Plain Text (.txt)
       </button>
-      <button 
-        className="dropdown-item" 
+      <button
+        className="dropdown-item"
         role="menuitem"
-        onClick={() => onExport(document.id, "pdf")}
+        onClick={() => { onExport(document.id, "pdf"); setOpenExportId(null); }}
       >
         Export as PDF (.pdf)
       </button>

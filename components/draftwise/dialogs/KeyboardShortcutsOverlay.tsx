@@ -7,15 +7,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 interface KeyboardShortcutsOverlayProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  theme?: "dark" | "light";
 }
 
+// Only bindings that actually exist. The previous list advertised New/Import,
+// Ctrl+D, and number keys that no handler implements — pressing them did
+// nothing (or bookmarked the page), which is worse than no help at all.
 const SHORTCUT_GROUPS = [
   {
     title: "Document",
     shortcuts: [
-      ["Save locally", "⌘ + S / Ctrl + S"],
-      ["New document", "⌘ + N / Ctrl + N"],
-      ["Import file", "⌘ + O / Ctrl + O"],
+      ["Save a checkpoint", "⌘ + S / Ctrl + S"],
+      ["Undo (in the draft)", "⌘ + Z / Ctrl + Z"],
+      ["Redo (in the draft)", "⌘ + Shift + Z / Ctrl + Y"],
+      ["Show this help", "?"],
     ],
   },
   {
@@ -24,24 +29,16 @@ const SHORTCUT_GROUPS = [
       ["Next suggestion", "⌘ + ↓ / Ctrl + ↓"],
       ["Previous suggestion", "⌘ + ↑ / Ctrl + ↑"],
       ["Accept suggestion", "⌘ + Enter / Ctrl + Enter"],
-      ["Dismiss suggestion", "⌘ + D / Ctrl + D"],
-    ],
-  },
-  {
-    title: "Navigation",
-    shortcuts: [
-      ["Documents view", "1"],
-      ["Write view", "2"],
-      ["Insights view", "3"],
-      ["Toggle suggestions", "5"],
+      ["Dismiss suggestion", "⌘ + Backspace / Ctrl + Backspace"],
+      ["Close rewrite preview", "Esc"],
     ],
   },
 ];
 
-export function KeyboardShortcutsOverlay({ open, onOpenChange }: KeyboardShortcutsOverlayProps) {
+export function KeyboardShortcutsOverlay({ open, onOpenChange, theme }: KeyboardShortcutsOverlayProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" data-theme={theme}>
         <DialogHeader>
           <div className="flex items-center gap-2">
             <CircleHelp size={24} />
@@ -55,7 +52,7 @@ export function KeyboardShortcutsOverlay({ open, onOpenChange }: KeyboardShortcu
         <div className="grid gap-6 py-4">
           {SHORTCUT_GROUPS.map((group) => (
             <div key={group.title}>
-              <h4 className="font-semibold mb-2">{group.title}</h4>
+              <h3 className="font-semibold mb-2">{group.title}</h3>
               <div className="grid gap-2">
                 {group.shortcuts.map(([action, shortcut]) => (
                   <div key={action} className="flex justify-between items-center">

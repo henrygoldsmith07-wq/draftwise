@@ -44,19 +44,18 @@ export function ToastProvider() {
       }, detail.duration || 4000);
     };
 
-    window.addEventListener("draftwise-toast" as any, handleToast);
-    return () => window.removeEventListener("draftwise-toast" as any, handleToast);
+    window.addEventListener("draftwise-toast", handleToast);
+    return () => window.removeEventListener("draftwise-toast", handleToast);
   }, []);
 
-  if (toasts.length === 0) return null;
-
+  // Keep the live region mounted even when empty: a screen reader only
+  // reliably announces text inserted into a region that already exists.
   return (
-    <div className="toast-container" aria-live="polite" aria-label="Notifications">
+    <div className="toast-container" role="status" aria-live="polite" aria-label="Notifications">
       {toasts.map((toast) => (
         <div
           key={toast.id}
           className={`toast toast-${toast.type} animate-slide-up`}
-          role="alert"
         >
           <div className="flex items-start gap-3">
             {toast.type === "success" && <CheckCircle2 className="text-success" size={18} />}

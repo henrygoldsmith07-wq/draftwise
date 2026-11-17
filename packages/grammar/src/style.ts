@@ -15,6 +15,7 @@ import {
   makeIssue,
   pushIssue,
 } from "./issues.ts";
+import { IRREGULAR_PAST_VERBS } from "./grammar.ts";
 import {
   type SentenceSpan,
   parseDocument,
@@ -252,12 +253,20 @@ export function findStructureIssues(text: string, preferences: StylePreferences,
     }
     const hasVerb = sentence.tokens.some((token) => {
       const base = token.lower.split(/[’']/u)[0];
-      return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base) || /(?:ed|ing|s)$/u.test(token.lower);
+      return VERB_HINTS.has(token.lower) || VERB_HINTS.has(base)
+        || IRREGULAR_PAST_VERBS.has(token.lower)
+        || /(?:ed|ing|s)$/u.test(token.lower);
     });
     // Every token capitalised or numeric is a name, label or heading ("Daniel",
     // "Roughly 1."), not a missing-verb fragment.
     const labelLike = sentence.tokens.length > 0 && sentence.tokens.every((token) => token.value[0] !== token.value[0].toLocaleLowerCase());
-    if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !labelLike && !/[!?]$/u.test(sentence.text)) {
+    // A dotted abbreviation split by the sentence parser ("e.g." -> "g.")
+    // leaves a one-token span that is not a prose fragment at all.
+    const abbrevSpan = sentence.text.trim();
+    const abbreviationRemnant = sentence.tokens.length === 1
+      && /^[\p{L}.]+\.$/u.test(abbrevSpan)
+      && (abbrevSpan.length <= 2 || abbrevSpan.replace(/\.$/u, "").includes("."));
+    if (sentence.tokens.length >= 1 && sentence.tokens.length <= 3 && !hasVerb && !labelLike && !abbreviationRemnant && !/[!?]$/u.test(sentence.text)) {
       pushIssue(issues, makeIssue("structure-fragment", sentence.start, sentence.end, sentence.text, "", "sentence structure", "low", "Possible sentence fragment", "This short sentence may be missing a verb. Keep it if the fragment is intentional.", 0.65, preferences));
     }
   }

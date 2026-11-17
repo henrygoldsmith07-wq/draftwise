@@ -1,5 +1,6 @@
 import { prioritiseSuggestions, ruleFamily } from "../packages/grammar/src/index.ts";
 import type { DismissedFinding, PrioritiseResult } from "../packages/grammar/src/index.ts";
+import type { ParsedDocument } from "../packages/grammar/src/parser.ts";
 import { issueAnchors } from "./issue-actions.ts";
 import { profileAdjustments } from "./writing-profile.ts";
 import type { PrioritisedIssue, StylePreferences, SuggestionTier, WritingGoals, WritingIssue, IssueCategory } from "../packages/types/src/index.ts";
@@ -105,6 +106,12 @@ export function buildSuggestionState(args: {
   dismissedKeys: string[];
   ruleDismissalCounts?: Record<string, number>;
   text?: string;
+  /**
+   * An already-parsed document from the analysis pass. When provided, the
+   * prioritisation step reuses it instead of parsing the identical text again.
+   * Omitted callers keep the previous behaviour: prioritise parses on demand.
+   */
+  document?: ParsedDocument;
   /** Findings the writer opened out of the held-back list; shown again by id. */
   unhiddenIssueIds?: string[];
 }): SuggestionState {
@@ -122,6 +129,7 @@ export function buildSuggestionState(args: {
     ruleDismissalCounts: args.ruleDismissalCounts,
     rankAdjustments,
     text: args.text,
+    document: args.document,
     alwaysDisplay: args.unhiddenIssueIds,
     anchorFor: args.text === undefined ? undefined : (issue) => issueAnchors(args.text as string, issue),
   });

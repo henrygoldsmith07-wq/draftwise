@@ -7,6 +7,7 @@ import {
   createDocument,
   recordSnapshot,
   sanitiseStoredDocument,
+  summarise,
   summariseDocuments,
   documentMatchesQuery,
   matchingExcerpt,
@@ -14,6 +15,7 @@ import {
 } from "../lib/documents.ts";
 import { exportAsMarkdown, exportAsText, importDocument, titleFromFilename } from "../lib/import-export.ts";
 import { rewriteActionsFor, significantRewriteInstruction } from "../lib/rewrite-actions.ts";
+import { MAX_TERMS_PER_LIST } from "../lib/terminology.ts";
 
 const goals = (audience, intent = "inform", tone = "professional") => ({ audience, intent, tone });
 
@@ -25,6 +27,77 @@ test("documents count words, summarise by recency, and search titles and text", 
   assert.equal(summaries[1].wordCount, 4);
   assert.deepEqual(summariseDocuments([older, newer], "revenue").map((item) => item.title), ["Quarterly report"]);
   assert.equal(countWords("  one   two three "), 3);
+});
+
+test("summarise excerpt is bounded and keeps the opening of short and long drafts", () => {
+  const shortDraft = "Hello   world.\n\nThis  is  a  short  draft.";
+  const short = createDocument("Short", shortDraft);
+  assert.equal(summarise(short).excerpt, "Hello world. This is a short draft.");
+
+  // A long draft: the excerpt is the first 120 normalised characters, drawn
+  // from the opening and never from the far tail. A marker placed well past
+  // the scan window must not leak into the card.
+  const opening = "The opening paragraph introduces the topic with care.\n\n";
+  const longDraft = opening + "body word ".repeat(120) + "NEVER_IN_EXCERPT " + "tail word ".repeat(50);
+  const long = createDocument("Long", longDraft);
+  const longExcerpt = summarise(long).excerpt;
+  assert.equal(longExcerpt.length, 120);
+  assert.match(longExcerpt, /^The opening paragraph/u);
+  assert.equal(longExcerpt.includes("NEVER_IN_EXCERPT"), false);
+  // wordCount still comes from the full stored draft, never the bounded scan.
+  assert.equal(summarise(long).wordCount, countWords(longDraft));
+  assert.ok(long.wordCount > 120);
+
+  // Two documents sharing a long prefix but with different far-away tails
+  // produce the same excerpt: changing text past the scan window cannot
+  // change the card, no matter how large the draft grows.
+  const sharedPrefix = "A long shared prefix. " + "common word ".repeat(100);
+  const twinA = createDocument("A", sharedPrefix + "ONLY_IN_A ".repeat(50));
+  const twinB = createDocument("B", sharedPrefix + "ONLY_IN_B ".repeat(50));
+  assert.equal(summarise(twinA).excerpt, summarise(twinB).excerpt);
+});
+
+test("summarise caches by document identity and recomputes after an edit", () => {
+  const document = createDocument("Cache", "First version of the draft.");
+  const first = summarise(document);
+  // Same object identity -> same cached summary object (not just equal value).
+  assert.equal(summarise(document), first);
+
+  const edited = { ...document, draft: "Second version of the draft.", wordCount: countWords("Second version of the draft.") };
+  const afterEdit = summarise(edited);
+  assert.notEqual(afterEdit, first);
+  assert.equal(afterEdit.excerpt, "Second version of the draft.");
+  // The original document still maps to its original cached summary.
+  assert.equal(summarise(document), first);
+  assert.equal(first.excerpt, "First version of the draft.");
+
+  // summariseDocuments reuses those cached summaries when rebuilding the list.
+  assert.equal(summariseDocuments([document])[0], first);
+  const listA = summariseDocuments([document, edited]);
+  const listB = summariseDocuments([document, edited]);
+  assert.equal(listA.find((item) => item.id === document.id), first);
+  assert.equal(listB.find((item) => item.id === document.id), first);
+  assert.equal(listA.find((item) => item.id === edited.id), listB.find((item) => item.id === edited.id));
+});
+
+test("summariseDocuments keeps full-text search and excerpt behaviour", () => {
+  const opening = "Visible opening line. ";
+  const buried = "the buried phrase sits far into the draft ";
+  const document = createDocument("Searchable", opening + "filler ".repeat(80) + buried + "closing.");
+  const summary = summarise(document);
+
+  // The card excerpt stays the opening, even though search reaches the middle.
+  assert.match(summary.excerpt, /^Visible opening line\./u);
+  assert.equal(summary.excerpt.includes("buried phrase"), false);
+  assert.equal(documentMatchesQuery(document, "buried phrase"), true);
+  assert.deepEqual(summariseDocuments([document], "buried phrase").map((item) => item.id), [document.id]);
+  assert.deepEqual(summariseDocuments([document], "not anywhere in here"), []);
+
+  // Matching excerpts (the passage shown while searching) are unchanged.
+  const match = matchingExcerpt(document, "buried phrase");
+  assert.ok(match);
+  assert.match(match, /buried phrase/u);
+  assert.match(match, /…/u);
 });
 
 test("search reaches the middle of a long draft, not just the card's excerpt", () => {
@@ -147,4 +220,38 @@ test("every adaptive action carries a distinct label and an instruction", () => 
   assert.equal(new Set(labels).size, labels.length);
   assert.ok(actions.every((action) => action.instruction.length > 10));
   assert.ok(actions.some((action) => action.significant));
+});
+
+test("sanitiseStoredDocument bounds hostile terminology lists but keeps normal goals", () => {
+  const normalGoals = {
+    audience: "academic",
+    intent: "explain",
+    tone: "formal",
+    requiredTerminology: ["API"],
+    forbiddenTerminology: ["sort of"],
+    preferredReplacements: { login: "sign in" },
+  };
+  const normal = sanitiseStoredDocument({ id: "doc-normal", title: "Normal", draft: "Body.", goals: normalGoals });
+  assert.deepEqual(normal.goals, normalGoals);
+
+  const words = (prefix) => Array.from({ length: 2_000 }, (_, index) => `${prefix}-${index}`);
+  const hostile = sanitiseStoredDocument({
+    id: "doc-hostile",
+    title: "Hostile",
+    draft: "Body.",
+    goals: {
+      audience: "academic",
+      intent: "explain",
+      tone: "formal",
+      requiredTerminology: words("required"),
+      forbiddenTerminology: words("forbidden"),
+      preferredReplacements: Object.fromEntries(Array.from({ length: 200 }, (_, index) => [`from-${index}`, `to-${index}`])),
+    },
+  });
+  assert.equal(hostile.goals.requiredTerminology.length, MAX_TERMS_PER_LIST);
+  assert.equal(hostile.goals.forbiddenTerminology.length, MAX_TERMS_PER_LIST);
+  assert.equal(Object.keys(hostile.goals.preferredReplacements).length, 50);
+  // The other goals survive the cleaning.
+  assert.equal(hostile.goals.audience, "academic");
+  assert.equal(hostile.goals.tone, "formal");
 });

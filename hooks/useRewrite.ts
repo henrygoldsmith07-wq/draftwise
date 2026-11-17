@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { rewriteWithProvider, ProviderError } from "@/packages/ai/src";
+// ProviderError lives in the dependency-free constants module; the rewrite
+// adapter itself is loaded only when the writer actually asks for a rewrite.
+import { ProviderError } from "@/packages/ai/src/constants";
 import { surroundingContext } from "@/lib/rewrite-context";
 import type { ProviderSettings, RewriteResult, StylePreferences, WritingGoals } from "@/packages/types/src";
 export { createRewriteRetryArgs } from "@/lib/rewrite-retry";
@@ -69,6 +71,8 @@ export function useRewrite() {
     };
     setPreview({ ...base, replacement: "", explanation: "", source: "local", loading: true });
     try {
+      const { rewriteWithProvider } = await import("@/packages/ai/src");
+      if (controller.signal.aborted || currentRun !== runId.current) return;
       const provider = args.aiEnabled ? args.settings : { ...args.settings, apiKey: "" };
       const context = args.draft ? surroundingContext(args.draft, args.selection) : {};
       const result = await rewriteWithProvider({ text: args.text, instruction: args.instruction, goals: args.goals, preferences: args.style, ...context }, provider, controller.signal);
@@ -103,10 +107,11 @@ export function useRewrite() {
    *
    * A suggested rewrite is a draft, not an instruction. Being able to take it
    * and finish it by hand is the difference between a preview the writer
-   * approves and a preview the writer works around. The edited text goes
-   * through exactly the same validation as the suggestion on the way out, so a
-   * writer cannot apply an empty replacement or reintroduce the original text
-   * by accident.
+   * approves and a preview the writer works around. Hand-edited text is
+   * checked for being empty or identical to the original before it can be
+   * applied; the provider-output validation (markup, protected tokens) has
+   * already run on the suggestion and does not need repeating on the writer's
+   * own wording.
    */
   const editReplacement = useCallback((value: string) => {
     setPreview((current) => {

@@ -9,24 +9,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 interface NewDraftDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
+  onConfirm: (title?: string) => void;
+  theme?: "dark" | "light";
 }
 
-export function NewDraftDialog({ open, onOpenChange, onConfirm }: NewDraftDialogProps) {
+export function NewDraftDialog({ open, onOpenChange, onConfirm, theme }: NewDraftDialogProps) {
   const [title, setTitle] = useState("");
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (title.trim()) {
-      onConfirm();
-      onOpenChange(false);
-      setTitle("");
-    }
+    // The placeholder promises an untitled document, so an empty field must
+    // create one rather than silently doing nothing.
+    onConfirm(title);
+    onOpenChange(false);
+    setTitle("");
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <DialogTitle>New document</DialogTitle>
           <DialogDescription>
@@ -36,6 +37,7 @@ export function NewDraftDialog({ open, onOpenChange, onConfirm }: NewDraftDialog
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
+              <label htmlFor="draft-title" className="text-sm font-medium">Document title</label>
               <Input
                 id="draft-title"
                 placeholder="Untitled"

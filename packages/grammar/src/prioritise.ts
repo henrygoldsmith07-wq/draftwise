@@ -366,9 +366,17 @@ function groupKey(issue: WritingIssue) {
  * should see, ranked, with the noise accounted for in the report.
  */
 export function prioritiseSuggestions(issues: WritingIssue[], options: PrioritiseOptions = {}): PrioritiseResult {
+  // Materialise once: `dismissed` is typed as an Iterable and may be a one-shot
+  // generator. Spreading it twice would silently drop every dismissal.
+  const dismissed = [...(options.dismissed ?? [])];
+  // The dashboard calls this with an empty issue list on first render, before
+  // analysis has run. There is nothing to rank, so parsing the whole draft here
+  // was pure first-paint work. Return an empty result without a parse.
+  if (issues.length === 0 && dismissed.length === 0) {
+    return { displayed: [], suppressed: [], report: emptyReport() };
+  }
   const document = options.document ?? parseDocument(options.text ?? issues.map((issue) => issue.original).join(" "));
   const preferences = options.preferences;
-  const dismissed = [...(options.dismissed ?? [])];
   const noise = options.ruleDismissalCounts ?? {};
   const suppressed: SuppressedFinding[] = [];
   const report = emptyReport();

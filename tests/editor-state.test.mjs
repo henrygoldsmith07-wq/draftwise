@@ -8,11 +8,13 @@ const settingsUrl = new URL("../components/draftwise/ProviderSettingsDialog.tsx"
 
 test("new drafts require confirmation and start their own history", async () => {
   const page = await readFile(pageUrl, "utf8");
-  assert.match(page, /Start a new draft\?/u);
+  const dialog = await readFile(new URL("../components/draftwise/dialogs/NewDraftDialog.tsx", import.meta.url), "utf8");
+  assert.match(page, /<NewDraftDialogComponent open=\{newDraftOpen\}/u);
+  assert.match(dialog, /<DialogTitle>New document<\/DialogTitle>/u);
   // The draft guard reads the document store: document content is the store's
   // exclusive domain, never workspace state.
   assert.match(page, /if \(!\(documents\.active\?\.draft \?\? ""\)\.trim\(\)\)/u);
-  const start = page.match(/const startNewDocument = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
+  const start = page.match(/const startNewDocument = useCallback\(\(title\?: string\) => \{([\s\S]*?)\n  \}, \[[^\]]*\]\);/u);
   assert.ok(start);
   // The new document opens its own history from its blank text: the previous
   // document's content can never be undone into it. Recovery is via Documents
@@ -24,7 +26,10 @@ test("new drafts require confirmation and start their own history", async () => 
 
 test("destructive local-data clearing is confirmed and editor shortcuts do not fire behind dialogs", async () => {
   const page = await readFile(pageUrl, "utf8");
-  assert.match(page, /Clear all local Draftwise data\?/u);
+  const dialog = await readFile(
+    new URL("../components/draftwise/dialogs/ClearDataDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /Delete all local data\?/u);
+  assert.doesNotMatch(page, /function ClearDataDialog\(/u, "the local duplicate dialog is dead code");
   assert.match(page, /settingsOpen \|\| shortcutsOpen \|\| newDraftOpen \|\| clearDataOpen/u);
   assert.match(page, /setClearDataOpen\(true\)/u);
 });

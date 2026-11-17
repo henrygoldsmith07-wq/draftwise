@@ -30,7 +30,7 @@ const SPELLING_VARIANTS: string[][] = [
   ["defence", "defense"], ["offence", "offense"], ["licence", "license"], ["practise", "practice"],
   ["organisation", "organization"], ["organisations", "organizations"], ["organise", "organize"],
   ["recognise", "recognize"], ["realise", "realize"], ["analyse", "analyze"], ["summarise", "summarize"],
-  ["organisation", "organization"], ["apologise", "apologize"], ["prioritise", "prioritise"],
+  ["apologise", "apologize"],
   ["travelling", "traveling"], ["cancelled", "canceled"], ["labelled", "labeled"], ["fuelled", "fueled"],
   ["modelled", "modeled"], ["signalled", "signaled"], ["catalogue", "catalog"], ["dialogue", "dialog"],
 ];

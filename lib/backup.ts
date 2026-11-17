@@ -1,7 +1,7 @@
 import { sanitiseStoredDocument, type StoredDocument } from "./documents.ts";
-import { isWorkspace } from "./workspace-storage.ts";
+import { isWorkspace, sanitiseWorkspace } from "./workspace-storage.ts";
 import { emptyLog, sanitiseActivityLog, type ActivityLog } from "./writing-activity.ts";
-import type { DraftwiseWorkspace } from "../packages/types/src/index.ts";
+import { DEFAULT_WORKSPACE, type DraftwiseWorkspace } from "../packages/types/src/index.ts";
 
 /**
  * Full backup and restore: every document plus the workspace settings and the
@@ -31,6 +31,8 @@ export const MAX_BACKUP_BYTES = 25_000_000;
 export const MAX_BACKUP_CHARS = 20_000_000;
 /** Far above any plausible library; stops a hostile array from pinning the tab. */
 export const MAX_BACKUP_DOCUMENTS = 2_000;
+/** The restore confirmation renders this string; never let it carry a 10MB "date". */
+export const MAX_EXPORTED_AT_CHARS = 100;
 
 export interface BackupFile {
   kind: typeof BACKUP_KIND;
@@ -159,13 +161,16 @@ export function parseBackup(text: string): ParseBackupResult {
   if (documents.length === 0) {
     return { ok: false, error: "That backup holds no readable documents, so there is nothing to restore." };
   }
-  // The workspace is adopted wholesale on restore, so it must validate as a
-  // whole: a half-valid settings object (bad provider URL, unknown shape) is
-  // refused rather than merged. Dismissal lists are re-bounded by the normal
-  // workspace load path after the restore reloads the app.
+  // Settings must validate as a whole: a half-valid object (bad provider URL,
+  // unknown shape) is refused rather than merged over the writer's own. But a
+  // shape-valid backup can still hide a 50,000-term blocklist or a 15MB
+  // dictionary, so run it through the same bounded sanitizer every stored
+  // workspace goes through before it reaches the restore confirmation or the
+  // app. `isWorkspace` above is the gate; this is the bound.
   if (!isWorkspace(parsed.workspace)) {
     return { ok: false, error: "That backup's settings are unreadable, so nothing was changed." };
   }
+  const workspace = sanitiseWorkspace(DEFAULT_WORKSPACE(), parsed.workspace);
   const warnings: string[] = [];
   if (skippedDocuments > 0) {
     warnings.push(`${skippedDocuments} unreadable ${skippedDocuments === 1 ? "entry was" : "entries were"} skipped.`);
@@ -184,9 +189,9 @@ export function parseBackup(text: string): ParseBackupResult {
     ok: true,
     backup: {
       documents,
-      workspace: parsed.workspace,
+      workspace,
       activity,
-      exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt : "unknown date",
+      exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt.slice(0, MAX_EXPORTED_AT_CHARS) : "unknown date",
       skippedDocuments,
       activityDropped,
     },

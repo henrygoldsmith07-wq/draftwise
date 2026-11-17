@@ -1,3 +1,5 @@
+import type { ParsedDocument } from "../../grammar/src/parser.js";
+
 export type Dialect = "en-GB" | "en-US";
 
 export type IssueCategory =
@@ -206,6 +208,8 @@ export interface AnalysisResult {
   scores: AnalysisScores;
   stats: WritingStats;
   analysedText: string;
+  /** The document parsed during this analysis, reused by suggestion ranking. */
+  document?: ParsedDocument;
   source: "local" | "ai" | "local+ai";
   changedRange?: { start: number; end: number };
   diagnostics?: AnalysisDiagnostics;
@@ -511,18 +515,6 @@ export const DEFAULT_CLASSIFIER_SETTINGS: ClassifierSettings = {
   maxExcerptChars: 500,
 };
 
-export const TRIAGE_CATEGORIES: TriageCategory[] = [
-  "correctness",
-  "clarity",
-  "conciseness",
-  "engagement",
-  "tone",
-  "consistency",
-  "structure",
-  "word-choice",
-  "style",
-  "other",
-];
 
 export const DEFAULT_WORKSPACE = (): DraftwiseWorkspace => ({
   version: 2,

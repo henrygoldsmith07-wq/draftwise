@@ -8,12 +8,13 @@ interface ClearDataDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  theme?: "dark" | "light";
 }
 
-export function ClearDataDialog({ open, onOpenChange, onConfirm }: ClearDataDialogProps) {
+export function ClearDataDialog({ open, onOpenChange, onConfirm, theme }: ClearDataDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent data-theme={theme}>
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Trash2 className="text-destructive" size={20} />

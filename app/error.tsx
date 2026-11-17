@@ -40,7 +40,7 @@ export default function Error({
         </p>
         {error.digest ? (
           <p className="mt-3 text-xs text-muted-foreground">
-            Reference: <code className="font-mono">{error.digest}</code>
+            Reference: <code className="font-mono break-all">{error.digest}</code>
           </p>
         ) : null}
         <div className="mt-7 flex flex-wrap justify-center gap-3">

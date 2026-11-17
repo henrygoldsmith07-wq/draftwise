@@ -117,7 +117,13 @@ export class DocumentHistoryStore {
    */
   reset(documentId: string, texts: string[]) {
     if (!this.histories.has(documentId) || texts.length === 0) return;
-    this.histories.set(documentId, { values: texts.slice(-HISTORY_LIMIT_PER_DOCUMENT), index: texts.length - 1 });
+    // The stored values are trimmed, so the index must point into the trimmed
+    // array. Using texts.length - 1 left it out of range and undo returned
+    // undefined once a restore received more states than the history limit.
+    this.histories.set(documentId, {
+      values: texts.slice(-HISTORY_LIMIT_PER_DOCUMENT),
+      index: Math.min(texts.length, HISTORY_LIMIT_PER_DOCUMENT) - 1,
+    });
     this.emit();
   }
 

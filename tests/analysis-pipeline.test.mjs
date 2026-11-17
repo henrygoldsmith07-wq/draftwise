@@ -11,7 +11,12 @@ import {
   mergeAnalysisIssues,
   retainUnaffectedIssues,
 } from "../packages/analysis/src/index.ts";
-import { analyzeLocallyIncremental } from "../packages/grammar/src/index.ts";
+import { analyzeLocally, analyzeLocallyIncremental } from "../packages/grammar/src/index.ts";
+import { buildSuggestionState } from "../lib/suggestions.ts";
+import { DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
+
+const style = DEFAULT_STYLE_PREFERENCES;
+const goals = { audience: "academic", intent: "persuade", tone: "formal" };
 
 test("analysis cache fingerprints are deterministic and exclude raw credential text", () => {
   const first = createAnalysisSettingsFingerprint({
@@ -205,4 +210,79 @@ test("web analysis cache is cleared when private credential material changes", a
   const hook = await readFile(new URL("../hooks/useAnalysis.ts", import.meta.url), "utf8");
   assert.match(hook, /cache\.current\.clear\(\);\s*\}, \[classifier\?\.apiKey, settings\.apiKey, settings\.customHeaders\]\);/u);
   assert.doesNotMatch(hook, /settingsFingerprint[\s\S]{0,500}apiKey:\s*settings\.apiKey/u);
+});
+
+test("analyzeLocally and analyzeLocallyIncremental hand back the parsed document", () => {
+  const previous = "The draft is repeated here. The stable tail remains.";
+  const next = "The draft is repeated here now. The stable tail remains.";
+  const local = analyzeLocally(next, {}, goals);
+  assert.ok(local.document, "analyzeLocally returns a document");
+  assert.equal(local.document.text, next);
+  assert.ok(local.document.tokens.length > 0);
+
+  const changed = detectChangedRange(previous, next);
+  const incremental = analyzeLocallyIncremental(previous, next, [], changed, {}, goals);
+  assert.ok(incremental.document, "incremental path returns a document");
+  assert.equal(incremental.document.text, next);
+
+  // A wholesale change falls back to the full-analysis path; that document is
+  // returned too.
+  const wholesale = analyzeLocallyIncremental("a".repeat(80), "b".repeat(80), [], detectChangedRange("a".repeat(80), "b".repeat(80)));
+  assert.ok(wholesale.document);
+  assert.equal(wholesale.document.text, "b".repeat(80));
+});
+
+test("buildSuggestionState passes the analysed document through to prioritisation", () => {
+  const text = "The report was wrote by the team. It are not accurate.";
+  const analysis = analyzeLocally(text, {}, goals);
+  const base = { issues: analysis.issues, goals, style, dismissedKeys: [] };
+
+  // Wrap the returned document in a proxy. prioritiseSuggestions reads
+  // document.tokens.length on every call, so the `get` trap fires only when the
+  // exact object we supplied reaches it — proving reuse rather than a re-parse.
+  let touched = false;
+  const spied = new Proxy(analysis.document, {
+    get(target, prop, receiver) {
+      touched = true;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const viaDocument = buildSuggestionState({ ...base, text, document: spied });
+  assert.equal(touched, true, "prioritisation used the provided document object");
+
+  // Supplying the document is functionally identical to letting prioritise
+  // parse the text itself.
+  const viaText = buildSuggestionState({ ...base, text });
+  assert.deepEqual(
+    viaDocument.displayed.map((issue) => issue.id),
+    viaText.displayed.map((issue) => issue.id),
+  );
+
+  // Callers that omit the document still work.
+  assert.ok(Array.isArray(viaText.displayed));
+});
+
+test("incremental analysis agrees with a full analysis of the same text", () => {
+  // A ~640-char slice cannot judge document-wide rules (repeated sentence
+  // openings hundreds of chars apart, paragraph length, consistency). Deriving
+  // them from the slice used to add/remove findings for identical text, so the
+  // writer saw different scores depending on whether they had just typed.
+  const paras = [
+    "The committee reviewed the evidence carefully. Several members suggested alternative approaches to the problem. The final decision was deferred. Everyone agreed that more data would help.",
+    "Writing is a craft that improves with deliberate practice. Draftwise keeps the writer in control of every suggestion. Local checks run without a network connection.",
+    "Climate policy requires balancing competing priorities. Economists emphasise efficiency while advocates stress fairness. A workable compromise must respect both.",
+  ];
+  const text = paras.join("\n\n").repeat(4);
+  const next = text.replace("more data would help", "more detailed data would help");
+  const full = analyzeLocally(next, {}, goals);
+  const previous = analyzeLocally(text, {}, goals);
+  const incremental = analyzeLocallyIncremental(
+    text, next, previous.issues, detectChangedRange(text, next), {}, goals,
+  );
+  const key = (result) => result.issues
+    .map((issue) => `${issue.ruleId}@${issue.start}:${issue.original}`)
+    .sort()
+    .join("|");
+  assert.equal(key(incremental), key(full), "same text must produce the same findings");
+  assert.equal(incremental.scores.conciseness, full.scores.conciseness);
 });

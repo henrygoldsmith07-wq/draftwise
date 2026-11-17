@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { findDocumentStructure } from "../packages/grammar/src/structure.ts";
 import { analyzeLocally } from "../packages/grammar/src/index.ts";
+import { parseDocument } from "../packages/grammar/src/parser.ts";
+import { getWritingStats } from "../packages/grammar/src/statistics.ts";
 import { DEFAULT_STYLE_PREFERENCES } from "../packages/types/src/index.ts";
 
 const style = DEFAULT_STYLE_PREFERENCES;
@@ -127,4 +129,72 @@ test("structural notes are editorial judgement, not objective errors", () => {
     assert.ok(issue.confidence < 0.9, "structural confidence stays below objective rules");
     assert.equal(issue.replacement, "", "structural notes have no auto-replacement");
   }
+});
+
+test("short sentences with irregular past verbs are not fragments", () => {
+  // hasVerb used to accept only suffix forms, so "went" and "left" made
+  // perfectly complete sentences read as missing a verb.
+  for (const text of ["Jane went home.", "He left early.", "She made the call."]) {
+    const issues = analyzeLocally(text, {}, goals).issues
+      .filter((issue) => issue.ruleId === "structure-fragment");
+    assert.deepEqual(issues, [], `${text} is a complete sentence`);
+  }
+});
+
+test("abbreviation remnants are not reported as sentence fragments", () => {
+  const issues = analyzeLocally("e.g. this one works.", {}, goals).issues
+    .filter((issue) => issue.ruleId === "structure-fragment");
+  assert.deepEqual(issues, []);
+});
+
+test("stative adjectives do not inflate the passive rate or clarity score", () => {
+  const text = "The door is open. The sky is green. He was keen.";
+  const stats = getWritingStats(text);
+  assert.equal(stats.passiveVoice, 0);
+  assert.equal(stats.passiveVoicePercentage, 0);
+  const result = analyzeLocally(text, {}, goals);
+  assert.equal(result.issues.length, 0, "clean prose stays issue-free");
+  assert.ok(result.scores.clarity >= 95, `clarity should not be penalised: ${result.scores.clarity}`);
+});
+
+test("genuine passives are still counted", () => {
+  const stats = getWritingStats("The report was written by the team. The letters were sent yesterday.");
+  assert.ok(stats.passiveVoice >= 2);
+  assert.ok(stats.passiveVoicePercentage >= 50);
+});
+
+test("a long unterminated token is parsed in bounded time", () => {
+  // Regression: the sentence pattern's lazy body used to expand to the end of a
+  // terminator-less run at every start position (minified code, a long URL or a
+  // base64 blob), which is quadratic on the keystroke path. Capping the body at
+  // 400 chars bounds that expansion. A pure token is the shape that triggers
+  // it: the very first match attempt walks the whole run looking for a period.
+  const token = "a".repeat(12_000);
+  const unbounded = /(?=\S)[^.!?…\n]*?[.!?…]+(?=\s|$)/gu;
+
+  const elapsed = (work) => {
+    const startedAt = performance.now();
+    work();
+    return performance.now() - startedAt;
+  };
+  const median = (work, runs = 3) => {
+    elapsed(work); // warm up
+    const samples = Array.from({ length: runs }, () => elapsed(work)).sort((a, b) => a - b);
+    return samples[Math.floor(samples.length / 2)];
+  };
+  // Compare medians in one run so the check is independent of machine speed.
+  const parseMs = median(() => parseDocument(token));
+  const unboundedMs = median(() => [...token.matchAll(unbounded)]);
+  assert.ok(parseMs < unboundedMs / 2, `parse ${parseMs.toFixed(1)}ms should beat the old quadratic pattern ${unboundedMs.toFixed(1)}ms`);
+
+  const doc = parseDocument(token);
+  assert.equal(doc.text, token);
+  assert.equal(doc.sentences.length, 1, "the unterminated run is captured as one tail sentence");
+  assert.equal(doc.sentences[0].text, token);
+});
+
+test("the bounded sentence pattern still splits ordinary prose", () => {
+  const doc = parseDocument("A short opening sentence. A short closing sentence.");
+  assert.ok(doc.sentences.some((sentence) => sentence.text.includes("A short opening sentence.")), "opening sentence is still detected");
+  assert.ok(doc.sentences.some((sentence) => sentence.text.includes("A short closing sentence.")), "closing sentence is still detected");
 });

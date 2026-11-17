@@ -90,13 +90,24 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
   const segmentsRef = useRef<SpeechSegment[]>([]);
   const runRef = useRef(0);
   const spokenTextRef = useRef<string | null>(null);
+  // The first segment is queued for the next tick (see `start`). Keeping its
+  // timer id lets unmount and a superseding run cancel a start that has not
+  // happened yet, instead of letting it read the old draft into a new view.
+  const startTimerRef = useRef<number | null>(null);
 
   const cancelEngine = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
   }, []);
 
+  const clearPendingStart = useCallback(() => {
+    if (startTimerRef.current === null) return;
+    if (typeof window !== "undefined") window.clearTimeout(startTimerRef.current);
+    startTimerRef.current = null;
+  }, []);
+
   const reset = useCallback((announcement: string) => {
+    clearPendingStart();
     runRef.current += 1;
     spokenTextRef.current = null;
     segmentsRef.current = [];
@@ -105,7 +116,7 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
     setPosition(0);
     setRange(null);
     setMessage(announcement);
-  }, [cancelEngine]);
+  }, [cancelEngine, clearPendingStart]);
 
   const speakFrom = useCallback((index: number, run: number) => {
     const engine = typeof window === "undefined" ? null : window.speechSynthesis;
@@ -170,8 +181,14 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
     // Cancelling the previous run and speaking in the same task makes Chrome
     // drop the new utterance, so the first one is queued for the next tick.
     cancelEngine();
-    window.setTimeout(() => speakFrom(0, run), 0);
-  }, [cancelEngine, speakFrom, text]);
+    // A previous start may still be queued in this tick; supersede it before
+    // scheduling this run's first segment.
+    clearPendingStart();
+    startTimerRef.current = window.setTimeout(() => {
+      startTimerRef.current = null;
+      speakFrom(0, run);
+    }, 0);
+  }, [cancelEngine, clearPendingStart, speakFrom, text]);
 
   const pause = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -203,8 +220,14 @@ export function useReadAloud({ text, dialect }: { text: string; dialect: Dialect
   }, [reset, text]);
 
   // Speech outlives the component: leaving the editor or switching documents
-  // must not leave a voice reading the previous draft.
-  useEffect(() => () => { cancelEngine(); }, [cancelEngine]);
+  // must not leave a voice reading the previous draft. A queued first segment
+  // has not reached the engine yet, so clear its timer and invalidate the run
+  // token (in case the callback was already dispatched) before cancelling.
+  useEffect(() => () => {
+    clearPendingStart();
+    runRef.current += 1;
+    cancelEngine();
+  }, [cancelEngine, clearPendingStart]);
 
   return { supported, status, position, total, range, message, start, pause, resume, stop };
 }

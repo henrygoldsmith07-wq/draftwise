@@ -13,6 +13,12 @@ import { DIALOG_FOCUSABLE_SELECTOR, nextTrapIndex } from "@/lib/dialog-focus";
  * `returnFocusRef` when that element is gone, which happens when the trigger
  * unmounts while its confirmation is showing.
  *
+ * `initialFocusRef` is optional and backwards compatible. Pass it when the
+ * first control would be destructive: a confirmation that opens with the
+ * delete button focused is one Enter press away from doing damage, so callers
+ * can name the safe action (Cancel / Keep them) instead. If the ref is absent
+ * or detached, behaviour is unchanged — the first focusable still wins.
+ *
  * The effect only touches the DOM (focus, listeners). It never calls setState,
  * so the render-then-effect cascade the set-state-in-effect rule guards
  * against cannot happen here.
@@ -23,20 +29,32 @@ export function useDialogFocusTrap<T extends HTMLElement>(
   // Read-only so any element ref (button, div) is accepted without a cast:
   // the hook only ever reads `.current`.
   returnFocusRef?: { readonly current: HTMLElement | null },
+  initialFocusRef?: { readonly current: HTMLElement | null },
 ) {
   const dialogRef = useRef<T | null>(null);
   const closeRef = useRef(onClose);
   const returnRef = useRef(returnFocusRef);
+  const initialRef = useRef(initialFocusRef);
 
   useEffect(() => {
     if (!open) return;
     closeRef.current = onClose;
     returnRef.current = returnFocusRef;
+    initialRef.current = initialFocusRef;
     const dialog = dialogRef.current;
     if (!dialog || typeof document === "undefined") return;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusables = () => [...dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR)];
-    (focusables()[0] ?? dialog).focus({ preventScroll: true });
+    const requested = initialRef.current?.current;
+    const initial = requested && requested.isConnected ? requested : (focusables()[0] ?? dialog);
+    // A confirmation can add prose above its buttons inside a scrollable
+    // dialog. Bring the target into view before focusing with preventScroll,
+    // otherwise the focused safe action can sit below the fold.
+    const focusItem = (element: HTMLElement) => {
+      element.scrollIntoView({ block: "nearest" });
+      element.focus({ preventScroll: true });
+    };
+    focusItem(initial);
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -55,7 +73,8 @@ export function useDialogFocusTrap<T extends HTMLElement>(
         ? (event.shiftKey ? items.length - 1 : 0)
         : nextTrapIndex(current, items.length, event.shiftKey);
       event.preventDefault();
-      items[next]?.focus({ preventScroll: true });
+      const target = items[next];
+      if (target) focusItem(target);
     };
     // Capture phase so a nested stopPropagation (e.g. inside a card button)
     // cannot let Tab slip out of the dialog unnoticed.
@@ -66,7 +85,7 @@ export function useDialogFocusTrap<T extends HTMLElement>(
       const target = fallback && fallback.isConnected ? fallback : previouslyFocused;
       if (target && target.isConnected) target.focus({ preventScroll: true });
     };
-  }, [open, onClose, returnFocusRef]);
+  }, [open, onClose, returnFocusRef, initialFocusRef]);
 
   return dialogRef;
 }

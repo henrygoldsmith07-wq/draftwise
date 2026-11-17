@@ -135,7 +135,7 @@ test("lexical verbs agree with a plural subject and stay quiet otherwise", () =>
   assert.ok(issue);
   assert.equal(issue.replacement, "show");
   // Correct agreement, ambiguous number, and noun-noun compounds stay clean.
-  for (const text of ["The results show steady improvement.", "The economics shows growth.", "Our headquarters shows growth.", "The sales calls rang unanswered."]) {
+  for (const text of ["The results show steady improvement.", "The economics shows growth.", "Our headquarters shows growth.", "The sales calls rang unanswered.", "The data are conclusive.", "The media are reporting it."]) {
     assert.equal(analyzeLocally(text).issues.some((item) => item.ruleId === "grammar-subject-verb-agreement"), false, text);
   }
 });

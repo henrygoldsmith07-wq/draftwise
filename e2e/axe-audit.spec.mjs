@@ -133,7 +133,7 @@ test.describe("axe-core audit", () => {
     await page.waitForTimeout(800);
     await page.getByRole("button", { name: "Documents" }).click({ force: true });
     await waitForAppReady(page);
-    await expect(page.locator(".document-card-main").first()).toBeVisible();
+    await expect(page.locator(".document-grid .document-card").first()).toBeVisible();
     expect(await runAxe(page, "dashboard")).toEqual([]);
   });
 
@@ -175,5 +175,63 @@ test.describe("axe-core audit", () => {
     );
     await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 15_000 });
     expect(await runAxe(page, "editor / mobile")).toEqual([]);
+  });
+
+  test("views reflow without horizontal scrolling at 320px", async ({ page }) => {
+    // 390px hid a real reflow failure: main was a flex item with min-width:auto,
+    // so the score heading's 52px number plus 126px ring widened the page to
+    // 751px. This is the WCAG 1.4.10 case a 390px viewport cannot exercise.
+    await page.setViewportSize({ width: 320, height: 700 });
+    await openApp(page);
+    await page.getByLabel("Draft editor").fill(
+      "This is repeatd wording and the numbers is wrong. The data are conclusive.",
+    );
+    await expect(page.locator(".suggestion-card").first()).toBeVisible({ timeout: 15_000 });
+    for (const [label, open] of [
+      ["editor", null],
+      ["dashboard", "Documents"],
+      ["insights", /Insights/u],
+    ]) {
+      if (open) await page.getByRole("button", { name: open }).click();
+      const widths = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth,
+      }));
+      expect(widths.scroll, `${label} scrollWidth`).toBe(widths.client);
+      expect(await runAxe(page, `${label} / 320px`)).toEqual([]);
+    }
+  });
+
+  test("extension guide passes axe with and without content", async ({ page }) => {
+    // The decorative preview is aria-hidden but its small caption text still
+    // has to clear 4.5:1, and its h3s used to follow the h1 directly.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await freshStart(page);
+    await page.getByRole("button", { name: /Extension/u }).click();
+    expect(await runAxe(page, "extension guide")).toEqual([]);
+    const headings = await page.locator("main h1, main h2, main h3").evaluateAll(
+      (nodes) => nodes.map((node) => node.tagName));
+    expect(headings[0]).toBe("H1");
+    expect(headings.slice(1).every((level) => level === "H2")).toBe(true);
+  });
+
+  test("dialogs reflow and stay accessible at 320px in dark theme", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await openApp(page);
+    await page.getByRole("button", { name: /Use dark theme/u }).click();
+    for (const [label, open] of [
+      ["shortcuts", () => page.getByRole("button", { name: /Keyboard shortcuts/u }).click()],
+      ["settings", () => page.locator("header").getByRole("button", { name: "Open settings" }).click()],
+    ]) {
+      await open();
+      const widths = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth,
+      }));
+      expect(widths.scroll, `${label} dialog scrollWidth`).toBe(widths.client);
+      expect(await runAxe(page, `${label} dialog / 320px dark`, "[role=\"dialog\"]")).toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toBeHidden();
+    }
   });
 });

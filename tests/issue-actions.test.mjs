@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "../lib/issue-actions.ts";
+import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues, issueAnchors } from "../lib/issue-actions.ts";
 
 const issue = (patch = {}) => ({
   id: "issue",
@@ -198,4 +199,124 @@ test("dismissal keys written before anchoring still parse", () => {
   const found = issue({ start: 0, end: 3 });
   assert.deepEqual(getOpenIssues([found], [legacy]), []);
   assert.doesNotThrow(() => getOpenIssues([found], [legacy], "bad whatever follows"));
+});
+
+// A faithful copy of the pre-indexing implementation. Kept in the test as an
+// oracle so the large-input test can prove the indexed version returns exactly
+// the same issues as the old linear scan (including all of its edge rules).
+function legacySemanticKey(candidate) {
+  return JSON.stringify([candidate.ruleId, candidate.start, candidate.end, candidate.original, candidate.replacement]);
+}
+
+function legacySemanticKeyFromStored(key) {
+  try {
+    const parsed = JSON.parse(key);
+    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
+    const [, ruleId, , start, end, original, replacement] = parsed;
+    if (!Number.isSafeInteger(start)
+      || !Number.isSafeInteger(end)
+      || typeof original !== "string"
+      || typeof replacement !== "string") return null;
+    return JSON.stringify([ruleId, start, end, original, replacement]);
+  } catch {
+    return null;
+  }
+}
+
+function legacyIsSameDismissal(key, candidate, text) {
+  if (text === undefined) return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(key);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 9) return false;
+  const [, ruleId, , , , original, replacement, before, after] = parsed;
+  if (ruleId !== candidate.ruleId || original !== candidate.original || replacement !== candidate.replacement) return false;
+  if (typeof before !== "string" || typeof after !== "string") return false;
+  const live = issueAnchors(text, candidate);
+  return live.before.endsWith(before) && live.after.startsWith(after);
+}
+
+function legacyGetOpenIssues(issues, dismissedIssueKeys, text) {
+  const dismissed = new Set(dismissedIssueKeys);
+  const semanticallyDismissed = new Set();
+  for (const key of dismissed) {
+    const semanticKey = legacySemanticKeyFromStored(key);
+    if (semanticKey !== null) semanticallyDismissed.add(semanticKey);
+  }
+  return issues.filter((candidate) => !dismissed.has(getIssueDismissalKey(candidate))
+    && !semanticallyDismissed.has(legacySemanticKey(candidate))
+    && ![...dismissed].some((key) => legacyIsSameDismissal(key, candidate, text)));
+}
+
+test("indexed getOpenIssues matches the legacy linear scan on large input", () => {
+  const sentence = (i) => `Sentence ${i} has the reigon and a teh error inside it. `;
+  const prefix = "An inserted opening paragraph shifts every offset below. ".repeat(6);
+  const baseText = Array.from({ length: 300 }, (_, i) => sentence(i)).join("");
+  const text = prefix + baseText;
+
+  // Findings on the edited text. Distinct replacements per finding keep the
+  // index buckets small, exercising O(1) lookups rather than one giant bucket.
+  const issues = [];
+  for (let i = 0; i < 300; i += 1) {
+    const from = text.indexOf(`Sentence ${i} `);
+    const regionAt = text.indexOf("reigon", from);
+    const tehAt = text.indexOf("teh", from);
+    issues.push(issue({ id: `region-${i}`, ruleId: "spelling", start: regionAt, end: regionAt + 6, original: "reigon", replacement: `region-${i}` }));
+    issues.push(issue({ id: `teh-${i}`, ruleId: "grammar", start: tehAt, end: tehAt + 3, original: "teh", replacement: `the-${i}` }));
+  }
+
+  // Dismissals are authored against the PRE-edit text, so their offsets no
+  // longer line up with the edited text: only anchored matching can keep them
+  // dismissed. This hammers the path that used to JSON.parse every pair.
+  const dismissedKeys = [];
+  for (let i = 0; i < 300; i += 2) {
+    const from = baseText.indexOf(`Sentence ${i} `);
+    const regionAt = baseText.indexOf("reigon", from);
+    const tehAt = baseText.indexOf("teh", from);
+    dismissedKeys.push(getIssueDismissalKey(issue({ id: `region-${i}`, ruleId: "spelling", start: regionAt, end: regionAt + 6, original: "reigon", replacement: `region-${i}` }), baseText));
+    dismissedKeys.push(getIssueDismissalKey(issue({ id: `teh-${i}`, ruleId: "grammar", start: tehAt, end: tehAt + 3, original: "teh", replacement: `the-${i}` }), baseText));
+  }
+  // A legacy 7-field key plus malformed keys the implementation must ignore.
+  dismissedKeys.push(JSON.stringify(["legacy", "spelling", "local", issues[0].start, issues[0].end, "reigon", "region-0"]));
+  dismissedKeys.push("not-json", "{}", "[1,2,3]");
+
+  assert.ok(dismissedKeys.length > 300, "fixture must contain hundreds of dismissals");
+  assert.ok(issues.length > 300, "fixture must contain hundreds of issues");
+
+  const expected = legacyGetOpenIssues(issues, dismissedKeys, text);
+  const actual = getOpenIssues(issues, dismissedKeys, text);
+  assert.deepEqual(actual.map((item) => item.id), expected.map((item) => item.id));
+  assert.ok(actual.length < issues.length, "the fixture must actually dismiss something");
+  // The undefined-text path must stay equivalent too (anchoring is skipped).
+  assert.deepEqual(
+    getOpenIssues(issues, dismissedKeys).map((item) => item.id),
+    legacyGetOpenIssues(issues, dismissedKeys).map((item) => item.id),
+  );
+});
+
+test("getOpenIssues parses dismissal keys only once, before the per-issue filter", () => {
+  const source = readFileSync(new URL("../lib/issue-actions.ts", import.meta.url), "utf8");
+  const fnStart = source.indexOf("export function getOpenIssues");
+  assert.ok(fnStart >= 0, "getOpenIssues source must be present");
+  const fnSource = source.slice(fnStart);
+
+  const filterAt = fnSource.indexOf(".filter(");
+  assert.ok(filterAt >= 0, "getOpenIssues must still use a per-issue filter");
+  const beforeFilter = fnSource.slice(0, filterAt);
+  const filterCallback = fnSource.slice(filterAt);
+
+  // The static guarantee: no JSON.parse inside the per-issue callback.
+  assert.ok(!filterCallback.includes("JSON.parse"),
+    "the per-issue filter callback must not call JSON.parse on stored keys");
+  // Parsing/indexing is delegated to a single helper that runs up front.
+  assert.ok(beforeFilter.includes("parseDismissalKey("),
+    "dismissal keys must be parsed before the filter runs");
+  assert.ok(beforeFilter.includes("new Map"),
+    "anchored dismissals must be indexed before the filter runs");
+  // Stored keys are parsed in exactly one place in the module.
+  assert.equal((source.match(/JSON\.parse\(/g) ?? []).length, 1,
+    "stored keys should be parsed in a single helper, not per issue");
 });

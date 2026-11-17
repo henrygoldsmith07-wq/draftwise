@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 
 interface PageLayoutProps {
   children: ReactNode;
@@ -15,8 +15,14 @@ export function PageLayout({
   focusMode, 
   onFocusModeChange,
   theme,
-  setTheme 
 }: PageLayoutProps) {
+  // Portaled dialogs render outside .app-shell. Mirroring the resolved theme
+  // onto the document root lets their shared CSS pick up the dark palette
+  // without threading a prop through every dialog.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
   return (
     <div className={`app-shell ${focusMode ? "focus-mode" : ""}`} data-theme={theme}>
       {/* Focus mode toggle would go here - can be implemented in a separate component */}

@@ -190,6 +190,28 @@ test("HTTP 200 response semantics distinguish missing content from valid zero-is
   }
 });
 
+test("a hard provider failure is not masked by an earlier invalid-json failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    // Chunk 0 looks like a harmless prose response; the rest reject the key.
+    if (call === 1) return new Response("not json", { status: 200 });
+    return new Response(JSON.stringify({ error: { message: "Bad key" } }), { status: 401 });
+  };
+  try {
+    const text = Array.from({ length: 4 },
+      (_, index) => `Section ${index} ` + "context ".repeat(72)).join("\n\n");
+    await assert.rejects(
+      () => analyzeWithProvider(text, goals, settings,
+        { maxChunkChars: 500, contextWindow: 0, providerConcurrency: 2, maxAiChunks: 4 }),
+      (error) => error instanceof ProviderError && error.code === "unauthorized",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("unsupported response formats retry without replacing local results", async () => {
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -552,6 +574,33 @@ test("negated protected-value instructions remain protected", async () => {
       "Do not change the date; just make this clearer.",
       "Don't change the date. Improve the wording.",
       "Rewrite this without changing the date.",
+      "Change the wording but not the dates.",
+      "Update the phrasing; leave the date untouched.",
+      "Keep the date as it is; improve the wording.",
+      "Preserve the date, but rewrite the rest.",
+    ]) {
+      await assert.rejects(
+        () => rewriteWithProvider({ text, instruction, goals, allowProtectedChanges: false }, settings),
+        (error) => error instanceof ProviderError && error.code === "invalid-json",
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("common negated URL instructions keep protected links untouched", async () => {
+  const originalFetch = globalThis.fetch;
+  const text = "See https://example.com for details.";
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify({ replacement: "See https://evil.example for details." }) } }],
+  }), { status: 200 });
+  try {
+    for (const instruction of [
+      "Change everything except the URLs.",
+      "Change the wording but not the links.",
+      "Update everything other than the URL.",
+      "Change the wording but leave the link untouched.",
     ]) {
       await assert.rejects(
         () => rewriteWithProvider({ text, instruction, goals, allowProtectedChanges: false }, settings),

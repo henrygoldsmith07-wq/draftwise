@@ -1,4 +1,23 @@
 import {
+  CLASSIFIER_BATCH_SIZES,
+  CLASSIFIER_MAX_BATCH_CHUNKS,
+  CLASSIFIER_MAX_EXCERPT_CHARS,
+  CLASSIFIER_TRIAGE_LABELS,
+  ClassifierError,
+  MAX_AI_CHARS_PER_ANALYSIS,
+  MAX_AI_CHUNKS_PER_ANALYSIS,
+  ProviderError,
+  PROVIDER_CONCURRENCY,
+  TRIAGE_CONFIDENCE_THRESHOLDS,
+  TRIAGE_LABEL_FORMULATION_ID,
+  TRIAGE_LABEL_FORMULATIONS,
+  type TriageLabelFormulationId,
+  type TriageConfidenceThresholds,
+} from "./constants.ts";
+export { CLASSIFIER_BATCH_SIZES, CLASSIFIER_MAX_BATCH_CHUNKS, CLASSIFIER_MAX_EXCERPT_CHARS, CLASSIFIER_TRIAGE_LABELS, ClassifierError, MAX_AI_CHARS_PER_ANALYSIS, MAX_AI_CHUNKS_PER_ANALYSIS, ProviderError, PROVIDER_CONCURRENCY, TRIAGE_CONFIDENCE_THRESHOLDS, TRIAGE_LABEL_FORMULATION_ID, TRIAGE_LABEL_FORMULATIONS } from "./constants.ts";
+export type { TriageLabelFormulationId, TriageConfidenceThresholds } from "./constants.ts";
+
+import {
   createAnalysisChunks,
   expandRangeToContext,
   mapChunkIssue,
@@ -113,17 +132,6 @@ function parseProviderPayload(value: unknown): ProviderPayload | null {
   return { issues, tone };
 }
 
-export class ProviderError extends Error {
-  readonly code: ProviderErrorCode;
-  readonly status?: number;
-
-  constructor(code: ProviderErrorCode, message: string, status?: number) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.name = "ProviderError";
-  }
-}
 
 export function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
@@ -696,9 +704,6 @@ export function parseAnalysisResponse(value: unknown, sourceText: string, option
   };
 }
 
-export const PROVIDER_CONCURRENCY = 3;
-export const MAX_AI_CHUNKS_PER_ANALYSIS = 10;
-export const MAX_AI_CHARS_PER_ANALYSIS = 50_000;
 
 export async function mapWithConcurrency<T, R>(
   items: T[],
@@ -727,6 +732,29 @@ export async function mapWithConcurrency<T, R>(
   const workerFailure = workerResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
   if (workerFailure) throw workerFailure.reason;
   return results;
+}
+
+/**
+ * When every chunk fails, a soft "invalid-json" failure is not a reason to
+ * alarm the writer — local analysis stays available. A hard failure among the
+ * other chunks (auth, rate limit, timeout, CORS, bad model) is: checking only
+ * the first rejection used to hide it behind a harmless-looking JSON error.
+ */
+function rethrowHardProviderFailure(results: Array<PromiseSettledResult<unknown>>) {
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  const hard = failures.filter((reason) =>
+    !(reason instanceof ProviderError && reason.code === "invalid-json"));
+  if (!hard.length) return;
+  const priority = ["unauthorized", "rate-limited", "invalid-model", "timeout", "cors"];
+  const rank = (reason: unknown) => {
+    if (!(reason instanceof ProviderError)) return 0;
+    const index = priority.indexOf(reason.code);
+    return index === -1 ? 1 : index;
+  };
+  hard.sort((left, right) => rank(left) - rank(right));
+  throw hard[0];
 }
 
 export interface ProviderRequestMetrics {
@@ -881,10 +909,7 @@ export async function analyzeWithProvider(
   }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
-  if (!successful.length) {
-    const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
-  }
+  if (!successful.length) rethrowHardProviderFailure(settled);
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
       .map((issue) => mapChunkIssue(issue, chunk, text))
@@ -1011,13 +1036,25 @@ function rangesOverlap(left: ProtectedRange, right: ProtectedRange) {
 function protectedKindsAllowedByInstruction(instruction: string) {
   const value = String(instruction || "");
   const edit = String.raw`\b(?:change|update|replace|adjust|convert|reformat|correct)\b[\s\S]{0,100}`;
-  const directNegation = String.raw`\b(?:do\s+not|don't|dont|never)\s+(?:change|update|replace|adjust|convert|reformat|correct)\b(?:(?![,.;!?]).){0,100}`;
-  const withoutChange = String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting)\b(?:(?![,.;!?]).){0,100}`;
+  const gap = String.raw`(?:(?![,.;!?]).){0,100}`;
+  // Negation must win wherever it appears. Previously only "do not change X"
+  // and "without changing X" were recognised, so "change the wording but not
+  // the dates" still allowed the provider to rewrite a protected date.
+  const denialScopes = [
+    String.raw`\b(?:do\s+not|don't|dont|never|does\s+not|doesn't|must\s+not|mustn't|should\s+not|shouldn't)\s+(?:change|update|replace|adjust|convert|reformat|correct|touch|alter|edit)\b`,
+    String.raw`\bwithout\s+(?:changing|updating|replacing|adjusting|converting|reformatting|correcting|touching|altering|editing)\b`,
+    String.raw`\b(?:but\s+)?not\b(?:(?:the|any|those|these)\s+)?`,
+    String.raw`\bexcept(?:\s+for)?\b`,
+    String.raw`\bother\s+than\b`,
+    String.raw`\bkeep\b`,
+    String.raw`\b(?:preserve|retain)\b`,
+  ];
+  const leaveTail = String.raw`(?:(?![,.;!?]).){0,60}\b(?:untouched|unchanged|alone|as\s+is)\b`;
   const allowed = new Set<ProtectedTokenKind>();
-  const permits = (target: string) => {
-    const denied = new RegExp(directNegation + target, "iu").test(value) || new RegExp(withoutChange + target, "iu").test(value);
-    return !denied && new RegExp(edit + target, "iu").test(value);
-  };
+  const denies = (target: string) =>
+    denialScopes.some((scope) => new RegExp(scope + gap + target, "iu").test(value))
+    || new RegExp(String.raw`\bleave\b` + gap + target + leaveTail, "iu").test(value);
+  const permits = (target: string) => !denies(target) && new RegExp(edit + target, "iu").test(value);
   if (permits(String.raw`\bdates?\b`)) allowed.add("date");
   if (permits(String.raw`\b(?:percentage|percent)s?\b`)) allowed.add("percentage");
   if (permits(String.raw`\bcurrenc(?:y|ies)\b`)) allowed.add("currency");
@@ -1213,50 +1250,6 @@ export const DEFAULT_CLASSIFIER_SETTINGS_VALUE: ClassifierSettings = {
   maxExcerptChars: 500,
 };
 
-export const CLASSIFIER_MAX_EXCERPT_CHARS = 500;
-export const CLASSIFIER_MAX_BATCH_CHUNKS = 100;
-export const CLASSIFIER_BATCH_SIZES = [5, 10, 25, 50, 100] as const;
-export const TRIAGE_LABEL_FORMULATIONS = {
-  "semantic-v2": [
-    "The local writing checks are sufficient; no semantic AI review is needed.",
-    "A semantic AI writing review would likely find useful issues the local checks cannot reliably detect.",
-  ],
-  "direct-v1": [
-    "Local writing checks are sufficient.",
-    "Semantic AI review would likely add useful feedback.",
-  ],
-  "explicit-v1": [
-    "No additional semantic review is needed beyond the local writing checks.",
-    "A semantic writing model would likely identify useful issues the local checks cannot reliably detect.",
-  ],
-  "compact-v1": [
-    "Local checks are enough for this passage.",
-    "An AI writing review would likely add useful feedback.",
-  ],
-} as const;
-export type TriageLabelFormulationId = keyof typeof TRIAGE_LABEL_FORMULATIONS;
-export const TRIAGE_LABEL_FORMULATION_ID: TriageLabelFormulationId = "semantic-v2";
-export const CLASSIFIER_TRIAGE_LABELS = TRIAGE_LABEL_FORMULATIONS[TRIAGE_LABEL_FORMULATION_ID];
-export interface TriageConfidenceThresholds {
-  aiNeeded: number;
-  locallySufficient: number;
-}
-export const TRIAGE_CONFIDENCE_THRESHOLDS: TriageConfidenceThresholds = {
-  aiNeeded: 0.75,
-  locallySufficient: 0.80,
-};
-
-export class ClassifierError extends Error {
-  readonly code: ClassifierErrorCode;
-  readonly status?: number;
-
-  constructor(code: ClassifierErrorCode, message: string, status?: number) {
-    super(message);
-    this.code = code;
-    this.status = status;
-    this.name = "ClassifierError";
-  }
-}
 
 export function validateClassifierUrl(baseUrl: string) {
   let parsed: URL;
@@ -2040,10 +2033,7 @@ export async function analyzeWithTriage(
   }, { concurrency: options.providerConcurrency, signal: options.signal });
   const successful = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   const failed = settled.filter((result) => result.status === "rejected").length;
-  if (!successful.length) {
-    const firstFailure = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (firstFailure && !(firstFailure.reason instanceof ProviderError && firstFailure.reason.code === "invalid-json")) throw firstFailure.reason;
-  }
+  if (!successful.length) rethrowHardProviderFailure(settled);
   const aiIssues = successful.flatMap(({ chunk, response }) => {
     return parseAnalysisIssues(response, chunk.text, chunk.id)
       .map((issue) => mapChunkIssue(issue, chunk, text))

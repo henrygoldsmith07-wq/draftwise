@@ -40,51 +40,99 @@ function getSemanticDismissalKey(issue: WritingIssue) {
   ]);
 }
 
-function getSemanticDismissalKeyFromStoredKey(key: string) {
+type AnchoredDismissal = {
+  ruleId: unknown;
+  original: unknown;
+  replacement: unknown;
+  before: string;
+  after: string;
+};
+
+/**
+ * Parse a stored dismissal key once and derive both dismissal identities from
+ * that single parse.
+ *
+ * The previous implementation called JSON.parse once per issue x dismissal
+ * pair (and copied the entire dismissal set for every issue) on every
+ * keystroke. Deriving the identities up front keeps all parsing out of the hot
+ * per-issue filter.
+ */
+function parseDismissalKey(key: string) {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(key);
-    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
-    const [, ruleId, , start, end, original, replacement] = parsed;
-    if (!Number.isSafeInteger(start)
-      || !Number.isSafeInteger(end)
-      || typeof original !== "string"
-      || typeof replacement !== "string") return null;
-    return JSON.stringify([ruleId, start, end, original, replacement]);
+    parsed = JSON.parse(key);
   } catch {
     return null;
   }
+  if (!Array.isArray(parsed)) return null;
+
+  // Semantic identity. Keys written before anchoring have 7 fields, current
+  // keys have 9; the previous implementation accepted both.
+  let semanticKey: string | null = null;
+  if (parsed.length === 7 || parsed.length === 9) {
+    const [, ruleId, , start, end, original, replacement] = parsed;
+    if (Number.isSafeInteger(start)
+      && Number.isSafeInteger(end)
+      && typeof original === "string"
+      && typeof replacement === "string") {
+      semanticKey = JSON.stringify([ruleId, start, end, original, replacement]);
+    }
+  }
+
+  // Anchored identity. Only full 9-field keys with string anchors can match.
+  let anchored: AnchoredDismissal | null = null;
+  if (parsed.length === 9) {
+    const [, ruleId, , , , original, replacement, before, after] = parsed;
+    if (typeof before === "string" && typeof after === "string") {
+      anchored = { ruleId, original, replacement, before, after };
+    }
+  }
+
+  return { semanticKey, anchored };
 }
 
 export function getOpenIssues(issues: WritingIssue[], dismissedIssueKeys: Iterable<string>, text?: string) {
   const dismissed = new Set(dismissedIssueKeys);
   const semanticallyDismissed = new Set<string>();
+  // Anchored dismissals indexed by the fields that must match for the anchor
+  // comparison to be relevant (rule id plus the exact original/replacement).
+  // The filter can jump straight to this issue's candidates instead of
+  // scanning and re-parsing every dismissal on every keystroke.
+  const anchoredByKey = new Map<string, AnchoredDismissal[]>();
   for (const key of dismissed) {
-    const semanticKey = getSemanticDismissalKeyFromStoredKey(key);
-    if (semanticKey !== null) semanticallyDismissed.add(semanticKey);
+    const parsed = parseDismissalKey(key);
+    if (parsed === null) continue;
+    if (parsed.semanticKey !== null) semanticallyDismissed.add(parsed.semanticKey);
+    if (parsed.anchored !== null) {
+      const indexKey = JSON.stringify([parsed.anchored.ruleId, parsed.anchored.original, parsed.anchored.replacement]);
+      const bucket = anchoredByKey.get(indexKey);
+      if (bucket) bucket.push(parsed.anchored);
+      else anchoredByKey.set(indexKey, [parsed.anchored]);
+    }
   }
-  return issues.filter((issue) => !dismissed.has(getIssueDismissalKey(issue))
-    && !semanticallyDismissed.has(getSemanticDismissalKey(issue))
+
+  return issues.filter((issue) => {
+    if (dismissed.has(getIssueDismissalKey(issue))) return false;
+    if (semanticallyDismissed.has(getSemanticDismissalKey(issue))) return false;
+    if (text === undefined) return true;
+
     // Anchored match. An exact key match fails as soon as anything above the
     // finding changes length, because the id carries the offsets. Without
     // this, rewriting a paragraph at the top of a long draft brought back
     // every suggestion the writer had already dismissed below it.
-    && ![...dismissed].some((key) => isSameDismissal(key, issue, text)));
-}
-
-function isSameDismissal(key: string, issue: WritingIssue, text?: string) {
-  if (text === undefined) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(key);
-  } catch {
-    return false;
-  }
-  if (!Array.isArray(parsed) || parsed.length !== 9) return false;
-  const [, ruleId, , , , original, replacement, before, after] = parsed;
-  if (ruleId !== issue.ruleId || original !== issue.original || replacement !== issue.replacement) return false;
-  if (typeof before !== "string" || typeof after !== "string") return false;
-  const live = issueAnchors(text, issue);
-  return live.before.endsWith(before) && live.after.startsWith(after);
+    const candidates = anchoredByKey.get(JSON.stringify([issue.ruleId, issue.original, issue.replacement]));
+    if (candidates === undefined) return true;
+    const live = issueAnchors(text, issue);
+    for (const entry of candidates) {
+      // Keep the old strict comparisons verbatim; the index only narrows the
+      // candidates, so edge/malformed values behave exactly as before.
+      if (entry.ruleId !== issue.ruleId
+        || entry.original !== issue.original
+        || entry.replacement !== issue.replacement) continue;
+      if (live.before.endsWith(entry.before) && live.after.startsWith(entry.after)) return false;
+    }
+    return true;
+  });
 }
 
 export function hasActionableReplacement(issue: WritingIssue) {

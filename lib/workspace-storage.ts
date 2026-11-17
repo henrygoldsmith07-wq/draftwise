@@ -9,7 +9,7 @@
  * and reused anywhere.
  */
 
-import { cleanPreferredReplacements } from "./terminology.ts";
+import { cleanPreferredReplacements, cleanTerminologyList } from "./terminology.ts";
 import {
   DEFAULT_CLASSIFIER_SETTINGS,
   DEFAULT_GOALS,
@@ -34,6 +34,12 @@ export const LEGACY_STORAGE_KEYS = [
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export const AUTO_SAVE_DELAY_MS = 350;
+// Bounds for fields that come from an untrusted backup. A shape-valid backup
+// can still carry a 15 MB API key or a 100k-entry count map, which would be
+// written to storage and then scanned on every writing-profile adjustment.
+export const MAX_API_KEY_CHARS = 4096;
+export const MAX_DOCUMENT_ID_CHARS = 256;
+export const MAX_COUNT_MAP_KEYS = 500;
 
 export interface WorkspaceStorage {
   getItem(key: string): string | null;
@@ -61,6 +67,40 @@ function isStringMap(value: unknown): value is Record<string, string> {
  * set actually needs.
  */
 const MAX_CUSTOM_HEADERS_CHARS = 4_000;
+
+/**
+ * Bounds for the free-text lists in the style profile and goals. These are
+ * learned from files the writer did not author (backups, imported profiles):
+ * analysis compiles a regex or scans an array per entry on every keystroke, so
+ * a hostile "dictionary" of 50,000 words would freeze the tab after restore.
+ * The limits sit far above any real profile so normal data round-trips untouched.
+ */
+export const MAX_WORD_LIST_ITEMS = 1_000;
+export const MAX_WORD_CHARS = 120;
+export const MAX_LEARNED_ITEMS = 500;
+export const MAX_LEARNED_TEXT_CHARS = 1_000;
+
+/**
+ * Single bounded cleaner for every untrusted word list (dictionary, names,
+ * ignored/blocked words, rule ids). Normalises whitespace and deduplicates like
+ * `cleanTerminologyList` does, but keeps its own limits: a personal dictionary
+ * can legitimately hold more than the per-document terminology cap of 50.
+ */
+function cleanWordList(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const words: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const word = item.trim().replace(/\s+/gu, " ");
+    if (!word || word.length > MAX_WORD_CHARS) continue;
+    if (seen.has(word)) continue;
+    seen.add(word);
+    words.push(word);
+    if (words.length >= MAX_WORD_LIST_ITEMS) break;
+  }
+  return words;
+}
 
 function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
   return typeof value === "string" && values.includes(value as T);
@@ -173,73 +213,96 @@ function parseRecord(value: string | null) {
 
 function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
   if (!isRecord(value)) return fallback;
-  return {
+  const goals: WritingGoals = {
     audience: isOneOf(value.audience, ["general", "academic", "professional", "technical", "casual"]) ? value.audience : fallback.audience,
     intent: isOneOf(value.intent, ["inform", "explain", "persuade", "describe", "story"]) ? value.intent : fallback.intent,
     tone: isOneOf(value.tone, ["neutral", "confident", "friendly", "professional", "formal", "casual"]) ? value.tone : fallback.tone,
-    ...(value.documentType !== undefined
-      ? { documentType: isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]) ? value.documentType : fallback.documentType }
-      : { documentType: fallback.documentType }),
-    ...(typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0
-      ? { targetLength: Math.min(200_000, Math.round(value.targetLength)) }
-      : { targetLength: fallback.targetLength }),
-    ...(value.requiredTerminology !== undefined || fallback.requiredTerminology !== undefined
-      ? { requiredTerminology: isStringArray(value.requiredTerminology) ? value.requiredTerminology : fallback.requiredTerminology ?? [] }
-      : {}),
-    ...(value.forbiddenTerminology !== undefined || fallback.forbiddenTerminology !== undefined
-      ? { forbiddenTerminology: isStringArray(value.forbiddenTerminology) ? value.forbiddenTerminology : fallback.forbiddenTerminology ?? [] }
-      : {}),
-    // A valid-but-hostile swap map is cleaned rather than trusted verbatim:
-    // the writer keeps their other goals and the prompt never carries an
-    // unbounded map from stored data.
-    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
-      ? { preferredReplacements: cleanPreferredReplacements(isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {}) }
-      : {}),
-    ...(value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined
-      ? { preferredReplacements: isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {} }
-      : {}),
   };
+  // Optional keys stay absent when neither the stored value nor the fallback
+  // has them, so a normal profile round-trips with exactly the same shape.
+  const documentType = value.documentType !== undefined
+    ? (isOneOf(value.documentType, ["essay", "report", "email", "article", "personal-statement", "technical-explanation", "notes", "general"]) ? value.documentType : fallback.documentType)
+    : fallback.documentType;
+  if (documentType !== undefined) goals.documentType = documentType;
+
+  const targetLength = typeof value.targetLength === "number" && Number.isFinite(value.targetLength) && value.targetLength > 0
+    ? Math.min(200_000, Math.round(value.targetLength))
+    : fallback.targetLength;
+  if (targetLength !== undefined) goals.targetLength = targetLength;
+
+  // Analysis builds a regex per term on every keystroke: bound and dedupe the
+  // lists rather than adopting a hostile 50,000-term array verbatim.
+  if (value.requiredTerminology !== undefined || fallback.requiredTerminology !== undefined) {
+    goals.requiredTerminology = cleanTerminologyList(value.requiredTerminology ?? fallback.requiredTerminology);
+  }
+  if (value.forbiddenTerminology !== undefined || fallback.forbiddenTerminology !== undefined) {
+    goals.forbiddenTerminology = cleanTerminologyList(value.forbiddenTerminology ?? fallback.forbiddenTerminology);
+  }
+  // A valid-but-hostile swap map is cleaned rather than trusted verbatim:
+  // the writer keeps their other goals and the prompt never carries an
+  // unbounded map from stored data.
+  if (value.preferredReplacements !== undefined || fallback.preferredReplacements !== undefined) {
+    goals.preferredReplacements = cleanPreferredReplacements(isStringMap(value.preferredReplacements) ? value.preferredReplacements : fallback.preferredReplacements ?? {});
+  }
+  return goals;
 }
 
 function sanitiseStyle(value: unknown, fallback: StylePreferences): StylePreferences {
   if (!isRecord(value)) return fallback;
-  return {
+  // Required fields are always present. Every untrusted word list goes through
+  // one bounded cleaner so a hostile backup cannot restore a 15MB dictionary.
+  const style: StylePreferences = {
     dialect: isOneOf(value.dialect, ["en-GB", "en-US"]) ? value.dialect : fallback.dialect,
-    personalDictionary: isStringArray(value.personalDictionary) ? value.personalDictionary : fallback.personalDictionary,
-    names: isStringArray(value.names) ? value.names : fallback.names,
-    ignoredWords: isStringArray(value.ignoredWords) ? value.ignoredWords : fallback.ignoredWords,
-    ignoredRuleIds: isStringArray(value.ignoredRuleIds) ? value.ignoredRuleIds : fallback.ignoredRuleIds,
-    reducedRuleIds: isStringArray(value.reducedRuleIds) ? value.reducedRuleIds : fallback.reducedRuleIds,
-    dismissalCounts: isRecord(value.dismissalCounts)
-      ? Object.fromEntries(Object.entries(value.dismissalCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])))
-      : (fallback as { dismissalCounts?: Record<string, number> }).dismissalCounts,
-    acceptanceCounts: isRecord(value.acceptanceCounts)
-      ? Object.fromEntries(Object.entries(value.acceptanceCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])))
-      : (fallback as { acceptanceCounts?: Record<string, number> }).acceptanceCounts,
-    learned: Array.isArray(value.learned)
-      ? value.learned.flatMap((entry): LearnedPreference[] => (isRecord(entry) && typeof entry.id === "string" && typeof entry.family === "string" && typeof entry.label === "string"
+    personalDictionary: cleanWordList(value.personalDictionary, fallback.personalDictionary),
+    ignoredWords: cleanWordList(value.ignoredWords, fallback.ignoredWords),
+    ignoredRuleIds: cleanWordList(value.ignoredRuleIds, fallback.ignoredRuleIds),
+    reducedRuleIds: cleanWordList(value.reducedRuleIds, fallback.reducedRuleIds),
+    blockedWords: cleanWordList(value.blockedWords, fallback.blockedWords),
+    // The global swap map feeds the same regex compilation as per-document
+    // swaps, so clean it at the boundary too rather than trusting it verbatim.
+    preferredTerminology: cleanPreferredReplacements(isStringMap(value.preferredTerminology) ? value.preferredTerminology : fallback.preferredTerminology ?? {}),
+    oxfordComma: typeof value.oxfordComma === "boolean" ? value.oxfordComma : fallback.oxfordComma,
+    allowContractions: typeof value.allowContractions === "boolean" ? value.allowContractions : fallback.allowContractions,
+    passiveVoiceSensitivity: isOneOf(value.passiveVoiceSensitivity, ["off", "normal", "strict"]) ? value.passiveVoiceSensitivity : fallback.passiveVoiceSensitivity,
+    preferredSentenceLength: isOneOf(value.preferredSentenceLength, ["short", "balanced", "long"]) ? value.preferredSentenceLength : fallback.preferredSentenceLength,
+  };
+  // Optional keys keep their shape: absent stays absent unless the fallback
+  // supplies one, so a normal profile round-trips unchanged.
+  if (value.names !== undefined || fallback.names !== undefined) {
+    style.names = cleanWordList(value.names, fallback.names ?? []);
+  }
+  if (isRecord(value.dismissalCounts)) {
+    style.dismissalCounts = Object.fromEntries(Object.entries(value.dismissalCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])).slice(0, MAX_COUNT_MAP_KEYS));
+  } else if (fallback.dismissalCounts !== undefined) {
+    style.dismissalCounts = fallback.dismissalCounts;
+  }
+  if (isRecord(value.acceptanceCounts)) {
+    style.acceptanceCounts = Object.fromEntries(Object.entries(value.acceptanceCounts).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])).slice(0, MAX_COUNT_MAP_KEYS));
+  } else if (fallback.acceptanceCounts !== undefined) {
+    style.acceptanceCounts = fallback.acceptanceCounts;
+  }
+  if (Array.isArray(value.learned)) {
+    style.learned = value.learned
+      .slice(0, MAX_LEARNED_ITEMS)
+      .flatMap((entry): LearnedPreference[] => (isRecord(entry) && typeof entry.id === "string" && typeof entry.family === "string" && typeof entry.label === "string"
         ? [{
-            id: entry.id,
+            id: entry.id.slice(0, MAX_LEARNED_TEXT_CHARS),
             // Every kind has to be listed. An unrecognised one falls back to
             // "dismissal-pattern", so omitting "accepted-pattern" silently
             // relabelled accepted advice as dampened on the next reload and
             // offered the writer "Forget this" for something they had endorsed.
             kind: entry.kind === "reduced-family" || entry.kind === "disabled-family" || entry.kind === "accepted-pattern" ? entry.kind : "dismissal-pattern",
-            label: entry.label,
-            detail: typeof entry.detail === "string" ? entry.detail : "",
-            family: entry.family,
+            label: entry.label.slice(0, MAX_LEARNED_TEXT_CHARS),
+            detail: (typeof entry.detail === "string" ? entry.detail : "").slice(0, MAX_LEARNED_TEXT_CHARS),
+            family: entry.family.slice(0, MAX_LEARNED_TEXT_CHARS),
             createdAt: typeof entry.createdAt === "number" && Number.isFinite(entry.createdAt) ? entry.createdAt : Date.now(),
             source: entry.source === "manual" ? "manual" : "learned",
           }]
-        : []))
-      : fallback.learned,
-    preferredTerminology: isStringMap(value.preferredTerminology) ? value.preferredTerminology : fallback.preferredTerminology,
-    oxfordComma: typeof value.oxfordComma === "boolean" ? value.oxfordComma : fallback.oxfordComma,
-    allowContractions: typeof value.allowContractions === "boolean" ? value.allowContractions : fallback.allowContractions,
-    passiveVoiceSensitivity: isOneOf(value.passiveVoiceSensitivity, ["off", "normal", "strict"]) ? value.passiveVoiceSensitivity : fallback.passiveVoiceSensitivity,
-    preferredSentenceLength: isOneOf(value.preferredSentenceLength, ["short", "balanced", "long"]) ? value.preferredSentenceLength : fallback.preferredSentenceLength,
-    blockedWords: isStringArray(value.blockedWords) ? value.blockedWords : fallback.blockedWords,
-  };
+        : []));
+  } else if (fallback.learned !== undefined) {
+    style.learned = fallback.learned;
+  }
+  return style;
 }
 
 function sanitiseProvider(value: unknown, fallback: ProviderSettings): ProviderSettings {
@@ -248,7 +311,7 @@ function sanitiseProvider(value: unknown, fallback: ProviderSettings): ProviderS
     provider: isOneOf(value.provider, ["openai-compatible", "custom"]) ? value.provider : fallback.provider,
     baseUrl: isSafeUrl(value.baseUrl) ? value.baseUrl : fallback.baseUrl,
     model: typeof value.model === "string" && value.model.length > 0 && value.model.length <= 200 ? value.model : fallback.model,
-    apiKey: typeof value.apiKey === "string" ? value.apiKey : fallback.apiKey,
+    apiKey: typeof value.apiKey === "string" && value.apiKey.length <= MAX_API_KEY_CHARS ? value.apiKey : fallback.apiKey,
     temperature: typeof value.temperature === "number" && Number.isFinite(value.temperature) && value.temperature >= 0 && value.temperature <= 1 ? value.temperature : fallback.temperature,
     maxTokens: typeof value.maxTokens === "number" && Number.isFinite(value.maxTokens) && value.maxTokens >= 100 && value.maxTokens <= 4_000 ? value.maxTokens : fallback.maxTokens,
     customHeaders: typeof value.customHeaders === "string" && value.customHeaders.length <= MAX_CUSTOM_HEADERS_CHARS ? value.customHeaders : fallback.customHeaders,
@@ -265,7 +328,7 @@ function sanitiseClassifier(value: unknown, fallback: ClassifierSettings | undef
     : isSafeUrl(safe.baseUrl) ? safe.baseUrl : fallback?.baseUrl ?? DEFAULT_CLASSIFIER_SETTINGS.baseUrl;
   return {
     baseUrl,
-    ...(typeof safe.apiKey === "string" ? { apiKey: safe.apiKey } : fallback?.apiKey !== undefined ? { apiKey: fallback.apiKey } : {}),
+    ...(typeof safe.apiKey === "string" && safe.apiKey.length <= MAX_API_KEY_CHARS ? { apiKey: safe.apiKey } : fallback?.apiKey !== undefined ? { apiKey: fallback.apiKey } : {}),
     ...(typeof safe.timeoutMs === "number" && Number.isFinite(safe.timeoutMs) && safe.timeoutMs >= 1_000 && safe.timeoutMs <= 30_000 ? { timeoutMs: safe.timeoutMs } : fallback?.timeoutMs !== undefined ? { timeoutMs: fallback.timeoutMs } : {}),
     ...(typeof safe.maxExcerptChars === "number" && Number.isFinite(safe.maxExcerptChars) && safe.maxExcerptChars >= 80 && safe.maxExcerptChars <= 2_000 ? { maxExcerptChars: safe.maxExcerptChars } : fallback?.maxExcerptChars !== undefined ? { maxExcerptChars: fallback.maxExcerptChars } : {}),
     uncertainPolicy: isOneOf(safe.uncertainPolicy, ["provider", "local"]) ? safe.uncertainPolicy : fallback?.uncertainPolicy ?? "provider",
@@ -276,7 +339,8 @@ function sanitiseTimestamp(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, unknown>): DraftwiseWorkspace {
+export function sanitiseWorkspace(initial: DraftwiseWorkspace, input: unknown): DraftwiseWorkspace {
+  const value: Record<string, unknown> = isRecord(input) ? input : {};
   const fallbackClassifier = initial.classifier ?? DEFAULT_CLASSIFIER_SETTINGS;
   const workspace: DraftwiseWorkspace = {
     version: 2,
@@ -288,7 +352,7 @@ function sanitiseWorkspace(initial: DraftwiseWorkspace, value: Record<string, un
     theme: isOneOf(value.theme, ["light", "dark", "system"]) ? value.theme : initial.theme,
     // Legacy `title`/`draft` fields are deliberately ignored: document content
     // lives in the document store. `activeDocumentId` is metadata only.
-    activeDocumentId: typeof value.activeDocumentId === "string" && value.activeDocumentId ? value.activeDocumentId : initial.activeDocumentId,
+    activeDocumentId: typeof value.activeDocumentId === "string" && value.activeDocumentId && value.activeDocumentId.length <= MAX_DOCUMENT_ID_CHARS ? value.activeDocumentId : initial.activeDocumentId,
     // Dismissals are decisions, not session state. Malformed entries are dropped
     // rather than trusted, and the list is bounded because it grows with use: a
     // writer who dismisses hundreds of findings must not grow storage without

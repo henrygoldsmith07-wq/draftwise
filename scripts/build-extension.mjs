@@ -126,7 +126,10 @@ const GRAMMAR_EXPORTS = [
 
 const analysisSource = await readModules(["packages/analysis/src/index.ts"]);
 const grammarSource = await readModules(GRAMMAR_MODULES);
-const aiSource = await readModules(["packages/ai/src/index.ts"]);
+// constants.ts is concatenated before index.ts in the same scope so the
+// ProviderError/ClassifierError class identity stays single across the bundle;
+// index.ts only re-exports these names for the web build.
+const aiSource = await readModules(["packages/ai/src/constants.ts", "packages/ai/src/index.ts"]);
 
 // Belt and braces: the emitted bundles run as classic scripts in a content
 // script and a service worker, where `exports` and `module` do not exist. Any

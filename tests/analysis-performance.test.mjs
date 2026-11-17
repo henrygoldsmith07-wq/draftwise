@@ -78,6 +78,39 @@ test("the spelling fast path still corrects genuine typos", () => {
   assert.ok(!issues.some((issue) => issue.original === "flow" || issue.original === "scores"), "ordinary words must survive");
 });
 
+test("bounded context keeps long-draft rule decisions identical", () => {
+  // End-anchored context regexes used to slice the whole draft for every
+  // match. They now look back a fixed window; the decision must not depend on
+  // how far into the document the match appears.
+  const filler = "The committee reviewed the ordinary evidence and the results were clear. ".repeat(600);
+  for (const [sentence, replacement] of [
+    ["Either myself or my colleague will attend.", "I"],
+    ["Please send the notes to either myself or John.", "me"],
+  ]) {
+    const near = analyzeLocally(sentence, {}, goals).issues.find(
+      (issue) => issue.ruleId === "grammar-reflexive-subject");
+    const far = analyzeLocally(filler + sentence, {}, goals).issues.find(
+      (issue) => issue.ruleId === "grammar-reflexive-subject");
+    assert.ok(near && far, sentence);
+    assert.equal(far.original, near.original);
+    assert.equal(far.replacement, near.replacement);
+    assert.equal(far.replacement, replacement);
+  }
+});
+
+test("full analysis of a long draft does not scale quadratically with findings", () => {
+  const block = "The committee reviewed the evidence and the results were clear. This is repeatd wording and the numbers is wrong. ";
+  const small = block.repeat(40);
+  const large = block.repeat(160);
+  elapsed(() => analyzeLocally(small, {}, goals));
+  const smallMs = elapsed(() => analyzeLocally(small, {}, goals));
+  const largeMs = elapsed(() => analyzeLocally(large, {}, goals));
+  // 4x the text (and 4x the findings): linear work grows ~4x, the old
+  // whole-prefix slices grew ~16x. Leave ample headroom for machine variance.
+  assert.ok(largeMs < Math.max(BUDGET_MS, smallMs * 8),
+    `full analysis scaled badly: ${smallMs}ms -> ${largeMs}ms`);
+});
+
 test("ordinary prose still parses into the same sentences", () => {
   // The lazy-pattern rewrite must not change what a normal document produces.
   const text = "First sentence here. Second one follows! Is this a third? Yes it is.";

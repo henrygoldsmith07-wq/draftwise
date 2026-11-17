@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { DocumentHistoryStore, HISTORY_CHAR_BUDGET_PER_DOCUMENT, HISTORY_LIMIT_PER_DOCUMENT } from "../lib/document-history.ts";
 import { DocumentLifecycle } from "../lib/document-lifecycle.ts";
 import { MemoryDocumentBackend, ResilientDocumentBackend, LocalStorageDocumentBackend } from "../lib/documents.ts";
@@ -107,6 +108,19 @@ test("version restore produces a sensible undo state: restore is itself recovera
   assert.equal(history.redo("doc"), "restored content");
 });
 
+test("restore history stays in range when more states than the limit are reset", () => {
+  const history = new DocumentHistoryStore();
+  history.open("doc", "original");
+  const texts = Array.from({ length: HISTORY_LIMIT_PER_DOCUMENT + 10 }, (_, index) => `state ${index}`);
+  history.reset("doc", texts);
+  const snapshot = history.snapshot("doc");
+  assert.equal(snapshot.values, HISTORY_LIMIT_PER_DOCUMENT);
+  assert.ok(snapshot.index >= 0 && snapshot.index < HISTORY_LIMIT_PER_DOCUMENT,
+    "the current index must point inside the trimmed history");
+  assert.equal(history.undo("doc"), texts[texts.length - 2],
+    "undo after a large restore returns real text, not undefined");
+});
+
 // --- P0: persistence success is truthful ---
 
 class FailingBackend extends MemoryDocumentBackend {
@@ -125,13 +139,13 @@ test("a failed write never reports saved and stays queued for retry", async () =
   // Fail only the edit's write: the document itself already exists.
   backend.failing = true;
   lifecycle.updateActive({ draft: "Unsaved work." });
-  await lifecycle.flush();
+  assert.equal(await lifecycle.flush(), false, "callers can await the real write result");
   assert.equal(lifecycle.getSnapshot().saveStatus, "error", "failure is reported, never 'saved'");
   assert.equal(lifecycle.hasPendingWrites(), true, "the write stays queued");
   assert.equal((await backend.get(active.id))?.draft, "", "nothing half-written is claimed as saved");
 
   backend.failing = false;
-  await lifecycle.flush();
+  assert.equal(await lifecycle.flush(), true);
   assert.equal(lifecycle.getSnapshot().saveStatus, "saved");
   assert.equal((await backend.get(active.id))?.draft, "Unsaved work.");
 });
@@ -174,6 +188,77 @@ test("a slow backend completing after a switch cannot overwrite the wrong docume
   await Promise.all([flushA, flushB]);
   assert.equal((await backend.get(first.id))?.draft, "A content queued");
   assert.equal((await backend.get(second.id))?.draft, "B content revised");
+});
+
+test("a failed write cannot replace a newer queued version of the same document", async () => {
+  class SelectiveFailBackend extends MemoryDocumentBackend {
+    rejectDrafts = new Set();
+    async put(document) {
+      if (this.rejectDrafts.has(document.draft)) throw new Error("quota exceeded");
+      return super.put(document);
+    }
+  }
+  const backend = new SelectiveFailBackend();
+  const lifecycle = new DocumentLifecycle(backend, { title: "Untitled draft", draft: "" });
+  await lifecycle.load();
+  const active = lifecycle.getActive();
+  backend.rejectDrafts.add("v1");
+  lifecycle.updateActive({ draft: "v1" });
+  const firstFlush = lifecycle.flush();
+  // A newer edit lands while the rejected write is still in flight.
+  lifecycle.updateActive({ draft: "v2" });
+  await firstFlush;
+  assert.equal(lifecycle.hasPendingWrites(), true, "the failed v1 write stays queued");
+  backend.rejectDrafts.clear();
+  await lifecycle.flush();
+  assert.equal((await backend.get(active.id))?.draft, "v2", "the newest text is what gets persisted");
+});
+
+test("clear-all awaits the live store reset before sweeping storage", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const clear = page.match(/const clearLocalData = useCallback\(async \(\) => \{[\s\S]*?historyStore\.clear\(\);/u);
+  assert.ok(clear, "clearLocalData should be async");
+  // A fire-and-forget reset could persist its fresh seed after the sweep had
+  // removed the fallback key, leaving a document behind after "clear all".
+  assert.match(clear[0], /await documents\.clearAll\(\{ title: "Untitled draft", draft: "" \}\)/u);
+  assert.match(clear[0], /await clearAllLocalData\(\{ documentBackend: documents\.backend \}\)/u);
+  assert.doesNotMatch(clear[0], /onClearMemory/u);
+});
+
+test("the canonical save waits for document writes before reporting success", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const saveAll = page.match(/const saveAll = useCallback\(async \(\) => \{[\s\S]*?\}, \[documents, saveNow\]\)/u);
+  assert.ok(saveAll, "saveAll should be the async canonical save");
+  // Read synchronously from a stale React state snapshot, the old version
+  // reported success even when the awaited document write had failed.
+  assert.match(saveAll[0], /await documents\.flush\(\)/u);
+  assert.match(saveAll[0], /writesSucceeded/u);
+});
+
+test("flushSync keeps a rejected exit write queued for the next flush", async () => {
+  class FailOnceBackend extends MemoryDocumentBackend {
+    failNext = true;
+    async put(document) {
+      if (this.failNext) {
+        this.failNext = false;
+        throw new Error("quota exceeded");
+      }
+      return super.put(document);
+    }
+  }
+  const backend = new FailOnceBackend();
+  const lifecycle = new DocumentLifecycle(backend, { title: "Untitled draft", draft: "" });
+  await lifecycle.load();
+  const active = lifecycle.getActive();
+  // load() writes the seed document, so arm the failure only after hydration.
+  backend.failNext = true;
+  lifecycle.updateActive({ draft: "Work from this tab" });
+  lifecycle.flushSync();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lifecycle.hasPendingWrites(), true,
+    "a rejected exit write must not vanish just because the tab was left");
+  await lifecycle.flush();
+  assert.equal((await backend.get(active.id))?.draft, "Work from this tab");
 });
 
 // --- P0: IndexedDB failure falls back safely ---
@@ -220,6 +305,70 @@ test("resilient backend degrades to memory when localStorage is also unavailable
   assert.equal(documents[0]?.draft, "Memory only", "the write is kept in memory rather than lost");
 });
 
+test("a fallback tier is remembered so a stale IndexedDB copy cannot shadow newer work", async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  globalThis.indexedDB = { open: () => { throw new Error("blocked"); } };
+  const scratch = storage();
+  try {
+    const first = new ResilientDocumentBackend(scratch);
+    assert.equal(first.mode, "indexeddb", "starts with IndexedDB while it is available");
+    await first.put({
+      id: "doc-1", title: "Essay", draft: "Newer fallback text",
+      createdAt: 1, updatedAt: 1, wordCount: 3, snapshots: [],
+    });
+    assert.equal(first.mode, "localstorage", "a failed write demotes to localStorage");
+    assert.equal(scratch.getItem("draftwise:documents:v1:tier"), "localstorage",
+      "the chosen tier must survive a reload");
+
+    const second = new ResilientDocumentBackend(scratch);
+    assert.equal(second.mode, "localstorage", "a fresh backend honours the remembered tier");
+    assert.equal((await second.list())[0]?.draft, "Newer fallback text");
+  } finally {
+    globalThis.indexedDB = previousIndexedDb;
+  }
+});
+
+test("a failed remove does not persist an empty fallback tier", async () => {
+  class FailingRemove {
+    mode = "indexeddb";
+    async list() { return []; }
+    async get() { return null; }
+    async put() {}
+    async remove() { throw new Error("blocked"); }
+    async clear() {}
+  }
+  const scratch = storage();
+  const backend = new ResilientDocumentBackend(scratch);
+  backend.current = new FailingRemove();
+  await backend.remove("doc-1");
+  // Unlike demote(), the remove fallback copies nothing. Remembering it
+  // would hide an intact IndexedDB library on the next reload.
+  assert.equal(scratch.getItem("draftwise:documents:v1:tier"), null);
+});
+
+test("clear-all removes the remembered tier and every tier ever used", async () => {
+  class AlwaysFailing {
+    mode = "indexeddb";
+    async list() { throw new Error("blocked"); }
+    async get() { throw new Error("blocked"); }
+    async put() { throw new Error("blocked"); }
+    async remove() { throw new Error("blocked"); }
+    async clear() { throw new Error("blocked"); }
+  }
+  const scratch = storage();
+  const resilient = new ResilientDocumentBackend(scratch);
+  resilient.current = new AlwaysFailing();
+  await resilient.put({
+    id: "doc-1", title: "Essay", draft: "Draft text",
+    createdAt: 1, updatedAt: 1, wordCount: 2, snapshots: [],
+  });
+  assert.equal(scratch.getItem("draftwise:documents:v1:tier"), "localstorage");
+  await resilient.clear();
+  assert.equal(scratch.getItem("draftwise:documents:v1:tier"), null,
+    "a cleared library must not keep a stale tier hint");
+  assert.equal((await resilient.list()).length, 0);
+});
+
 test("localStorage quota errors surface as failures rather than silent success", async () => {
   class QuotaStorage {
     getItem() { return null; }
@@ -231,4 +380,33 @@ test("localStorage quota errors surface as failures rather than silent success",
     backend.put({ id: "doc-1", title: "T", draft: "x", createdAt: 1, updatedAt: 1, wordCount: 1, snapshots: [] }),
     /QuotaExceededError/u,
   );
+});
+
+test("replaceAll reports failure when documents can only be kept in memory", async () => {
+  // put() intentionally swallows a failed write and demotes to a lower tier,
+  // so a try/catch cannot see a memory-only restore. The caller reloads right
+  // after a successful replace, which would drop every memory-only document.
+  const doc = (id) => ({ id, title: id, draft: "text", createdAt: 1, updatedAt: 1, wordCount: 1, snapshots: [] });
+  const failing = {
+    mode: "indexeddb",
+    async list() { return []; },
+    async get() { return null; },
+    async put() { throw new Error("blocked"); },
+    async remove() {},
+    async clear() {},
+  };
+  let storage = new Map();
+  const localStorage = {
+    getItem: (k) => storage.get(k) ?? null,
+    setItem: () => { throw new Error("quota"); },
+    removeItem: (k) => storage.delete(k),
+  };
+  const backend = new ResilientDocumentBackend(localStorage);
+  backend.current = failing;
+  const lifecycle = new DocumentLifecycle(backend, { title: "Untitled draft", draft: "" });
+  await lifecycle.load();
+  const result = await lifecycle.replaceAll([doc("a")]);
+  assert.equal(result.ok, false, "a memory-only restore must not be reported as success");
+  assert.match(result.error, /durably/u);
+  assert.equal(lifecycle.getSnapshot().saveStatus, "error");
 });

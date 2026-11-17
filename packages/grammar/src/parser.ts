@@ -51,7 +51,14 @@ function sentenceSpans(text: string, allTokens?: Token[]): SentenceSpan[] {
   // the keystroke path. With `(?=\S)` a start inside a whitespace run is
   // rejected immediately instead of rescanning the run, and the body only
   // expands while it is finding a terminator.
-  const pattern = /(?=\S)[^.!?…\n]*?[.!?…]+(?=\s|$)/gu;
+  //
+  // `(?=\S)` alone did not bound a *terminator-less* run (minified code, a long
+  // URL or base64 blob): the lazy body still expanded to the end of the run at
+  // every start position, which is quadratic. Capping the body at 400 chars
+  // makes each failed attempt O(400) instead of O(run length). A sentence whose
+  // terminator is more than 400 chars away simply falls through to the tail
+  // span below, so ordinary prose is unaffected.
+  const pattern = /(?=\S)[^.!?…\n]{0,400}?[.!?…]+(?=\s|$)/gu;
   const addSpan = (start: number, end: number) => {
     const value = text.slice(start, end);
     if (!value.trim()) return;

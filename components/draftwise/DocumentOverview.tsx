@@ -6,7 +6,6 @@ import { useDialogFocusTrap } from "@/hooks/useDialogFocusTrap";
 import { buildDocumentOutline, summariseDocument } from "@/packages/grammar/src";
 import { SUPPRESSION_REASONS, describeSuppression } from "@/packages/grammar/src/prioritise.ts";
 import type { SuggestionReport, SuppressedFinding, WritingGoals, WritingIssue, WritingStats, StylePreferences } from "@/packages/types/src";
-import type { SuggestionState } from "@/lib/suggestions";
 
 /**
  * How many held-back findings to list before asking the writer to filter. The
@@ -158,7 +157,11 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
   // button returns and focus lands back on it.
   const closeBatchConfirm = useCallback(() => setBatchConfirm(false), []);
   const batchTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const batchDialogRef = useDialogFocusTrap<HTMLDivElement>(batchConfirm, closeBatchConfirm, batchTriggerRef);
+  // "Dismiss all N" is the first button in the dialog, so the trap's default
+  // would open on the destructive choice. Name the safe action explicitly:
+  // Tab cycling, Escape and return focus still come from the shared trap.
+  const keepRef = useRef<HTMLButtonElement | null>(null);
+  const batchDialogRef = useDialogFocusTrap<HTMLDivElement>(batchConfirm, closeBatchConfirm, batchTriggerRef, keepRef);
   if (!report.suppressedCount) return null;
 
   const byReason = new Map<string, SuppressedFinding[]>();
@@ -282,7 +285,7 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
                   <button type="button" className="suppressed-batch-yes" onClick={() => { onDismissMany(shown.map((entry) => entry.issue)); setBatchConfirm(false); }}>
                     Dismiss all {shown.length}
                   </button>
-                  <button type="button" onClick={() => setBatchConfirm(false)}>Keep them</button>
+                  <button type="button" ref={keepRef} onClick={() => setBatchConfirm(false)}>Keep them</button>
                 </div>
               </div>
             ) : (
@@ -312,6 +315,3 @@ export function SuppressedFindings({ suppressed, report, onSelectIssue, onDismis
 }
 
 /** Convenience wrapper so callers pass the suggestion state they already have. */
-export function SuggestionDisclosure({ suggestions }: { suggestions: SuggestionState }) {
-  return <SuppressedFindings suppressed={suggestions.suppressed} report={suggestions.report} />;
-}

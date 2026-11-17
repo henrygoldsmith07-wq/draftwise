@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Copy, History, RotateCcw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,50 @@ const REASON_LABELS: Record<DocumentSnapshot["reason"], string> = {
   manual: "Checkpoint",
   import: "Imported",
 };
+
+/**
+ * Focus handling for the inline "Confirm restore / Cancel" pair. It is not a
+ * modal dialog, so it does not take over the page's Tab key — but a destructive
+ * confirmation still must not open with the restore button focused. Focus goes
+ * to Cancel, Escape cancels, and focus returns to whatever was there before.
+ */
+function useRestoreConfirmFocus(onCancel: () => void) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    cancelRef.current?.focus({ preventScroll: true });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onCancelRef.current();
+    };
+    // Capture phase, matching the dialog trap: a control inside the group
+    // cannot swallow the key that cancels the confirmation.
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+    };
+  }, []);
+  return cancelRef;
+}
+
+function RestoreConfirmActions({ label, onConfirm, onCancel }: {
+  label: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const cancelRef = useRestoreConfirmFocus(onCancel);
+  return (
+    <div className="history-restore-confirm" role="group" aria-label="Confirm restore" style={{ display: "inline-flex", gap: 6 }}>
+      <span className="sr-only">Restore this version? Your current draft stays in history, but this replaces what you are editing now. Cancel leaves your draft unchanged.</span>
+      <Button size="sm" onClick={onConfirm}>{label}</Button>
+      <Button ref={cancelRef} size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+    </div>
+  );
+}
 
 export interface VersionHistoryViewProps {
   document: StoredDocument;
@@ -57,7 +101,11 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
   // stable so opening the dialog arms the trap once instead of re-arming it
   // on every render and yanking focus back to the start.
   const closePreview = useCallback(() => setPreviewId(null), []);
-  const previewDialogRef = useDialogFocusTrap<HTMLDivElement>(preview !== null, closePreview);
+  // While an inline restore confirmation is open inside the preview, its own
+  // focus/Escape handling owns the keyboard; leaving the preview trap armed
+  // would let one Escape close both the confirmation and the preview.
+  const previewTrapOpen = preview !== null && confirmRestoreId === null;
+  const previewDialogRef = useDialogFocusTrap<HTMLDivElement>(previewTrapOpen, closePreview);
 
   return <section className="full-view">
     <div className="full-view-heading">
@@ -94,10 +142,11 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
           <div className="history-entry-actions">
             <Button size="sm" variant="ghost" onClick={() => setPreviewId(previewId === snapshot.id ? null : snapshot.id)}>{previewId === snapshot.id ? "Hide preview" : "Preview"}</Button>
             {confirmRestoreId === snapshot.id ? (
-              <>
-                <Button size="sm" variant="ghost" onClick={() => { onRestore(snapshot); setConfirmRestoreId(null); }}>Confirm restore</Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmRestoreId(null)}>Cancel</Button>
-              </>
+              <RestoreConfirmActions
+                label="Confirm restore"
+                onConfirm={() => { onRestore(snapshot); setConfirmRestoreId(null); }}
+                onCancel={() => setConfirmRestoreId(null)}
+              />
             ) : (
               <Button size="sm" variant="ghost" onClick={() => setConfirmRestoreId(snapshot.id)}><RotateCcw size={13} /> Restore</Button>
             )}
@@ -157,10 +206,11 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
         <div className="history-preview-actions">
           <Button size="sm" variant="ghost" onClick={() => setPreviewId(null)}>Back to current</Button>
           {confirmRestoreId === preview.id ? (
-            <>
-              <Button size="sm" onClick={() => { onRestore(preview); setConfirmRestoreId(null); setPreviewId(null); }}>Confirm restore this version</Button>
-              <Button size="sm" variant="ghost" onClick={() => setConfirmRestoreId(null)}>Cancel</Button>
-            </>
+            <RestoreConfirmActions
+              label="Confirm restore this version"
+              onConfirm={() => { onRestore(preview); setConfirmRestoreId(null); setPreviewId(null); }}
+              onCancel={() => setConfirmRestoreId(null)}
+            />
           ) : (
             <Button size="sm" variant="outline" onClick={() => setConfirmRestoreId(preview.id)}><RotateCcw size={13} /> Restore this version</Button>
           )}

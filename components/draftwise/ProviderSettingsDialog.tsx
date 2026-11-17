@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChevronRight, Download, Info, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { useDialogFocusTrap } from "@/hooks/useDialogFocusTrap";
 import { Button } from "@/components/ui/button";
 import { AppInstallSection } from "@/components/draftwise/AppInstallSection";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { downloadFile } from "@/lib/import-export";
-import { testProviderConnection } from "@/lib/ai-provider";
 import { formatRelativeTime } from "@/lib/time";
 import { exportProfile, importProfile } from "@/lib/profile-transfer";
 import { buildBackup, buildSecretsFreeBackup, oversizedBackupFile, parseBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
@@ -20,6 +20,17 @@ const PROVIDER_PRESETS: Array<{ value: ProviderSettings["provider"]; label: stri
   { value: "openai-compatible", label: "OpenAI", baseUrl: "https://api.openai.com/v1", modelPlaceholder: "gpt-4o-mini" },
   { value: "custom", label: "OpenRouter / compatible", baseUrl: "https://openrouter.ai/api/v1", modelPlaceholder: "openai/gpt-4o-mini" },
 ];
+
+/** Backups are untrusted files: never render an arbitrary exportedAt verbatim. */
+const MAX_EXPORTED_AT_LENGTH = 40;
+
+function displayBackupDate(raw: string): string {
+  const bounded = typeof raw === "string" ? raw.slice(0, MAX_EXPORTED_AT_LENGTH) : "";
+  const timestamp = Date.parse(bounded);
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : bounded || "unknown date";
+}
 
 interface ProviderSettingsDialogProps {
   open: boolean;
@@ -95,7 +106,9 @@ export function ProviderSettingsDialog({
     if (testingConnection) return;
     setTestingConnection(true);
     setConnectionTest(null);
-    void testProviderConnection({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, customHeaders: settings.customHeaders })
+    // Loaded only when the writer actually tests a connection, not on first paint.
+    void import("@/lib/ai-provider")
+      .then(({ testProviderConnection }) => testProviderConnection({ baseUrl: settings.baseUrl, apiKey: settings.apiKey, customHeaders: settings.customHeaders }))
       .then((result) => setConnectionTest(result))
       .catch(() => setConnectionTest({ ok: false, message: "The test failed unexpectedly. Check the URL and try again." }))
       .finally(() => setTestingConnection(false));
@@ -132,6 +145,14 @@ export function ProviderSettingsDialog({
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [pendingBackup, setPendingBackup] = useState<{ backup: RestorableBackup; warnings: string[] } | null>(null);
   const [restoring, setRestoring] = useState(false);
+  // The restore confirmation replaces a passive alert with a real alertdialog:
+  // it traps focus while a decision is pending, opens on Cancel (the safe
+  // choice, not the first button in the list), closes on Escape, and hands
+  // focus back to the file input the writer used when it disappears.
+  const closeRestoreConfirm = useCallback(() => setPendingBackup(null), []);
+  const restoreCancelRef = useRef<HTMLButtonElement | null>(null);
+  const restoreDialogRef = useDialogFocusTrap<HTMLDivElement>(
+    pendingBackup !== null, closeRestoreConfirm, undefined, restoreCancelRef);
   const exportBackup = (withoutSecrets = false) => {
     const builder = withoutSecrets ? buildSecretsFreeBackup : buildBackup;
     const backup = builder({
@@ -250,7 +271,10 @@ export function ProviderSettingsDialog({
 
           <div className="settings-connection">
             <Button size="sm" variant="outline" onClick={runConnectionTest} disabled={testingConnection}>{testingConnection ? "Testing…" : "Test connection"}</Button>
-            {connectionTest ? <span role="status" className={connectionTest.ok ? "connection-ok" : "connection-error"}>{connectionTest.message}</span> : <span className="connection-hint">Checks the URL and key against the provider&apos;s model list. No draft text is sent.</span>}
+            {connectionTest ? null : <span className="connection-hint">Checks the URL and key against the provider&apos;s model list. No draft text is sent.</span>}
+            {/* The live region is always in the DOM and updates its text; a
+                region mounted together with its first message is often missed. */}
+            <span role="status" aria-live="polite" className={connectionTest ? (connectionTest.ok ? "connection-ok" : "connection-error") : "connection-status"}>{connectionTest?.message ?? ""}</span>
           </div>
 
           <details className="settings-advanced">
@@ -386,7 +410,7 @@ export function ProviderSettingsDialog({
                 <input type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importStyleProfile(file); event.target.value = ""; }} />
               </label>
             </div>
-            {transferMessage ? <p className="writing-profile-transfer-message" role="status">{transferMessage}</p> : null}
+            <p className="writing-profile-transfer-message" role="status" aria-live="polite">{transferMessage ?? ""}</p>
           </div>
 
           <div className="writing-profile">
@@ -404,19 +428,26 @@ export function ProviderSettingsDialog({
             </div>
             <p className="backup-age">{backupWorkspace.lastBackupAt ? `Last exported ${formatRelativeTime(backupWorkspace.lastBackupAt)}.` : "Never exported yet — your words live only in this browser."}</p>
             {pendingBackup ? (
-              <div className="writing-profile-transfer-message" role="alert">
-                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {pendingBackup.backup.exportedAt}?</span>
+              <div
+                ref={restoreDialogRef}
+                className="writing-profile-transfer-message"
+                role="alertdialog"
+                aria-modal="true"
+                aria-label="Confirm backup restore"
+                tabIndex={-1}
+              >
+                <span>Restore {pendingBackup.backup.documents.length} {pendingBackup.backup.documents.length === 1 ? "document" : "documents"} from {displayBackupDate(pendingBackup.backup.exportedAt)}?</span>
                 {pendingBackup.warnings.map((warning) => <span key={warning}>{warning}</span>)}
                 <span><strong>Merge into library</strong> adds the documents from the backup alongside your current ones — settings, activity and open draft untouched. Documents already here with identical text are skipped; same identity but different text is kept as a titled copy. Nothing is removed and nothing reloads.</span>
                 <span><strong>Replace everything</strong> swaps every current document, setting, and activity record — including API keys — and reloads Draftwise. Export a backup of your current work first if you might want it back.</span>
                 <span>
                   <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("merge")}>{restoring ? "Merging…" : "Merge into library"}</Button>{' '}
                   <Button size="sm" variant="outline" disabled={restoring} onClick={() => confirmRestore("replace")}>{restoring ? "Restoring…" : "Replace everything"}</Button>{' '}
-                  <Button size="sm" variant="ghost" disabled={restoring} onClick={() => setPendingBackup(null)}>Cancel</Button>
+                  <Button ref={restoreCancelRef} size="sm" variant="ghost" disabled={restoring} onClick={closeRestoreConfirm}>Cancel</Button>
                 </span>
               </div>
             ) : null}
-            {backupMessage ? <p className="writing-profile-transfer-message" role="status">{backupMessage}</p> : null}
+            <p className="writing-profile-transfer-message" role="status" aria-live="polite">{backupMessage ?? ""}</p>
           </div>
 
           <AppInstallSection />
@@ -428,12 +459,18 @@ export function ProviderSettingsDialog({
         </div>
 
         <DialogFooter className="settings-footer">
-          {saveError ? (
-            <div className="settings-save-error" role="alert">
-              <span>{saveError}</span>
-              <button type="button" onClick={() => setSaveError(null)}>Dismiss</button>
-            </div>
-          ) : null}
+          {/* Keep the assertive region mounted and empty until there is an
+              error. The collapse style only removes the box visually — the
+              region stays in the accessibility tree so its text is announced
+              when it changes, the same contract the toast container uses. */}
+          <div
+            className="settings-save-error"
+            style={saveError ? undefined : { height: 0, padding: 0, borderWidth: 0, margin: 0, overflow: "hidden" }}
+          >
+            {/* Text-only live region; the recovery action is its sibling. */}
+            <span role="alert" aria-live="assertive">{saveError ?? ""}</span>
+            {saveError ? <button type="button" onClick={() => setSaveError(null)}>Dismiss</button> : null}
+          </div>
           <Button variant="ghost" onClick={forget}><Trash2 size={14} /> Forget cloud credentials</Button>
           <Button variant="ghost" onClick={onClearData}>Clear local data</Button>
           <Button onClick={save}><ShieldCheck size={14} /> Save & close</Button>

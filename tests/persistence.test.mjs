@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isProviderSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../lib/workspace-storage.ts";
+import { AUTO_SAVE_DELAY_MS, LEGACY_STORAGE_KEYS, MAX_LEARNED_ITEMS, MAX_LEARNED_TEXT_CHARS, MAX_WORD_CHARS, MAX_WORD_LIST_ITEMS, WORKSPACE_STORAGE_KEY, clearWorkspaceStorage, isClassifierSettings, isProviderSettings, isWorkspace, readWorkspaceFromStorage, resolveHydratedWorkspace, writeWorkspaceToStorage } from "../lib/workspace-storage.ts";
+import { MAX_TERMS_PER_LIST } from "../lib/terminology.ts";
 import { DEFAULT_PROVIDER_SETTINGS, DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 function storage(seed = {}) {
@@ -224,4 +225,104 @@ test("pre-hydration edits win over a late local-storage read", () => {
   const loaded = { ...initial, activeDocumentId: "older-saved-id" };
   assert.equal(resolveHydratedWorkspace(current, loaded, true).activeDocumentId, "typed-before-hydration");
   assert.equal(resolveHydratedWorkspace(current, loaded, false).activeDocumentId, "older-saved-id");
+});
+
+test("hostile keys, ids and count maps are bounded on hydration", () => {
+  const initial = DEFAULT_WORKSPACE();
+  const hostileCounts = Object.fromEntries(
+    Array.from({ length: 1000 }, (_, index) => [`rule-${index}`, index]));
+  const saved = {
+    ...initial,
+    version: 2,
+    provider: { ...initial.provider, apiKey: "A".repeat(10_000) },
+    activeDocumentId: "d".repeat(1000),
+    style: { ...initial.style, dismissalCounts: hostileCounts, acceptanceCounts: hostileCounts },
+  };
+  const loaded = readWorkspaceFromStorage(initial,
+    storage({ [WORKSPACE_STORAGE_KEY]: JSON.stringify(saved) }));
+  assert.equal(loaded.provider.apiKey.length <= 4096, true);
+  assert.equal(!loaded.activeDocumentId || loaded.activeDocumentId.length <= 256, true,
+    "a hostile 1000-character active id must not survive");
+  assert.equal(Object.keys(loaded.style.dismissalCounts ?? {}).length <= 500, true);
+  assert.equal(Object.keys(loaded.style.acceptanceCounts ?? {}).length <= 500, true);
+});
+
+test("workspace sticky defaults clean hostile preferred replacements on hydration", () => {
+  // A second, identical spread used to overwrite the cleaned map with the raw
+  // value, so an oversized stored map reached regex construction and prompts.
+  const initial = DEFAULT_WORKSPACE();
+  const hostile = Object.fromEntries(
+    Array.from({ length: 200 }, (_, index) => [`from${index}`, `to${index}`]));
+  const saved = { ...initial, version: 2, goals: { ...initial.goals, preferredReplacements: hostile } };
+  const loaded = readWorkspaceFromStorage(initial,
+    storage({ [WORKSPACE_STORAGE_KEY]: JSON.stringify(saved) }));
+  assert.equal(Object.keys(loaded.goals.preferredReplacements ?? {}).length, 50);
+});
+
+test("hostile free-text lists are bounded on hydration before they reach analysis", () => {
+  const initial = DEFAULT_WORKSPACE();
+  const words = (prefix) => Array.from({ length: 2_000 }, (_, index) => `${prefix}-${index}`);
+  const hostile = {
+    ...initial,
+    version: 2,
+    goals: {
+      ...initial.goals,
+      requiredTerminology: words("required"),
+      forbiddenTerminology: words("forbidden"),
+      preferredReplacements: Object.fromEntries(Array.from({ length: 200 }, (_, index) => [`from-${index}`, `to-${index}`])),
+    },
+    style: {
+      ...initial.style,
+      personalDictionary: ["z".repeat(5_000), ...words("dict")],
+      names: words("name"),
+      ignoredWords: words("ignored"),
+      blockedWords: words("blocked"),
+      ignoredRuleIds: words("rule"),
+      reducedRuleIds: words("reduced"),
+      preferredTerminology: Object.fromEntries(Array.from({ length: 200 }, (_, index) => [`g-${index}`, `r-${index}`])),
+      learned: Array.from({ length: 1_000 }, (_, index) => ({
+        id: `id-${index}`,
+        kind: "accepted-pattern",
+        label: "label",
+        detail: "d".repeat(3_000),
+        family: "family",
+        createdAt: 1,
+        source: "learned",
+      })),
+    },
+  };
+  const loaded = readWorkspaceFromStorage(initial,
+    storage({ [WORKSPACE_STORAGE_KEY]: JSON.stringify(hostile) }));
+  assert.ok(isWorkspace(loaded));
+  assert.equal(loaded.goals.requiredTerminology.length, MAX_TERMS_PER_LIST);
+  assert.equal(loaded.goals.forbiddenTerminology.length, MAX_TERMS_PER_LIST);
+  assert.equal(Object.keys(loaded.goals.preferredReplacements ?? {}).length, 50);
+  assert.equal(Object.keys(loaded.style.preferredTerminology ?? {}).length, 50);
+  for (const list of ["personalDictionary", "names", "ignoredWords", "blockedWords", "ignoredRuleIds", "reducedRuleIds"]) {
+    assert.equal(loaded.style[list].length, MAX_WORD_LIST_ITEMS, `${list} must be count-bounded`);
+    assert.ok(loaded.style[list].every((word) => word.length <= MAX_WORD_CHARS), `${list} words must be length-bounded`);
+  }
+  assert.equal(loaded.style.learned.length, MAX_LEARNED_ITEMS);
+  assert.equal(loaded.style.learned[0].detail.length, MAX_LEARNED_TEXT_CHARS);
+});
+
+test("a normal style/goals profile is preserved unchanged through storage hydration", () => {
+  const initial = DEFAULT_WORKSPACE();
+  const normal = {
+    ...initial,
+    version: 2,
+    goals: { ...initial.goals, documentType: "report", targetLength: 900, requiredTerminology: ["API"], forbiddenTerminology: ["lol"] },
+    style: {
+      ...initial.style,
+      personalDictionary: ["SaaS", "Kubernetes"],
+      names: ["Ada"],
+      ignoredWords: ["etc"],
+      blockedWords: ["very"],
+      learned: [{ id: "learned-1", kind: "accepted-pattern", label: "Passive voice", detail: "You kept this.", family: "style-passive-voice", createdAt: 42, source: "learned" }],
+    },
+  };
+  const loaded = readWorkspaceFromStorage(initial,
+    storage({ [WORKSPACE_STORAGE_KEY]: JSON.stringify(normal) }));
+  assert.deepEqual(loaded.goals, normal.goals);
+  assert.deepEqual(loaded.style, normal.style);
 });

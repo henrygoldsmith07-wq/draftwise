@@ -25,14 +25,14 @@ if (readExecutionProfile() === "managed-linux") {
   process.exit(result.status ?? 1);
 }
 
-// The committed lockfile contains a mixed React/Vinext toolchain. Restore it first
-// without re-resolving peer ranges, then normalize the runtime-only incompatibilities
+// Restore the committed lockfile, then normalize the runtime-only incompatibilities
 // below so CI can exercise the product rather than fail in dependency setup.
+// The lockfile is complete enough that peer validation stays enabled.
 const installed = spawnSync(
   process.execPath,
   [
     process.env.npm_execpath, "ci", "--prefix", projectRoot, "--workspaces=false",
-    "--include=dev", "--include=optional", "--legacy-peer-deps", "--prefer-offline",
+    "--include=dev", "--include=optional", "--prefer-offline",
     "--no-audit", "--no-fund",
   ],
   { stdio: "inherit" },
@@ -60,7 +60,7 @@ const installRuntimePackage = (specifier) => {
     process.execPath,
     [
       process.env.npm_execpath, "install", specifier, "--no-save",
-      "--prefix", projectRoot, "--workspaces=false", "--legacy-peer-deps",
+      "--prefix", projectRoot, "--workspaces=false",
       "--prefer-offline", "--no-audit", "--no-fund",
     ],
     { stdio: "inherit" },

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   BACKUP_KIND,
   MAX_BACKUP_DOCUMENTS,
+  MAX_EXPORTED_AT_CHARS,
   buildBackup,
   buildSecretsFreeBackup,
   oversizedBackupFile,
@@ -13,6 +14,8 @@ import {
 } from "../lib/backup.ts";
 import { MemoryDocumentBackend, createDocument } from "../lib/documents.ts";
 import { DocumentLifecycle } from "../lib/document-lifecycle.ts";
+import { MAX_LEARNED_ITEMS, MAX_LEARNED_TEXT_CHARS, MAX_WORD_LIST_ITEMS } from "../lib/workspace-storage.ts";
+import { MAX_TERMS_PER_LIST } from "../lib/terminology.ts";
 import { DEFAULT_WORKSPACE } from "../packages/types/src/index.ts";
 
 const seed = { title: "Untitled draft", draft: "" };
@@ -238,4 +241,109 @@ test("replaceAll refuses an empty library and reports storage failure", async ()
   await failing.load();
   const result = await failing.replaceAll(sampleBackup().documents);
   assert.equal(result.ok, false);
+});
+
+// --- Bounded restore (security/availability audit) -------------------------
+
+test("a hostile backup's oversized settings are bounded on parse, not adopted raw", () => {
+  const base = workspace();
+  const words = (prefix) => Array.from({ length: 2_000 }, (_, index) => `${prefix}-${index}`);
+  const hostileWorkspace = {
+    ...base,
+    goals: {
+      ...base.goals,
+      requiredTerminology: words("required"),
+      forbiddenTerminology: words("forbidden"),
+    },
+    style: {
+      ...base.style,
+      // An overlong single word plus thousands of ordinary ones: the first is
+      // dropped by the length bound, the rest are cut by the count bound.
+      personalDictionary: ["x".repeat(5_000), ...words("dict")],
+      names: words("name"),
+      ignoredWords: words("ignored"),
+      blockedWords: words("blocked"),
+      ignoredRuleIds: words("rule"),
+      learned: Array.from({ length: 1_000 }, (_, index) => ({
+        id: `learned-${index}`,
+        kind: "accepted-pattern",
+        label: "A label",
+        detail: "d".repeat(3_000),
+        family: "a-family",
+        createdAt: 1,
+        source: "learned",
+      })),
+    },
+  };
+  const result = parseBackup(serializeBackup(buildBackup({
+    documents: [createDocument("Doc", "Text.")],
+    workspace: hostileWorkspace,
+    activity: { version: 1, days: [] },
+  })));
+  assert.equal(result.ok, true);
+  const { goals, style } = result.backup.workspace;
+
+  assert.equal(goals.requiredTerminology.length, MAX_TERMS_PER_LIST);
+  assert.equal(goals.forbiddenTerminology.length, MAX_TERMS_PER_LIST);
+  for (const list of ["personalDictionary", "names", "ignoredWords", "blockedWords", "ignoredRuleIds"]) {
+    assert.equal(style[list].length, MAX_WORD_LIST_ITEMS, `${list} must be count-bounded`);
+    assert.ok(style[list].every((word) => word.length <= 120), `${list} words must be length-bounded`);
+  }
+  assert.equal(style.learned.length, MAX_LEARNED_ITEMS);
+  assert.equal(style.learned[0].detail.length, MAX_LEARNED_TEXT_CHARS);
+  // The hostile source object is untouched; only the restored copy is bounded.
+  assert.equal(hostileWorkspace.style.personalDictionary.length, 2_001);
+  assert.equal(hostileWorkspace.style.learned.length, 1_000);
+});
+
+test("a normal profile round-trips through the bounded backup path unchanged", () => {
+  const base = workspace();
+  const normal = {
+    ...base,
+    goals: {
+      ...base.goals,
+      audience: "academic",
+      documentType: "essay",
+      targetLength: 800,
+      requiredTerminology: ["API", "REST"],
+      forbiddenTerminology: ["sort of"],
+      preferredReplacements: { login: "sign in" },
+    },
+    style: {
+      ...base.style,
+      personalDictionary: ["SaaS", "Kubernetes"],
+      names: ["Ada", "Grace"],
+      ignoredWords: ["etc"],
+      blockedWords: ["very"],
+      ignoredRuleIds: ["style-passive-voice"],
+      reducedRuleIds: ["wordiness"],
+      dismissalCounts: { "style-passive-voice": 3 },
+      acceptanceCounts: { concision: 2 },
+      preferredTerminology: { login: "log in" },
+      learned: [{ id: "learned-1", kind: "accepted-pattern", label: "Passive voice", detail: "You kept this.", family: "style-passive-voice", createdAt: 42, source: "learned" }],
+    },
+  };
+  const result = parseBackup(serializeBackup(buildBackup({
+    documents: [createDocument("Doc", "Text.")],
+    workspace: normal,
+    activity: { version: 1, days: [] },
+    exportedAt: "2026-10-17T00:00:00.000Z",
+  })));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.backup.workspace.goals, normal.goals);
+  assert.deepEqual(result.backup.workspace.style, normal.style);
+  assert.equal(result.backup.workspace.provider.apiKey, normal.provider.apiKey);
+  assert.equal(result.backup.exportedAt, "2026-10-17T00:00:00.000Z");
+});
+
+test("exportedAt is truncated so the restore confirmation cannot render a giant date", () => {
+  const result = parseBackup(serializeBackup(buildBackup({
+    documents: [createDocument("Doc", "Text.")],
+    workspace: workspace(),
+    activity: { version: 1, days: [] },
+    exportedAt: "2".repeat(2_000_000),
+  })));
+  assert.equal(result.ok, true);
+  assert.equal(result.backup.exportedAt.length, MAX_EXPORTED_AT_CHARS);
+  assert.equal(result.backup.exportedAt, "2".repeat(MAX_EXPORTED_AT_CHARS));
 });

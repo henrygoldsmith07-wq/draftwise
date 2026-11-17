@@ -121,10 +121,32 @@ self.addEventListener("install", (event) => {
   })());
 });
 
+/**
+ * Deployments change content-hashed filenames inside the same cache. Without
+ * pruning, every historical generation of chunks stays in storage forever.
+ *
+ * Never infer liveness from the shell HTML: chunks loaded lazily by other
+ * chunks are cached at runtime and are not named there, so deleting them
+ * would break offline reloads. Cache keys are in insertion order, so the
+ * oldest hashed entries belong to earlier deploys — keep the newest window
+ * intact, including anything fetched after this shell was cached.
+ */
+const MAX_HASHED_ASSETS = 200;
+async function pruneStaleHashedAssets() {
+  const cache = await caches.open(CACHE_NAME);
+  if (!await cache.match("/")) return;
+  const hashed = (await cache.keys()).filter(
+    (request) => new URL(request.url).pathname.startsWith("/_next/static/"));
+  if (hashed.length <= MAX_HASHED_ASSETS) return;
+  const stale = hashed.slice(0, hashed.length - MAX_HASHED_ASSETS);
+  await Promise.all(stale.map((request) => cache.delete(request)));
+}
+
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
     await Promise.all(names.map((name) => (name === CACHE_NAME ? null : caches.delete(name))));
+    await pruneStaleHashedAssets();
   })());
 });
 

@@ -1,17 +1,20 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
+// Constants and error classes live in a dependency-free module so the web app
+// does not parse the whole provider/triage adapter on first paint when AI is
+// off (the default). The heavy adapter is imported only when an AI run starts.
 import {
-  analyzeWithTriage,
   CLASSIFIER_MAX_BATCH_CHUNKS,
   MAX_AI_CHARS_PER_ANALYSIS,
   MAX_AI_CHUNKS_PER_ANALYSIS,
-  PROVIDER_CONCURRENCY,
   ProviderError,
+  PROVIDER_CONCURRENCY,
   TRIAGE_LABEL_FORMULATION_ID,
-} from "@/packages/ai/src";
+} from "@/packages/ai/src/constants";
 import { createAnalysisCacheKey, createAnalysisSettingsFingerprint, detectChangedRange, LruCache } from "@/packages/analysis/src";
 import { analyzeLocally, analyzeLocallyIncremental } from "@/packages/grammar/src";
+import { emptyAnalysisResult } from "@/lib/empty-analysis";
 import type { AnalysisResult, ClassifierSettings, ProviderSettings, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
 const emptyResult = (text: string, goals: WritingGoals, style: StylePreferences): AnalysisResult => {
@@ -50,7 +53,8 @@ interface UseAnalysisArgs {
 const ANALYSIS_CACHE_ENTRIES = 8;
 
 export function useAnalysis({ text, goals, style, settings, aiEnabled, classifier }: UseAnalysisArgs) {
-  const [analysis, setAnalysis] = useState(() => emptyResult(text, goals, style));
+  // Zero-work first render: the engine runs in the effect below, after paint.
+  const [analysis, setAnalysis] = useState(() => emptyAnalysisResult(text, goals));
   const [status, setStatus] = useState<"local" | "analysing" | "ready" | "error">("local");
   const [error, setError] = useState<string | null>(null);
   const previousText = useRef("");
@@ -77,6 +81,21 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
     // rest of the session. Keys are text fingerprints, so this costs a little
     // work on re-analysis and never returns the wrong document's results.
     if (!changedRange && beforeText && beforeText !== text) cache.current.clear();
+    // An empty draft has nothing to analyse. On first paint the document store
+    // has not hydrated yet, so text is ""; running the whole rule engine on an
+    // empty string was a measurable main-thread task before first content.
+    // The zero-work placeholder already describes an empty draft exactly.
+    if (!text.trim()) {
+      abort.current?.abort();
+      previousLocalAnalysis.current = null;
+      previousAiIssues.current = [];
+      startTransition(() => {
+        setAnalysis(emptyAnalysisResult(text, goals));
+        setError(null);
+        setStatus("local");
+      });
+      return;
+    }
     const localBase = beforeLocalAnalysis && changedRange
       ? analyzeLocallyIncremental(beforeText, text, beforeLocalAnalysis.issues, changedRange, style, goals)
       : emptyResult(text, goals, style);
@@ -152,28 +171,32 @@ export function useAnalysis({ text, goals, style, settings, aiEnabled, classifie
     // while batching the changed/context chunks into one triage pass.
     const timer = window.setTimeout(() => {
       setStatus("analysing");
-      void analyzeWithTriage(text, goals, settings, {
-        signal: controller.signal,
-        preferences: style,
-        changedRange,
-        localAnalysis: local,
-        classifier: classifier ?? null,
-        triageEnabled: true,
-        uncertainPolicy: classifier?.uncertainPolicy ?? "provider",
-        labelFormulationId: TRIAGE_LABEL_FORMULATION_ID,
-      })
-        .then((remote) => {
-          if (controller.signal.aborted || currentRun !== runId.current) return;
-          cache.current.set(cacheKey, remote);
-          previousAiIssues.current = remote.issues.filter((issue) => issue.source === "ai");
-          setAnalysis(remote);
-          setStatus("ready");
-        })
-        .catch((reason: unknown) => {
-          if (controller.signal.aborted || currentRun !== runId.current) return;
-          setStatus("error");
-          setError(reason instanceof ProviderError ? reason.message : reason instanceof Error ? reason.message : "AI analysis failed. Local checks are still available.");
+      // The provider/triage adapter is only needed for an enabled AI run, so
+      // it is loaded here rather than at first paint. Every result still
+      // passes through the same run/abort guards below.
+      void (async () => {
+        const { analyzeWithTriage } = await import("@/packages/ai/src");
+        if (controller.signal.aborted || currentRun !== runId.current) return;
+        const remote = await analyzeWithTriage(text, goals, settings, {
+          signal: controller.signal,
+          preferences: style,
+          changedRange,
+          localAnalysis: local,
+          classifier: classifier ?? null,
+          triageEnabled: true,
+          uncertainPolicy: classifier?.uncertainPolicy ?? "provider",
+          labelFormulationId: TRIAGE_LABEL_FORMULATION_ID,
         });
+        if (controller.signal.aborted || currentRun !== runId.current) return;
+        cache.current.set(cacheKey, remote);
+        previousAiIssues.current = remote.issues.filter((issue) => issue.source === "ai");
+        setAnalysis(remote);
+        setStatus("ready");
+      })().catch((reason: unknown) => {
+        if (controller.signal.aborted || currentRun !== runId.current) return;
+        setStatus("error");
+        setError(reason instanceof ProviderError ? reason.message : reason instanceof Error ? reason.message : "AI analysis failed. Local checks are still available.");
+      });
     }, 650);
     return () => {
       window.clearTimeout(timer);

@@ -60,6 +60,43 @@ export function mergeWritingIssues(issues: WritingIssue[]): WritingIssue[] {
   return Array.isArray(issues) ? mergeAnalysisIssues(issues) : [];
 }
 
+/**
+ * Rules whose answer depends on the whole document, not on a local slice:
+ * repeated openings hundreds of characters apart, paragraph length, document
+ * notes, goal-wide terminology and spelling-variant consistency. An incremental
+ * pass must NOT derive these from its ~640-char window, or it reports findings
+ * the full analysis would suppress (and vice versa) for the same text.
+ */
+const DOCUMENT_WIDE_PREFIXES = ["repetition-", "structure-", "goal-", "consistency-"];
+export function isDocumentWideIssue(issue: WritingIssue) {
+  return DOCUMENT_WIDE_PREFIXES.some((prefix) => issue.ruleId.startsWith(prefix));
+}
+
+function localIssues(text: string, preferences: ReturnType<typeof mergePreferences>, document: ReturnType<typeof analyzeDocument>, goals?: WritingGoals): WritingIssue[] {
+  return [
+    ...findSpelling(text, preferences, document),
+    ...findConfusedWords(text, preferences),
+    ...findReflexiveSubjects(text, preferences),
+    ...findPrecisionGrammarIssues(text, preferences, document),
+    ...findPunctuation(text, preferences),
+    ...findCapitalization(text, preferences),
+    ...findStyleIssues(text, preferences, document, goals),
+    ...findStickySentences(document, preferences),
+  ];
+}
+
+function documentWideIssues(text: string, preferences: ReturnType<typeof mergePreferences>, document: ReturnType<typeof analyzeDocument>, goals?: WritingGoals): WritingIssue[] {
+  return [
+    ...findRepeatedWordsAndPhrases(text, preferences, document),
+    ...findStructureIssues(text, preferences, document),
+    ...findDocumentStructure(text, preferences, goals, document),
+    ...findGoalTerminology(text, goals, preferences, document),
+    // Runs last: it needs the whole document to tell a consistent choice from a
+    // drifting one, and it never overlaps a span an earlier rule already claimed.
+    ...findConsistencyIssues(text, preferences, document),
+  ];
+}
+
 export function analyzeLocally(text: string, options: GrammarOptions = {}, goals?: WritingGoals) {
   const startedAt = analysisNow();
   const preferences = mergePreferences(options);
@@ -67,23 +104,7 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
   // Markdown-aware: code fences, inline code and URLs are machine text that
   // prose rules must not touch, and list items are structured content.
   const protectedSpans = findProtectedSpans(text);
-  const rawIssues = mergeWritingIssues([
-    ...findSpelling(text, preferences, document),
-    ...findConfusedWords(text, preferences),
-    ...findReflexiveSubjects(text, preferences),
-    ...findPrecisionGrammarIssues(text, preferences, document),
-    ...findPunctuation(text, preferences),
-    ...findCapitalization(text, preferences),
-    ...findRepeatedWordsAndPhrases(text, preferences, document),
-    ...findStyleIssues(text, preferences, document, goals),
-    ...findStickySentences(document, preferences),
-    ...findStructureIssues(text, preferences, document),
-    ...findDocumentStructure(text, preferences, goals, document),
-    ...findGoalTerminology(text, goals, preferences, document),
-    // Runs last: it needs the whole document to tell a consistent choice from a
-    // drifting one, and it never overlaps a span an earlier rule already claimed.
-    ...findConsistencyIssues(text, preferences, document),
-  ]);
+  const rawIssues = mergeWritingIssues([...localIssues(text, preferences, document, goals), ...documentWideIssues(text, preferences, document, goals)]);
   const issues = rawIssues.filter((issue) => {
     if (isInsideProtectedSpan(protectedSpans, issue.start, issue.end)) return false;
     // Fragment and terminal-punctuation advice does not apply to bullets,
@@ -95,7 +116,9 @@ export function analyzeLocally(text: string, options: GrammarOptions = {}, goals
   });
   const stats = getWritingStats(text, document);
   const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "local");
-  return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text, document), ...(diagnostics ? { diagnostics } : {}) };
+  // Return the parsed document so the suggestion layer can reuse it instead of
+  // re-parsing the identical text a second time on every keystroke.
+  return { issues, tone: inferTone(text, document), stats, scores: scoreWriting(stats, issues, goals, text, document), document, ...(diagnostics ? { diagnostics } : {}) };
 }
 
 function expandLocalContext(text: string, start: number, end: number, contextWindow = 320) {
@@ -171,7 +194,10 @@ export function analyzeLocallyIncremental(
   const nextRegion = expandLocalContext(nextText, changedRange.start, changedRange.end);
   const delta = nextText.length - previousText.length;
   const region = analyzeLocally(nextText.slice(nextRegion.start, nextRegion.end), options, goals);
-  const recalculated = region.issues.map((issue) => ({
+  // Only local rules are trustworthy from a slice. Document-wide rules (repeated
+  // openings, paragraph length, consistency) need the whole draft; they were
+  // computed against a short window and would disagree with a full analysis.
+  const recalculated = region.issues.filter((issue) => !isDocumentWideIssue(issue)).map((issue) => ({
     ...issue,
     id: createIssueId(issue.ruleId, issue.start + nextRegion.start, issue.end + nextRegion.start, issue.original),
     start: issue.start + nextRegion.start,
@@ -179,7 +205,7 @@ export function analyzeLocallyIncremental(
   }));
   // Anything the region re-derived is already accounted for.
   const rederived = new Set(recalculated.map((issue) => `${issue.ruleId}\u0000${issue.original.toLowerCase()}`));
-  const retained = previousIssues.filter((issue) => issue.source === "local").flatMap((issue) => {
+  const retained = previousIssues.filter((issue) => issue.source === "local" && !isDocumentWideIssue(issue)).flatMap((issue) => {
     // An issue overlapping the region was assumed to be re-derived there. It is
     // not always: a long sentence that starts well before the region cannot be
     // seen from a slice that begins later, so dropping it lost a real finding.
@@ -193,11 +219,20 @@ export function analyzeLocallyIncremental(
       ? [{ ...issue, id: createIssueId(issue.ruleId, start, end, issue.original), start, end }]
       : [];
   });
-  const issues = mergeWritingIssues([...retained, ...recalculated]);
-  const document = analyzeDocument(nextText);
+  // Recompute whole-draft rules on the full text, then merge once so overlap
+  // resolution sees local and document-wide findings in the same pass — exactly
+  // as analyzeLocally does. Without this, the two paths disagree for identical
+  // text (repetition/consistency findings appear or vanish with an edit).
+  const fullDocument = analyzeDocument(nextText);
+  const fullProtectedSpans = findProtectedSpans(nextText);
+  const freshDocumentWide = documentWideIssues(nextText, mergePreferences(options), fullDocument, goals)
+    .filter((issue) => !isInsideProtectedSpan(fullProtectedSpans, issue.start, issue.end));
+  const issues = mergeWritingIssues([...retained, ...recalculated, ...freshDocumentWide]);
+  const document = fullDocument;
   const stats = getWritingStats(nextText, document);
   const diagnostics = createAnalysisDiagnostics(issues.length, startedAt, "incremental");
-  return { issues, tone: inferTone(nextText, document), stats, scores: scoreWriting(stats, issues, goals, nextText, document), ...(diagnostics ? { diagnostics } : {}) };
+  // As with analyzeLocally, hand back the parsed document for downstream reuse.
+  return { issues, tone: inferTone(nextText, document), stats, scores: scoreWriting(stats, issues, goals, nextText, document), document, ...(diagnostics ? { diagnostics } : {}) };
 }
 // Public surface preserved for the web app, the extension bundle, and the test suite.
 export { WORD_PATTERN, analyzeDocument, parseDocument } from "./parser.ts";

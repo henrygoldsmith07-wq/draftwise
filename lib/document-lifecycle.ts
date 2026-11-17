@@ -176,8 +176,8 @@ export class DocumentLifecycle {
   }
 
   /** Write everything queued. Failed documents stay queued for the next flush. */
-  async flush(): Promise<void> {
-    if (this.pending.size === 0) return;
+  async flush(): Promise<boolean> {
+    if (this.pending.size === 0) return true;
     const batch = [...this.pending.values()];
     this.pending.clear();
     if (this.timer !== null) {
@@ -191,22 +191,32 @@ export class DocumentLifecycle {
         await this.backend.put(document);
       } catch {
         failed = true;
-        this.pending.set(document.id, document);
+        // A newer edit to this same document may have been queued while the
+        // write was in flight. Re-queuing the stale copy would overwrite it
+        // and persist the older text as the writer's latest work.
+        if (!this.pending.has(document.id)) this.pending.set(document.id, document);
       }
     }
     // A fallback demotion happens inside put(); refresh the reported tier so
     // the UI never claims IndexedDB durability the app no longer has.
     const storageMode = readStorageMode(this.backend);
     this.setState({ saveStatus: failed ? "error" : "saved", storageMode });
+    return !failed;
   }
 
-  /** Synchronous best-effort flush for page exit. */
+  /** Best-effort synchronous flush for page exit; a rejected write stays queued. */
   flushSync() {
-    for (const document of this.pending.values()) {
+    for (const document of [...this.pending.values()]) {
+      const requeue = () => {
+        // Keep a newer queued edit if one arrived while the write was in flight.
+        if (!this.pending.has(document.id)) this.pending.set(document.id, document);
+      };
       try {
-        void this.backend.put(document);
+        // put() is async: without a rejection handler a failed exit write
+        // silently drops the queued copy, and the next exit finds nothing.
+        void this.backend.put(document).catch(requeue);
       } catch {
-        // The browser is going away; nothing further we can do here.
+        requeue();
       }
     }
     this.pending.clear();
@@ -408,8 +418,19 @@ export class DocumentLifecycle {
     const nextActive = activeId && documents.some((document) => document.id === activeId)
       ? activeId
       : documents[0].id;
-    this.setState({ documents: [...documents], activeId: nextActive, saveStatus: failed ? "error" : "saved" });
+    // put() swallows a failed write and silently demotes to a lower tier, so a
+    // try/catch alone cannot detect that the restored library landed in
+    // memory only. The caller reloads immediately after a successful restore;
+    // that reload would lose every memory-only document. Treat it as failure.
+    const storageMode = readStorageMode(this.backend);
+    // A ResilientDocumentBackend only reports "memory" after both durable
+    // tiers failed and documents were copied there. A bare MemoryDocumentBackend
+    // (unit tests, deliberate in-memory mode) has no durable tier to have lost.
+    const volatile = storageMode === "memory"
+      && typeof (this.backend as { degraded?: boolean }).degraded === "boolean";
+    this.setState({ documents: [...documents], activeId: nextActive, saveStatus: failed || volatile ? "error" : "saved", storageMode });
     if (failed) return { ok: false as const, error: "Some restored documents could not be saved. Nothing was reloaded; retry the restore." };
+    if (volatile) return { ok: false as const, error: "The restored documents could not be saved durably on this device. Nothing was reloaded; free some storage and retry the restore." };
     return { ok: true as const };
   }
 

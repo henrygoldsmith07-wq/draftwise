@@ -190,7 +190,10 @@ export function importProfile(current: StylePreferences, fileText: string): Prof
     message: `Imported ${added} item${added === 1 ? "" : "s"}: ${dictionary.added} dictionary word${dictionary.added === 1 ? "" : "s"}, ${termsAdded} terminology ${termsAdded === 1 ? "rule" : "rules"}, ${newLearned.length} learned preference${newLearned.length === 1 ? "" : "s"}${names.added + ignored.added + blocked.added > 0 ? `, ${names.added + ignored.added + blocked.added} other` : ""}. Nothing already here was changed.`,
     merged: {
       ...current,
-      dialect,
+      // Additive import: the writer's existing dialect is left alone, as the
+      // success message promises. The incoming dialect is only validated above
+      // so a malformed export cannot be imported as a valid profile.
+      dialect: current.dialect,
       personalDictionary: dictionary.merged,
       names: names.merged,
       ignoredWords: ignored.merged,

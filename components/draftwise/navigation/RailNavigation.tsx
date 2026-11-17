@@ -12,6 +12,8 @@ interface RailNavigationProps {
   goals: WritingGoals;
   onOpenShortcuts: () => void;
   onOpenSettings: () => void;
+  showInsightsNew?: boolean;
+  showExtensionNew?: boolean;
 }
 
 export function RailNavigation({ 
@@ -19,7 +21,9 @@ export function RailNavigation({
   onViewChange, 
   goals,
   onOpenShortcuts,
-  onOpenSettings
+  onOpenSettings,
+  showInsightsNew = false,
+  showExtensionNew = false,
 }: RailNavigationProps) {
   const { audience, intent, tone } = goals;
 
@@ -51,22 +55,22 @@ export function RailNavigation({
           className={`${currentView === "insights" ? "rail-button active" : "rail-button"}`} 
           onClick={() => onViewChange("insights")} 
           type="button" 
-          aria-label="Insights new"
+          aria-label={showInsightsNew ? "Insights new" : "Insights"}
         >
           <BarChart3 size={18} aria-hidden="true" />
           <span>Insights</span>
-          <span className="rail-new" aria-hidden="true"> new</span>
+          {showInsightsNew ? <span className="rail-new" aria-hidden="true"> new</span> : null}
         </button>
         
         <button 
           className={`${currentView === "extension" ? "rail-button active" : "rail-button"}`} 
           onClick={() => onViewChange("extension")} 
           type="button" 
-          aria-label="Extension new"
+          aria-label={showExtensionNew ? "Extension new" : "Extension"}
         >
           <Puzzle size={18} aria-hidden="true" />
           <span>Extension</span>
-          <span className="rail-new" aria-hidden="true"> new</span>
+          {showExtensionNew ? <span className="rail-new" aria-hidden="true"> new</span> : null}
         </button>
       </div>
       

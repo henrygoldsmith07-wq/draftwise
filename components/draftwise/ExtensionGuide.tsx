@@ -64,19 +64,19 @@ export function ExtensionGuide({ onOpenSettings }: { onOpenSettings: () => void 
       <div className="extension-grid">
         <div className="extension-card">
           <div className="extension-card-icon"><Laptop size={18} /></div>
-          <h3>Install with least privilege</h3>
+          <h2>Install with least privilege</h2>
           <p>Open <code>chrome://extensions</code>, turn on Developer mode, choose “Load unpacked”, select the <code>extension</code> folder, and grant access only to sites you choose.</p>
           <span className="extension-card-note"><Check size={13} /> Optional host permissions</span>
         </div>
         <div className="extension-card">
           <div className="extension-card-icon"><ShieldCheck size={18} /></div>
-          <h3>Private by design</h3>
+          <h2>Private by design</h2>
           <p>Sensitive fields are skipped. Local analysis runs in the page; optional AI runs in the Manifest V3 service worker. API keys never enter page scripts.</p>
           <span className="extension-card-note"><Check size={13} /> No page analytics</span>
         </div>
         <div className="extension-card">
           <div className="extension-card-icon"><Code2 size={18} /></div>
-          <h3>One shared engine</h3>
+          <h2>One shared engine</h2>
           <p>The extension bundle is built from the same grammar and provider packages as the web editor, so rule IDs and behavior stay aligned.</p>
           <span className="extension-card-note"><Check size={13} /> Build-time shared packages</span>
         </div>

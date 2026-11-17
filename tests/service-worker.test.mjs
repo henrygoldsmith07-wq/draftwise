@@ -180,6 +180,19 @@ test("the settings dialog offers the install and reports the offline state", () 
   assert.match(hook, /display-mode: standalone/u);
 });
 
+test("activation prunes hashed assets from previous deploys", () => {
+  // The cache name is stable, so without pruning every historical generation
+  // of content-hashed chunks accumulates in CacheStorage indefinitely.
+  assert.match(worker, /async function pruneStaleHashedAssets\(\)/u);
+  assert.match(worker, /await pruneStaleHashedAssets\(\);/u);
+  const prune = worker.slice(worker.indexOf("async function pruneStaleHashedAssets"));
+  // Never delete lazily-loaded chunks just because the shell HTML does not
+  // name them; keep the newest insertion-order window instead.
+  assert.match(prune, /if \(!await cache\.match\("\/"\)\) return;/u);
+  assert.match(prune, /hashed\.slice\(0, hashed\.length - MAX_HASHED_ASSETS\)/u);
+  assert.doesNotMatch(prune, /referenced\.has/u);
+});
+
 test("the settings dialog says the app is ready to work offline", () => {
   // The section has to be in the dialog, not just in a component nobody
   // renders.

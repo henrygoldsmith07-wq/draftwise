@@ -18,6 +18,18 @@ import {
   preserveCase,
 } from "./util.ts";
 
+// Shared with the structure rules: a short sentence whose only verb is an
+// irregular past form ("Jane went home.") is complete, not a fragment.
+export const IRREGULAR_PAST_VERBS = new Set([
+  "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
+  "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
+  "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
+  "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
+  "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
+  "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
+  "sold", "sent", "spent", "built", "lent", "said",
+]);
+
 export function findConfusedWords(text: string, preferences: StylePreferences) {
   const issues: WritingIssue[] = [];
   const patterns: Array<[RegExp, string, string, string, number?]> = [
@@ -586,15 +598,6 @@ export function findPrecisionGrammarIssues(text: string, preferences: StylePrefe
   // — greetings and fragments ("Yes, this is fine") have none and are left
   // alone. A preceding colon properly introduces the clause, and "that is
   // to say" parentheticals are idiomatic, so both are excluded.
-  const IRREGULAR_PAST_VERBS = new Set([
-    "left", "went", "came", "saw", "took", "made", "got", "knew", "thought",
-    "felt", "became", "brought", "began", "kept", "held", "wrote", "stood",
-    "heard", "meant", "paid", "met", "ran", "sat", "spoke", "drove", "broke",
-    "chose", "wore", "tore", "fell", "forgot", "gave", "hid", "rode", "rang",
-    "rose", "sank", "sang", "shook", "shot", "slept", "slid", "stole", "stuck",
-    "struck", "swore", "swept", "swung", "threw", "woke", "won", "lost",
-    "sold", "sent", "spent", "built", "lent", "said",
-  ]);
   const FINITE_VERB_BEFORE_COMMA = /\b(am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|shall|should|will|would|may|might|must)\b|[\p{L}]ed\b/iu;
   // A message written entirely without letter case has no sentence
   // conventions either (the terminal-stop rule already treats it that way),

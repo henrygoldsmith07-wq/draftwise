@@ -29,8 +29,9 @@ test.beforeEach(async ({ page }) => {
 test("analysis status is announced and is not an empty live region", async ({ page }) => {
   const status = page.locator(".analysis-status");
   await expect(status).toBeVisible();
-  await expect(status).toHaveAttribute("role", "status");
-  await expect(status).toHaveAttribute("aria-live", "polite");
+  // There is one announcer for analysis status — the footer region — so the
+  // toolbar copy is not a second role="status". Both stay readable.
+  await expect(page.locator(".suggestions-footer [role=\"status\"]")).toHaveAttribute("aria-live", "polite");
 
   // A live region with no accessible text announces nothing. The status must
   // always carry a readable string, analysing or not.
@@ -63,7 +64,7 @@ test("analysis status stays announced while the app is analysing", async ({ page
 });
 
 test("focus mode reports its pressed state, not just its label", async ({ page }) => {
-  const toggle = page.getByRole("button", { name: /Check as I write|Exit focus/u });
+  const toggle = page.getByRole("button", { name: /focus mode/iu });
   await expect(toggle).toBeVisible();
 
   // The label flips, which is not the same as the state being exposed. aria-pressed
@@ -73,7 +74,7 @@ test("focus mode reports its pressed state, not just its label", async ({ page }
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await expect(toggle).toHaveText(/Exit focus/u);
+  await expect(toggle).toHaveText(/Exit focus mode/u);
 });
 
 test("suggestions panel collapse is a labelled disclosure in both states", async ({ page }) => {
@@ -101,7 +102,7 @@ test.describe("mobile layout", () => {
     // font-size: 0 is not a hiding technique: most screen readers drop
     // zero-sized text, so these labels became silent rather than invisible.
     // They must still be reachable by accessible name at mobile width.
-    const toggle = page.getByRole("button", { name: /Check as I write|Exit focus/u });
+    const toggle = page.getByRole("button", { name: /focus mode/iu });
     await expect(toggle).toBeVisible();
 
     const status = page.locator(".analysis-status");

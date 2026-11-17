@@ -214,6 +214,45 @@ test("a failed write cannot replace a newer queued version of the same document"
   assert.equal((await backend.get(active.id))?.draft, "v2", "the newest text is what gets persisted");
 });
 
+test("a stale in-flight write that fails cannot requeue over a newer written version", async () => {
+  const held = [];
+  class DeferredFailBackend extends MemoryDocumentBackend {
+    holdDraft = null;
+    rejectDraft = null;
+    async put(document) {
+      if (document.draft === this.holdDraft) {
+        await new Promise((resolve) => held.push({ document, resolve }));
+      }
+      if (document.draft === this.rejectDraft) throw new Error("quota exceeded");
+      return super.put(document);
+    }
+  }
+  const backend = new DeferredFailBackend();
+  const lifecycle = new DocumentLifecycle(backend, { title: "Untitled draft", draft: "" });
+  await lifecycle.load();
+  const active = lifecycle.getActive();
+
+  // v2 is held in flight and will reject. While it is held, v3 is queued and
+  // written successfully by a second flush, leaving nothing in `pending`.
+  backend.holdDraft = "v2";
+  backend.rejectDraft = "v2";
+  lifecycle.updateActive({ draft: "v2" });
+  const staleFlush = lifecycle.flush();
+  lifecycle.updateActive({ draft: "v3" });
+  assert.equal(await lifecycle.flush(), true, "v3 is written while v2 is still in flight");
+
+  const pending = held.find((entry) => entry.document.draft === "v2");
+  assert.ok(pending, "v2's write is still waiting");
+  pending.resolve();
+  await staleFlush;
+
+  // The old v2 rejection arrived after a newer version was already persisted;
+  // it must not requeue v2 and become the next write that overwrites v3.
+  assert.equal(lifecycle.hasPendingWrites(), false);
+  await lifecycle.flush();
+  assert.equal((await backend.get(active.id))?.draft, "v3", "the newest text survives the stale rejection");
+});
+
 test("clear-all awaits the live store reset before sweeping storage", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const clear = page.match(/const clearLocalData = useCallback\(async \(\) => \{[\s\S]*?historyStore\.clear\(\);/u);

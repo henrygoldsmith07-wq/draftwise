@@ -8,7 +8,9 @@ const settingsUrl = new URL("../components/draftwise/ProviderSettingsDialog.tsx"
 
 test("new drafts require confirmation and start their own history", async () => {
   const page = await readFile(pageUrl, "utf8");
-  assert.match(page, /Start a new draft\?/u);
+  const newDraftDialog = await readFile(
+    new URL("../components/draftwise/dialogs/NewDraftDialog.tsx", import.meta.url), "utf8");
+  assert.match(newDraftDialog, /New document/u);
   // The draft guard reads the document store: document content is the store's
   // exclusive domain, never workspace state.
   assert.match(page, /if \(!\(documents\.active\?\.draft \?\? ""\)\.trim\(\)\)/u);
@@ -24,7 +26,10 @@ test("new drafts require confirmation and start their own history", async () => 
 
 test("destructive local-data clearing is confirmed and editor shortcuts do not fire behind dialogs", async () => {
   const page = await readFile(pageUrl, "utf8");
-  assert.match(page, /Clear all local Draftwise data\?/u);
+  // The confirmation lives in its own component; the page only renders it.
+  const dialog = await readFile(
+    new URL("../components/draftwise/dialogs/ClearDataDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /Delete all local data\?/u);
   assert.match(page, /settingsOpen \|\| shortcutsOpen \|\| newDraftOpen \|\| clearDataOpen/u);
   assert.match(page, /setClearDataOpen\(true\)/u);
 });

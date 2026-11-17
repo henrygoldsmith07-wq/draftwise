@@ -4,6 +4,7 @@ import {
   type DocumentStoreBackend,
 } from "./documents.ts";
 import { ACTIVITY_STORAGE_KEY } from "./writing-activity.ts";
+import { PENDING_DELETIONS_STORAGE_KEY } from "./document-lifecycle.ts";
 import { clearWorkspaceStorage, type WorkspaceStorage } from "./workspace-storage.ts";
 
 /**
@@ -65,6 +66,17 @@ export async function clearAllLocalData(options: ClearLocalDataOptions = {}) {
       storage.removeItem(ACTIVITY_STORAGE_KEY);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Failed to clear writing activity");
+    }
+  }
+
+  // 3c. Persisted ids of deletions that failed and are awaiting retry. A
+  // "clear everything" that left these behind could delete documents created
+  // later with a reused id.
+  if (storage) {
+    try {
+      storage.removeItem(PENDING_DELETIONS_STORAGE_KEY);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Failed to clear pending deletions");
     }
   }
 

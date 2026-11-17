@@ -3,6 +3,7 @@
 import { FileText, ShieldCheck, Settings2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/draftwise/topbar/ThemeToggle";
 
 interface TopBarProps {
   draftTitle: string;
@@ -11,6 +12,8 @@ interface TopBarProps {
   onSaveTitle: (title: string) => void;
   onOpenSettings: () => void;
   isPrivate?: boolean;
+  darkMode: boolean;
+  onThemeChange: (dark: boolean) => void;
 }
 
 export function TopBar({ 
@@ -19,7 +22,9 @@ export function TopBar({
   saveError,
   onSaveTitle,
   onOpenSettings,
-  isPrivate = true
+  isPrivate = true,
+  darkMode,
+  onThemeChange,
 }: TopBarProps) {
   return (
     <header className="topbar">
@@ -49,7 +54,7 @@ export function TopBar({
           className="saved-dot" 
           title={saveError || savedLabel} 
           style={{
-            backgroundColor: saveError ? 'var(--error)' : undefined
+            backgroundColor: saveError ? 'var(--destructive)' : undefined
           }}
         />
       </div>
@@ -59,6 +64,7 @@ export function TopBar({
           <span className="privacy-dot" />
           Local-first, cloud opt-in
         </div>
+        <ThemeToggle darkMode={darkMode} onThemeChange={onThemeChange} />
         <Button variant="ghost" size="icon" aria-label="Open settings" onClick={onOpenSettings}>
           <Settings2 size={17} />
         </Button>

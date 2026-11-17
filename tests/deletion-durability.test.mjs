@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DocumentLifecycle } from "../lib/document-lifecycle.ts";
+import { DocumentLifecycle, PENDING_DELETIONS_STORAGE_KEY } from "../lib/document-lifecycle.ts";
 import { MemoryDocumentBackend, LocalStorageDocumentBackend } from "../lib/documents.ts";
 
 function storage(seed = {}) {
@@ -73,6 +73,85 @@ test("persistent deletion failure is reported and stays retryable", async () => 
   assert.equal(retry.ok, true);
   assert.equal(lifecycle.hasPendingDeletions(), false);
   assert.equal((await backend.list()).some((document) => document.id === victim.id), false);
+});
+
+test("a later flush retries a failed deletion, so the document cannot reappear after reload", async () => {
+  class FailRemoveBackend extends MemoryDocumentBackend {
+    failRemoves = true;
+    async remove(id) {
+      if (this.failRemoves) throw new Error("temporary storage lock");
+      return super.remove(id);
+    }
+  }
+  const backend = new FailRemoveBackend();
+  const lifecycle = new DocumentLifecycle(backend, seed);
+  await lifecycle.load();
+  const victim = lifecycle.getActive();
+  // A second document keeps remove() from minting a fresh one, so the failed
+  // delete is the only outstanding work and no write is queued.
+  lifecycle.createNew("Keeper", "keep me");
+  await lifecycle.flush();
+
+  assert.equal((await lifecycle.remove(victim.id)).ok, false);
+  assert.equal(lifecycle.hasPendingDeletions(), true);
+  assert.equal(lifecycle.hasPendingWrites(), false, "only the deletion remains outstanding");
+
+  // The canonical save path (saveAll -> flush) must retry it even with nothing
+  // in the write queue — otherwise a failed delete looks successful until the
+  // document silently reappears after a reload.
+  backend.failRemoves = false;
+  assert.equal(await lifecycle.flush(), true);
+  assert.equal(lifecycle.hasPendingDeletions(), false);
+  assert.equal((await backend.list()).some((document) => document.id === victim.id), false);
+
+  const reloaded = new DocumentLifecycle(backend, seed);
+  await reloaded.load();
+  assert.equal(reloaded.documents.some((document) => document.id === victim.id), false);
+});
+
+test("a still-failing deletion keeps flush honest and stays retriable", async () => {
+  class AlwaysFailRemove extends MemoryDocumentBackend {
+    async remove() { throw new Error("storage blocked"); }
+  }
+  const lifecycle = new DocumentLifecycle(new AlwaysFailRemove(), seed);
+  await lifecycle.load();
+  const victim = lifecycle.getActive();
+  await lifecycle.remove(victim.id);
+
+  assert.equal(await lifecycle.flush(), false, "a failed delete must not report a successful save");
+  assert.equal(lifecycle.getSnapshot().saveStatus, "error");
+  assert.equal(lifecycle.hasPendingDeletions(), true, "it remains queued for the next attempt");
+});
+
+test("failed deletion ids survive a reload via the persisted queue", async () => {
+  const previous = globalThis.localStorage;
+  const values = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
+  try {
+    class AlwaysFailRemove extends MemoryDocumentBackend {
+      async remove() { throw new Error("blocked"); }
+    }
+    const backend = new AlwaysFailRemove();
+    const first = new DocumentLifecycle(backend, seed);
+    await first.load();
+    const victim = first.getActive();
+    assert.equal((await first.remove(victim.id)).ok, false);
+    assert.deepEqual(JSON.parse(values.get(PENDING_DELETIONS_STORAGE_KEY)), [victim.id]);
+
+    // A fresh lifecycle over the same backend reads the persisted queue: the
+    // "deleted" document is hidden, not resurrected, and the id stays queued.
+    const second = new DocumentLifecycle(backend, seed);
+    await second.load();
+    assert.equal(second.hasPendingDeletions(), true);
+    assert.deepEqual(second.pendingDeletionIds, [victim.id]);
+    assert.equal(second.documents.some((document) => document.id === victim.id), false);
+  } finally {
+    globalThis.localStorage = previous;
+  }
 });
 
 test("deletion falls back through storage tiers", async () => {

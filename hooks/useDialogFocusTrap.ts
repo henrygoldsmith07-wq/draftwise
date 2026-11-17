@@ -66,7 +66,11 @@ export function useDialogFocusTrap<T extends HTMLElement>(
       const target = fallback && fallback.isConnected ? fallback : previouslyFocused;
       if (target && target.isConnected) target.focus({ preventScroll: true });
     };
-  }, [open, onClose, returnFocusRef]);
+    // onClose and returnFocusRef are mirrored into refs above, so a caller
+    // passing a fresh callback each render must not tear down and re-run the
+    // trap — that would pull focus back to the first control mid-interaction.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return dialogRef;
 }

@@ -95,3 +95,20 @@ test("a future timestamp counts as fresh, never as a reason to nag", () => {
     false,
   );
 });
+
+test("the app renders the reminder with working export and snooze actions", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  // The pure decision and its callbacks used to be computed but never rendered,
+  // so the documented nudge never appeared in the dashboard.
+  assert.match(page, /\{showBackupReminder \? \(/u, "the reminder must be rendered");
+  assert.match(page, /className="backup-banner"/u);
+  assert.match(page, /onClick=\{exportBackupFromReminder\}/u);
+  assert.match(page, /onClick=\{snoozeBackupReminder\}/u);
+  const settings = await readFile(
+    new URL("../components/draftwise/ProviderSettingsDialog.tsx", import.meta.url), "utf8");
+  assert.match(page, /onBackupExported=\{markBackupExported\}/u,
+    "exports from Settings must satisfy the reminder too");
+  assert.ok(settings.includes("onBackupExported"));
+});

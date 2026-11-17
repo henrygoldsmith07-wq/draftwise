@@ -90,14 +90,16 @@ test("the worker registers only in production", () => {
   assert.equal(shouldRegisterServiceWorker({ production: true, hasServiceWorker: true, secureContext: true }), true);
 });
 
-test("the app registers the worker and the worker is served from the site root", () => {
+test("the app registers the worker with a scope derived from the base path", () => {
   const page = read("app/page.tsx");
   assert.match(page, /registerServiceWorker/u);
   assert.match(page, /shouldRegisterServiceWorker/u);
-  // A worker served from a sub-path would not cover the app, and the scope
-  // has to be the whole site.
-  assert.match(read("lib/service-worker.ts"), /SERVICE_WORKER_URL = "\/sw\.js"/u);
-  assert.match(read("lib/service-worker.ts"), /scope: "\/"/u);
+  // A worker cannot control a scope broader than its script URL, so the
+  // worker path and its scope move together when a base path is configured.
+  const source = read("lib/service-worker.ts");
+  assert.match(source, /SERVICE_WORKER_URL = "\/sw\.js"/u);
+  assert.match(source, /serviceWorkerScope/u);
+  assert.match(source, /scope: serviceWorkerScope/u);
 });
 
 test("the worker script is not cached by the browser", () => {

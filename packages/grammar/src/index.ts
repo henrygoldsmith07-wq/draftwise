@@ -207,6 +207,8 @@ export { suggestSpelling } from "./spelling.ts";
 export { createAnalysisDiagnostics } from "./diagnostics.ts";
 export { SUGGESTION_DENSITY_CAPS, SUGGESTION_DENSITY_PER_THOUSAND_WORDS, SUPPRESSION_REASONS, classifyIssueKind, densityCapsFor, describeSuppression, prioritiseSuggestions, ruleFamily } from "./prioritise.ts";
 export type { DismissedFinding, PrioritiseOptions, PrioritiseResult } from "./prioritise.ts";
+export { anchorMatches, fingerprintAnchor, fingerprintText, normaliseDismissalText } from "./dismissal-anchor.ts";
+export type { AnchorFingerprint } from "./dismissal-anchor.ts";
 export type { GrammarOptions } from "./preferences.ts";
 // Document-level reasoning: an outline, themes, and editorial notes that scale
 // with the draft. Entirely local - no provider, no network.

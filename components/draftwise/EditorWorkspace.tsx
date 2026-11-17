@@ -7,7 +7,7 @@ import {
   Check,
   CheckCheck,
   FileText,
-  Highlighter,
+  Focus,
   Keyboard,
   PanelRight,
   RotateCw,
@@ -230,11 +230,6 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
       : "A few useful changes";
   return (
     <div className={`workspace-grid ${props.focusMode ? "is-focus-mode" : ""}`}>
-      {/* Spoken confirmation for keyboard review. Visually hidden but in the
-          accessibility tree: a keyboard writer gets no hover state, so this is
-          the only signal that Tab moved the review cursor and what it landed
-          on. */}
-      <p className="sr-only" role="status" aria-live="polite">{props.reviewAnnouncement}</p>
       <section className="editor-column">
         <div className="workspace-heading">
           <div>
@@ -321,15 +316,15 @@ export function EditorWorkspace(props: EditorWorkspaceProps) {
               <Button size="icon-xs" variant="ghost" aria-label="Undo" disabled={!props.canUndo} onClick={props.onUndo}><Undo2 size={15} /></Button>
               <Button size="icon-xs" variant="ghost" aria-label="Redo" disabled={!props.canRedo} onClick={props.onRedo}><RotateCw size={15} /></Button>
               <span className="toolbar-separator" />
-              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode} aria-label={props.focusMode ? "Exit focus mode" : "Check as I write mode"}><Highlighter size={14} aria-hidden="true" /> {props.focusMode ? "Exit focus" : "Check as I write"}</button>
+              <button type="button" className="toolbar-text active" onClick={props.onToggleFocusMode} aria-pressed={props.focusMode} aria-label={props.focusMode ? "Exit focus mode" : "Focus mode"}><Focus size={14} aria-hidden="true" /> <span className="sr-only">{props.focusMode ? "Exit focus mode" : "Focus mode"}</span></button>
               <span className="toolbar-separator" />
               <ReadAloudControls controller={readAloud} hasText={props.draft.trim().length > 0} disabled={props.loading} />
             </div>
             <div className="editor-toolbar-right">
-              <span className={`analysis-status ${props.analyzing ? "is-working" : ""}`} role="status" aria-live="polite">
+              <span className={`analysis-status ${props.analyzing ? "is-working" : ""}`}>
                 {props.analyzing
-                  ? <><span className="status-spinner" aria-hidden="true" /> Analysing changed text</>
-                  : <><span className="status-check" aria-hidden="true"><Check size={11} /></span> {props.analysisStatusLabel}</>}
+                  ? <><span className="status-spinner" aria-hidden="true" /> <span className="sr-only">Analysing changed text</span></>
+                  : <><span className="status-check" aria-hidden="true"><Check size={11} /></span> <span className="sr-only">{props.analysisStatusLabel}</span></>}
               </span>
               <Button variant="ghost" size="icon-xs" aria-label="Open editor shortcuts" onClick={props.onOpenShortcuts}><Keyboard size={16} /></Button>
               <Button variant="ghost" size="icon-xs" aria-label="Clear document" onClick={props.onClearDocument}><Trash2 size={16} /></Button>

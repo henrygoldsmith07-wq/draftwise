@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { BarChart3, CircleHelp, FileText, Flag, Settings2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { DocumentDashboard } from "@/components/draftwise/DocumentDashboard";
 import { OfflineNotice } from "@/components/draftwise/OfflineNotice";
@@ -23,7 +21,6 @@ import { EditorSkeleton } from "@/components/draftwise/loading/EditorSkeleton";
 import { PageLayout } from "@/components/draftwise/PageLayout";
 import { RailNavigation } from "@/components/draftwise/navigation/RailNavigation";
 import { TopBar } from "@/components/draftwise/topbar/TopBar";
-import { ThemeToggle } from "@/components/draftwise/topbar/ThemeToggle";
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues } from "@/lib/issue-actions";
 import { canApplyRewritePreview } from "@/lib/rewrite-retry";
 import { buildSuggestionState, filterByCategory, filterByTier, filterableCategories, ruleFamily, sortForReview, type CategoryFilter, type TierFilter } from "@/lib/suggestions";
@@ -32,7 +29,8 @@ import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
-import { ACTIVITY_STORAGE_KEY, countWords, creditSince } from "@/lib/writing-activity";
+import { ACTIVITY_STORAGE_KEY } from "@/lib/writing-activity";
+import { ActivityFoldTracker } from "@/lib/activity-fold";
 import { buildBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
 import { shouldShowBackupReminder } from "@/lib/backup-reminder";
 import { resolveDocumentStyle } from "@/lib/documents";
@@ -59,81 +57,10 @@ The result is a calmer writing loop: notice one useful change, accept it when it
 
 type WorkspaceView = "home" | "write" | "insights" | "extension" | "history";
 
-function ShortcutDialog({ open, onOpenChange, theme }: { open: boolean; onOpenChange: (open: boolean) => void; theme: "dark" | "light" }) {
-  const shortcuts = [
-    ["Save locally", "⌘ / Ctrl + S"],
-    ["Next suggestion", "⌘ / Ctrl + ↓"],
-    ["Previous suggestion", "⌘ / Ctrl + ↑"],
-    ["Accept the current suggestion", "⌘ / Ctrl + Enter"],
-    ["Ignore the current suggestion", "⌘ / Ctrl + Backspace"],
-    ["Accept all visible suggestions", "Ctrl + Shift + Enter"],
-    ["Close rewrite preview", "Esc"],
-    ["Open shortcuts", "?"],
-  ];
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-theme={theme}>
-        <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>Keep your hands on the draft while you review suggestions.</DialogDescription>
-        </DialogHeader>
-        <div className="shortcut-list">{shortcuts.map(([label, key]) => <div key={label}><span>{label}</span><kbd>{key}</kbd></div>)}</div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function NewDraftDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-theme={theme}>
-        <DialogHeader>
-          <DialogTitle>Start a new draft?</DialogTitle>
-          <DialogDescription>
-            This starts a fresh blank document. Your current text stays intact in Documents and its version history — undo now works within each document, so return to the previous document to recover anything.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Start new draft</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ClearDataDialog({ open, onOpenChange, onConfirm, theme }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void; theme: "dark" | "light" }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-theme={theme}>
-        <DialogHeader>
-          <DialogTitle>Clear all local Draftwise data?</DialogTitle>
-          <DialogDescription>
-            This removes every document and version snapshot, your draft and preferences (personal dictionary, dismissed and disabled suggestion rules), provider and classifier credentials, and all other local Draftwise storage from this browser. Reload and Draftwise starts clean. This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => { onConfirm(); onOpenChange(false); }}>Clear local data</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export default function Home() {
   const initialWorkspace = useMemo(() => DEFAULT_WORKSPACE(), []);
   const { workspace, hydrated, saveStatus, saveError, updateWorkspace, setWorkspace, saveNow, clearLocalData: clearPersistedData } = useDraftPersistence(initialWorkspace);
   
-  // Loading state tracking for progressive UX
-  const [loadingState, setLoadingState] = useState<'splash' | 'documents' | 'editor' | 'ready'>('splash');
-  
-  // Initial splash for first render
-  useEffect(() => {
-    if (!hydrated) {
-      setLoadingState('splash');
-    }
-  }, [hydrated]);
   // Document content lives in exactly one state system: the document store.
   // The editor reads documents.active and writes back through updateActive;
   // workspace holds only global configuration plus activeDocumentId metadata.
@@ -143,17 +70,6 @@ export default function Home() {
   // explicit action (loadSampleDocument); it is never persisted uninvited.
   const documents = useDocuments({ title: "Untitled draft", draft: "" }, hydrated, workspace.activeDocumentId);
   const draftText = documents.active?.draft ?? "";
-
-  // Track hydration states progressively. This must run after useDocuments:
-  // the dependency array reads documents during render, so declaring it above
-  // throws a temporal-dead-zone ReferenceError on the first render.
-  useEffect(() => {
-    if (hydrated && !documents.hydrated) {
-      setLoadingState('documents');
-    } else if (hydrated && documents.hydrated) {
-      setLoadingState('ready');
-    }
-  }, [hydrated, documents.hydrated]);
   const draftTitle = documents.active?.title ?? "Untitled draft";
   // Goals belong to the document being written, not to the app globally: an
   // academic essay and a casual email need different audiences, intents and
@@ -340,7 +256,10 @@ export default function Home() {
   // bulk restores cannot mint a week's worth of words in one go.
   const [activityStore] = useState(() => new WritingActivityStore());
   const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
-  const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
+  const activityRef = useRef(new ActivityFoldTracker());
+  // Which document has had its activity baseline seeded. Guarding on it keeps
+  // activation a one-time event even though the effect reads the live draft.
+  const activatedIdRef = useRef<string | null>(null);
   const docsReady = documents.hydrated;
 
   // Register the service worker so the deployed app is a real PWA: Chrome
@@ -380,15 +299,9 @@ export default function Home() {
     let lastTick = Date.now();
     const fold = (activeMs: number) => {
       lastTick = Date.now();
-      const tracker = activityRef.current;
-      if (!tracker.keystrokeSinceTick) return;
-      tracker.keystrokeSinceTick = false;
-      const words = countWords(tracker.draft);
-      const baseline = tracker.baselines.get(activeId) ?? words;
-      tracker.baselines.set(activeId, words);
-      const credited = creditSince(baseline, words);
-      if (credited === 0) return;
-      activityStore.record(window.localStorage, credited, activeMs);
+      const result = activityRef.current.fold();
+      if (!result || result.credited === 0) return;
+      activityStore.record(window.localStorage, result.credited, activeMs);
     };
     const timer = window.setInterval(() => fold(30_000), 30_000);
     // Attribute only time actually spent: the exit fold credits the slice
@@ -397,6 +310,20 @@ export default function Home() {
     window.addEventListener("pagehide", onActivityHide);
     return () => { window.clearInterval(timer); window.removeEventListener("pagehide", onActivityHide); };
   }, [hydrated, docsReady, activeId, activityStore]);
+
+  // Activating a document closes the previous document's fold window and seeds
+  // the new baseline from its existing text. Without this, pending keystrokes
+  // were folded against the next document's word count and lost.
+  useEffect(() => {
+    if (!hydrated || !docsReady || !activeId) return;
+    if (activatedIdRef.current === activeId) return;
+    activatedIdRef.current = activeId;
+    const pending = activityRef.current.fold();
+    if (pending && pending.credited > 0) {
+      activityStore.record(window.localStorage, pending.credited, 0);
+    }
+    activityRef.current.activate(activeId, draftText);
+  }, [hydrated, docsReady, activeId, draftText, activityStore]);
 
   const updateDraft = useCallback((next: string, recordHistory = true) => {
     // Until both stores have hydrated there is no active document to write to,
@@ -408,8 +335,8 @@ export default function Home() {
       return;
     }
     documents.updateActive({ draft: next });
-    activityRef.current.keystrokeSinceTick = true;
-    activityRef.current.draft = next;
+    activityRef.current.ensureBaseline(activeId, documents.active?.draft ?? "");
+    activityRef.current.noteEdit(activeId, next);
     if (recordHistory) {
       historyStore.commit(activeId, next);
     }
@@ -476,11 +403,14 @@ export default function Home() {
   useEffect(() => {
     const fixFirst = suggestions.report.byTier["fix-first"];
     const worthMaking = suggestions.changesWorthMaking;
-    const key = `${activeId}:${draftText.length}:${worthMaking}:${fixFirst}`;
+    // Key on the analysis result, not the live draft length: the latter changed
+    // on every keystroke and queued a storage write and a second render per
+    // character. Analysis is debounced, so this now fires once per finished pass.
+    const key = `${activeId}:${analysis.analysedText}:${worthMaking}:${fixFirst}`;
     if (recordedReviewRef.current === key) return;
     recordedReviewRef.current = key;
     documents.recordReview({ worthMaking, fixFirst, analysedAt: Date.now() });
-  }, [activeId, documents, draftText, suggestions.changesWorthMaking, suggestions.report.byTier]);
+  }, [activeId, documents, analysis.analysedText, suggestions.changesWorthMaking, suggestions.report.byTier]);
 
   // Insights progress: the baseline is captured when the document becomes
   // active, so the writer sees what their editing actually changed.
@@ -732,10 +662,13 @@ export default function Home() {
       setImportError(null);
       const document = documents.createNew(result.title, result.text, defaultGoals, defaultDialect);
       historyStore.open(document.id, document.draft);
+      activityRef.current.replace(document.id, result.text);
       setDismissedIssueKeys([]);
       setActiveIssueId(null);
       setView("write");
       resetUnhidden(result.text);
+    }).catch(() => {
+      setImportError("That file could not be read. Try selecting it again.");
     });
   }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
@@ -1064,15 +997,15 @@ export default function Home() {
   const providerConfigured = Boolean(workspace.provider.apiKey.trim() && workspace.provider.baseUrl.trim() && workspace.provider.model.trim());
   const analysisStatusLabel = getAiReviewStatus(analysis.aiCoverage, workspace.aiEnabled, providerConfigured, analysisState.status);
 
-  // Determine what to show based on loading state and view
-  const shouldShowSplash = loadingState === 'splash';
+  // The splash is the unhydrated render. Deriving it avoids an effect that
+  // mirrored the same hydration flags into state a render later.
+  const shouldShowSplash = !hydrated;
   const shouldShowDashboardSkeleton = loading && view === 'home';
   const shouldShowEditorSkeleton = loading && view === 'write';
 
   return (
     <PageLayout 
-      focusMode={focusMode} 
-      onFocusModeChange={setFocusMode}
+      focusMode={focusMode}
       theme={darkMode ? "dark" : "light"}
       setTheme={(theme) => updateWorkspace({ theme })}
     >
@@ -1093,18 +1026,41 @@ export default function Home() {
           saveError={saveError}
           onSaveTitle={(title) => documents.updateActive({ title })}
           onOpenSettings={() => setSettingsOpen(true)}
+          darkMode={darkMode}
+          onThemeChange={(dark) => updateWorkspace({ theme: dark ? "dark" : "light" })}
         />
-        
+
+        <OfflineNotice online={online} />
+
         <div className="app-body">
           <RailNavigation 
             currentView={view}
-            onViewChange={setView}
+            onViewChange={(next) => {
+              if (next === "insights") openInsights();
+              if (next === "extension") openExtensionGuide();
+              setView(next);
+            }}
             goals={activeGoals}
             onOpenShortcuts={() => setShortcutsOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
+            showInsightsNew={showInsightsNew}
+            showExtensionNew={showExtensionNew}
           />
   
           <main id="main-content" tabIndex={-1}>
+            {showBackupReminder ? (
+              <div className="backup-banner" role="status">
+                <Download size={16} aria-hidden="true" />
+                <div>
+                  <strong>Keep a copy of your work</strong>
+                  <span>Drafts live only in this browser. Export a backup file you own, then store it somewhere private.</span>
+                </div>
+                <div className="backup-banner-actions">
+                  <Button size="sm" onClick={exportBackupFromReminder}>Export backup</Button>
+                  <Button size="sm" variant="ghost" onClick={snoozeBackupReminder}>Later</Button>
+                </div>
+              </div>
+            ) : null}
             {shouldShowDashboardSkeleton ? (
               <DocumentDashboardSkeleton />
             ) : (
@@ -1125,7 +1081,7 @@ export default function Home() {
         </>
       )}
       
-      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} theme={themeName} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} />
+      <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} theme={themeName} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onRestoreBackup={restoreBackup} onBackupExported={markBackupExported} />
       <KeyboardShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <NewDraftDialogComponent open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} />
       <ClearDataDialogComponent open={clearDataOpen} onOpenChange={setClearDataOpen} onConfirm={clearLocalData} />

@@ -50,10 +50,13 @@ test("mobile layout hides labels visually without removing them from the a11y tr
 
   assert.match(css, /\.sr-only \{/u);
   assert.match(css, /clip-path: inset\(50%\)/u);
-  // The old font-size:0 hide used a .sr-only revert rule that matched nothing
-  // (the labels are plain text nodes). Keeping the analysis status readable
-  // at a small size restores the actual "Analysing / ready" feedback.
-  assert.doesNotMatch(css, /\.toolbar-text \.sr-only, \.analysis-status \.sr-only/u);
+  // Inside a zero-sized container the absolute .sr-only utility collapses, so
+  // these spans are reverted to static and clipped by the container. Both
+  // hardening fixes survive the merge: the revert rule keeps the sr-only
+  // labels readable to screen readers (they are real sr-only spans now), and
+  // the analysis status keeps its own small font size so the
+  // "Analysing / ready" feedback stays visible.
+  assert.match(css, /\.toolbar-text \.sr-only, \.analysis-status \.sr-only \{ position: static; font-size: 11px; \}/u);
   assert.match(mobileBlock, /\.analysis-status \{ font-size: 10px; \}/u);
 });
 
@@ -72,7 +75,7 @@ test("offline status, backup reminder and backup stamping reach the UI", async (
   // These were computed but never rendered, so the offline explanation and
   // the only nudge protecting local-only drafts never reached any writer.
   assert.match(page, /<OfflineNotice online=\{online\} \/>/u);
-  assert.match(page, /<div className="backup-banner">[\s\S]{0,80}<span role="status">/u);
+  assert.match(page, /<div className="backup-banner" role="status">/u);
   assert.match(page, /onClick=\{exportBackupFromReminder\}/u);
   assert.match(page, /onClick=\{snoozeBackupReminder\}/u);
   assert.match(page, /onBackupExported=\{markBackupExported\}/u);
@@ -130,8 +133,13 @@ test("each status message has exactly one live region", async () => {
   // announced twice by screen readers.
   assert.doesNotMatch(editor, /reviewAnnouncement: string;/u);
   assert.doesNotMatch(editor, /<p className="sr-only" role="status"/u);
-  const liveRegions = editor.match(/role="status" aria-live="polite"/gu) ?? [];
-  assert.equal(liveRegions.length, 1, "the editor should own exactly one polite live region");
+  // Review announcements have a single owner: page.tsx's LiveRegionAnnouncer.
+  // A second polite region in the editor made screen readers read every review
+  // step twice, so the editor must own none and page.tsx must own exactly one.
+  assert.doesNotMatch(editor, /role="status" aria-live="polite"/u);
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.equal((page.match(/<LiveRegionAnnouncer /gu) ?? []).length, 1,
+    "page.tsx should own exactly one review live region");
   assert.match(editor, /<span aria-hidden="true"><Zap size=\{14\} \/> \{props\.analysisStatusLabel\}<\/span>/u);
   assert.match(topBar, /className="sr-only" role="status" aria-live="polite">\{saveError \?\? ""\}/u);
 
@@ -148,8 +156,8 @@ test("each status message has exactly one live region", async () => {
 
 test("skip link is hidden until focused and all motion respects the OS setting", async () => {
   const css = await readFile(cssUrl, "utf8");
-  assert.match(css, /\.skip-link \{ position: absolute; left: -9999px;/u);
-  assert.match(css, /\.skip-link:focus \{ left: 8px;/u);
+  assert.match(css, /\.skip-link \{[^}]*clip-path: inset\(50%\)/u);
+  assert.match(css, /\.skip-link:focus \{ position: fixed; top: 10px; left: 10px;/u);
   const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(reduced, /\.toast, \[class\*="animate-"\], button, \.app-shell/u);
   assert.match(reduced, /button:hover \{ transform: none; \}/u);

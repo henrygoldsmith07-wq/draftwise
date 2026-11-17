@@ -63,12 +63,64 @@ function readStorageMode(backend: DocumentStoreBackend): DocumentLifecycleState[
   return mode === "indexeddb" || mode === "localstorage" ? mode : "memory";
 }
 
+/**
+ * localStorage key holding the JSON array of document ids whose deletion
+ * failed and still needs retrying. Kept here (rather than in workspace state)
+ * so a failed "delete" survives a reload: load() re-queues these ids, hides
+ * those documents, and every later flush retries the storage removal. The
+ * integrator's "Clear all local data" action must also remove this key.
+ */
+export const PENDING_DELETIONS_STORAGE_KEY = "draftwise:pending-deletions:v1";
+
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function pendingDeletionsStorage(): KeyValueStorage | null {
+  try {
+    const storage = (globalThis as { localStorage?: KeyValueStorage }).localStorage;
+    return storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readPersistedDeletions(): string[] {
+  const storage = pendingDeletionsStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(PENDING_DELETIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersistedDeletions(ids: Iterable<string>) {
+  const storage = pendingDeletionsStorage();
+  if (!storage) return;
+  const list = [...ids];
+  try {
+    if (list.length === 0) storage.removeItem(PENDING_DELETIONS_STORAGE_KEY);
+    else storage.setItem(PENDING_DELETIONS_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // Best effort: the in-memory queue stays the source of truth this session.
+  }
+}
+
 export class DocumentLifecycle {
   private backend: DocumentStoreBackend;
   private seed: DocumentsSeed;
   private state: DocumentLifecycleState = emptyLifecycleState();
   private listeners = new Set<() => void>();
   private pending = new Map<string, StoredDocument>();
+  /**
+   * Newest object we have produced for each id. A failed write may only be
+   * re-queued when its object is still this one; otherwise a stale rejection
+   * arriving after a newer edit (or after that edit was already written) could
+   * put the old text back at the head of the queue.
+   */
+  private latest = new Map<string, StoredDocument>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private loadPromise: Promise<void> | null = null;
 
@@ -115,6 +167,12 @@ export class DocumentLifecycle {
     const seed: DocumentsSeed = { ...this.seed, ...seedOverride };
     this.loadPromise = (async () => {
       const stored = await this.backend.list();
+      // A deletion that failed in an earlier session is still our job. The
+      // ids are persisted, so re-queue them here and hide those documents:
+      // otherwise a "deleted" draft reappears the moment the app reloads.
+      for (const id of readPersistedDeletions()) this.pendingDeletions.add(id);
+      const deletedIds = new Set(this.pendingDeletions);
+      const visible = stored.filter((document) => !deletedIds.has(document.id));
       // Storage reads are async, so a writer can start typing before hydration
       // resolves. Their edits live in state and must not be discarded by the
       // load: an earlier version called setState here unconditionally, and any
@@ -125,16 +183,18 @@ export class DocumentLifecycle {
       const editedId = this.state.activeId;
       const edited = this.findById(editedId);
       const hasUnsavedWork = this.pending.has(editedId);
-      if (stored.length === 0) {
-        // Nothing on disk. If the writer already typed into the seeded
+      if (visible.length === 0) {
+        // Nothing usable on disk. If the writer already typed into the seeded
         // document during the read, that document is theirs: keep it and
         // persist it instead of replacing it with a fresh seed.
         if (hasUnsavedWork && edited) {
           this.setState({ activeId: edited.id, hydrated: true });
           this.queueWrite(edited);
+          await this.retryDeletionsAfterLoad();
           return;
         }
         const initial = createDocument(seed.title, seed.draft);
+        this.latest.set(initial.id, initial);
         try {
           await this.backend.put(initial);
         } catch {
@@ -143,12 +203,14 @@ export class DocumentLifecycle {
           // and the write stays queued for retry.
           this.setState({ documents: [initial], activeId: initial.id, hydrated: true, saveStatus: "error" });
           this.queueWrite(initial);
+          await this.retryDeletionsAfterLoad();
           return;
         }
         this.setState({ documents: [initial], activeId: initial.id, hydrated: true });
+        await this.retryDeletionsAfterLoad();
         return;
       }
-      const ordered = [...stored].sort((left, right) => right.updatedAt - left.updatedAt);
+      const ordered = [...visible].sort((left, right) => right.updatedAt - left.updatedAt);
       // Restore the last-opened document when it still exists. "Most recently
       // edited" is only a fallback: it is not synonymous with "last opened".
       const preferred = preferredActiveId ? ordered.find((document) => document.id === preferredActiveId) : undefined;
@@ -165,19 +227,25 @@ export class DocumentLifecycle {
         hydrated: true,
       });
       if (hasUnsavedWork && edited?.id === nextActive && edited) this.queueWrite(edited);
+      await this.retryDeletionsAfterLoad();
     })();
     return this.loadPromise;
   }
 
   private queueWrite(document: StoredDocument) {
     this.pending.set(document.id, document);
+    this.latest.set(document.id, document);
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.flush(), 500);
   }
 
   /** Write everything queued. Failed documents stay queued for the next flush. */
   async flush(): Promise<boolean> {
-    if (this.pending.size === 0) return true;
+    // A pending deletion is retried on every flush, so the canonical save
+    // pathway recovers a failed delete even when no documents are queued.
+    // This subsumes HEAD's early return: with both queues empty the flush is
+    // still a no-op success, but a queued failed delete now gets retried.
+    if (this.pending.size === 0 && this.pendingDeletions.size === 0) return true;
     const batch = [...this.pending.values()];
     this.pending.clear();
     if (this.timer !== null) {
@@ -191,12 +259,19 @@ export class DocumentLifecycle {
         await this.backend.put(document);
       } catch {
         failed = true;
-        // A newer edit to this same document may have been queued while the
-        // write was in flight. Re-queuing the stale copy would overwrite it
-        // and persist the older text as the writer's latest work.
-        if (!this.pending.has(document.id)) this.pending.set(document.id, document);
+        // Both guards are needed. HEAD's check avoids overwriting a newer edit
+        // queued while this write was in flight; the backend's `latest` map
+        // additionally rejects a stale rejection after that newer edit was
+        // already written. Re-queue only when both conditions still hold.
+        if (!this.pending.has(document.id) && this.latest.get(document.id) === document) {
+          this.pending.set(document.id, document);
+        }
       }
     }
+    // Retry failed deletions on the same save pathway. A still-failing delete
+    // keeps the flush honest (false + saveStatus error) and stays queued.
+    const deletionResult = await this.retryDeletions();
+    if (!deletionResult.ok) failed = true;
     // A fallback demotion happens inside put(); refresh the reported tier so
     // the UI never claims IndexedDB durability the app no longer has.
     const storageMode = readStorageMode(this.backend);
@@ -208,8 +283,11 @@ export class DocumentLifecycle {
   flushSync() {
     for (const document of [...this.pending.values()]) {
       const requeue = () => {
-        // Keep a newer queued edit if one arrived while the write was in flight.
-        if (!this.pending.has(document.id)) this.pending.set(document.id, document);
+        // Keep a newer queued edit if one arrived mid-write, and reject a
+        // stale rejection once a newer object for this id has been produced.
+        if (!this.pending.has(document.id) && this.latest.get(document.id) === document) {
+          this.pending.set(document.id, document);
+        }
       };
       try {
         // put() is async: without a rejection handler a failed exit write
@@ -305,6 +383,8 @@ export class DocumentLifecycle {
    */
   remove(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
     this.pending.delete(id);
+    // A removed document must never be persisted by a write still in flight.
+    this.latest.delete(id);
     const next = this.state.documents.filter((document) => document.id !== id);
     const removedActive = id === this.state.activeId;
     let statePatch: Partial<DocumentLifecycleState>;
@@ -322,12 +402,14 @@ export class DocumentLifecycle {
     return this.backend.remove(id).then(
       () => {
         this.pendingDeletions.delete(id);
+        writePersistedDeletions(this.pendingDeletions);
         return { ok: true as const };
       },
       (error: unknown) => {
-        // Keep the deletion queued: retrying is the writer's only path back to
-        // a truthful state, and the reload path honours the queue too.
+        // Keep the deletion queued and persisted: retrying is the writer's only
+        // path back to a truthful state, across reloads as well as saves.
         this.pendingDeletions.add(id);
+        writePersistedDeletions(this.pendingDeletions);
         this.setState({ saveStatus: "error" });
         return { ok: false as const, error: error instanceof Error ? error.message : "Could not delete the document from local storage." };
       },
@@ -341,6 +423,11 @@ export class DocumentLifecycle {
     return this.pendingDeletions.size > 0;
   }
 
+  /** The failed-deletion ids, for callers that need to surface them in the UI. */
+  get pendingDeletionIds(): string[] {
+    return [...this.pendingDeletions];
+  }
+
   /** Retry every failed deletion, e.g. from the save pathway. */
   async retryDeletions(): Promise<{ ok: true } | { ok: false; error: string }> {
     let firstError: string | null = null;
@@ -352,7 +439,15 @@ export class DocumentLifecycle {
         firstError ??= error instanceof Error ? error.message : "Could not delete the document from local storage.";
       }
     }
+    writePersistedDeletions(this.pendingDeletions);
     return firstError ? { ok: false as const, error: firstError } : { ok: true as const };
+  }
+
+  /** Used by load(): a still-failing deletion reports the error, others clear it. */
+  private async retryDeletionsAfterLoad() {
+    if (this.pendingDeletions.size === 0) return;
+    const result = await this.retryDeletions();
+    if (!result.ok) this.setState({ saveStatus: "error" });
   }
 
   saveSnapshot(reason: DocumentSnapshot["reason"] = "manual"): boolean {
@@ -395,14 +490,35 @@ export class DocumentLifecycle {
    */
   async replaceAll(documents: StoredDocument[], activeId?: string): Promise<{ ok: true } | { ok: false; error: string }> {
     if (documents.length === 0) return { ok: false as const, error: "That backup holds no documents to restore." };
+    // Snapshot everything we are about to disturb. A failed restore must leave
+    // the original library intact on disk AND in memory: swapping in a partial
+    // backup would erase the writer's work before the caller could abort.
+    const previousPending = new Map(this.pending);
+    const previousLatest = new Map(this.latest);
+    let original: StoredDocument[];
+    try {
+      original = await this.backend.list();
+    } catch (error) {
+      this.setState({ saveStatus: "error" });
+      return { ok: false as const, error: error instanceof Error ? error.message : "Could not read the current documents." };
+    }
     this.pending.clear();
+    this.latest.clear();
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    const restoreQueue = () => {
+      this.pending = previousPending;
+      this.latest = previousLatest;
+      // The old debounce was cleared above; re-arm it so restored pending
+      // edits still auto-save without waiting for another keystroke.
+      this.timer = previousPending.size > 0 ? setTimeout(() => void this.flush(), 500) : null;
+    };
     try {
       await this.backend.clear();
     } catch (error) {
+      restoreQueue();
       this.setState({ saveStatus: "error" });
       return { ok: false as const, error: error instanceof Error ? error.message : "Could not clear the current documents." };
     }
@@ -412,8 +528,22 @@ export class DocumentLifecycle {
         await this.backend.put(document);
       } catch {
         failed = true;
-        this.pending.set(document.id, document);
+        break;
       }
+    }
+    if (failed) {
+      // Put the original library back. Even if the rollback itself hits an
+      // error, in-memory state is left untouched and we report failure, so the
+      // caller never reloads into a half-restored workspace.
+      try {
+        await this.backend.clear();
+        for (const document of original) await this.backend.put(document);
+      } catch {
+        // Nothing more can be done here; the failure is reported below.
+      }
+      restoreQueue();
+      this.setState({ saveStatus: "error" });
+      return { ok: false as const, error: "Restore failed; the original library was preserved. Retry the restore." };
     }
     const nextActive = activeId && documents.some((document) => document.id === activeId)
       ? activeId
@@ -428,6 +558,13 @@ export class DocumentLifecycle {
     // (unit tests, deliberate in-memory mode) has no durable tier to have lost.
     const volatile = storageMode === "memory"
       && typeof (this.backend as { degraded?: boolean }).degraded === "boolean";
+    // Track the restored docs as the newest objects and clear any failed
+    // deletion ids from the previous library (remote hardening). Both sit
+    // alongside the degraded-storage detection above: a memory-only restore
+    // is still reported as failure rather than silently lost on reload.
+    for (const document of documents) this.latest.set(document.id, document);
+    this.pendingDeletions.clear();
+    writePersistedDeletions(this.pendingDeletions);
     this.setState({ documents: [...documents], activeId: nextActive, saveStatus: failed || volatile ? "error" : "saved", storageMode });
     if (failed) return { ok: false as const, error: "Some restored documents could not be saved. Nothing was reloaded; retry the restore." };
     if (volatile) return { ok: false as const, error: "The restored documents could not be saved durably on this device. Nothing was reloaded; free some storage and retry the restore." };
@@ -467,13 +604,14 @@ export class DocumentLifecycle {
         merged.renamed += 1;
       }
     }
+    for (const document of additions) this.latest.set(document.id, document);
     let failed = false;
     for (const document of additions) {
       try {
         await this.backend.put(document);
       } catch {
         failed = true;
-        this.pending.set(document.id, document);
+        if (this.latest.get(document.id) === document) this.pending.set(document.id, document);
       }
     }
     // Imports join the front of the in-memory list; the dashboard sorts by
@@ -486,6 +624,7 @@ export class DocumentLifecycle {
   /** Remove every trace of stored documents and return to a clean first-run state. */
   async clearAll(freshSeed: DocumentsSeed = this.seed): Promise<void> {
     this.pending.clear();
+    this.latest.clear();
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -493,6 +632,9 @@ export class DocumentLifecycle {
     await this.backend.clear();
     const fresh = createDocument(freshSeed.title, freshSeed.draft);
     await this.backend.put(fresh);
+    this.latest.set(fresh.id, fresh);
+    this.pendingDeletions.clear();
+    writePersistedDeletions(this.pendingDeletions);
     this.setState({ documents: [fresh], activeId: fresh.id, saveStatus: "saved" });
   }
 }

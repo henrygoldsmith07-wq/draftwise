@@ -77,6 +77,28 @@ const CATEGORY_ALIASES: Record<string, IssueCategory> = {
   consistency: "consistency",
 };
 
+// Explicit allowlist of the IssueCategory values we accept from a provider.
+// CATEGORY_ALIASES is a plain object, so a bare lookup would fall through to
+// Object.prototype for keys such as "__proto__", "constructor" or "toString"
+// and return a non-string value that later breaks React rendering.
+const VALID_CATEGORIES = new Set<string>([
+  "spelling",
+  "grammar",
+  "punctuation",
+  "clarity",
+  "conciseness",
+  "word choice",
+  "repetition",
+  "tone",
+  "formality",
+  "readability",
+  "fluency",
+  "passive voice",
+  "sentence structure",
+  "consistency",
+  "capitalization",
+]);
+
 const VALID_SEVERITIES = new Set<IssueSeverity>(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 const MAX_PROVIDER_ISSUES_PER_RESPONSE = 250;
@@ -638,7 +660,11 @@ ${chunk.text.slice(chunk.text.length - trailingLength)}
 }
 
 function normaliseCategory(value: string): IssueCategory | null {
-  return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
+  if (typeof value !== "string") return null;
+  const key = value.toLocaleLowerCase().trim();
+  if (!Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key)) return null;
+  const category = CATEGORY_ALIASES[key];
+  return VALID_CATEGORIES.has(category) ? category : null;
 }
 
 function aiIssueFingerprint(ruleId: string, original: string, replacement: string) {

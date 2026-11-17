@@ -36,7 +36,7 @@ export async function exportAsPDF(title: string, draft: string, options: PdfExpo
     body {
       font-family: Georgia, serif;
       line-height: 1.6;
-      font-size: 11pt;
+      font-size: ${(11 * Math.max(0.5, Math.min(2, fontScale))).toFixed(1)}pt;
       max-width: 90%;
       margin: 0 auto;
       padding: 20px;

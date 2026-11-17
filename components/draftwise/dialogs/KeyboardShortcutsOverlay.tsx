@@ -1,7 +1,6 @@
 "use client";
 
 import { CircleHelp } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface KeyboardShortcutsOverlayProps {
@@ -13,6 +12,8 @@ interface KeyboardShortcutsOverlayProps {
 // Only bindings that actually exist. The previous list advertised New/Import,
 // Ctrl+D, and number keys that no handler implements — pressing them did
 // nothing (or bookmarked the page), which is worse than no help at all.
+// Every entry below is wired to the global keydown handler in app/page.tsx
+// (review keys mapped in lib/review-navigation.ts); nothing is aspirational.
 const SHORTCUT_GROUPS = [
   {
     title: "Document",
@@ -29,6 +30,10 @@ const SHORTCUT_GROUPS = [
       ["Next suggestion", "⌘ + ↓ / Ctrl + ↓"],
       ["Previous suggestion", "⌘ + ↑ / Ctrl + ↑"],
       ["Accept suggestion", "⌘ + Enter / Ctrl + Enter"],
+      // Remote addition: implemented by the acceptAll branch of the same
+      // global handler. It intentionally shares modifier+Enter with the
+      // single-suggestion accept above (the handler routes by context).
+      ["Accept all visible suggestions", "⌘ + Enter / Ctrl + Enter"],
       ["Dismiss suggestion", "⌘ + Backspace / Ctrl + Backspace"],
       ["Close rewrite preview", "Esc"],
     ],

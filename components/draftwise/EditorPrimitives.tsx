@@ -10,6 +10,12 @@ import { buildExplanation, categoryColors } from "@/packages/grammar/src";
 import type { PrioritisedIssue, StylePreferences, WritingGoals, WritingIssue } from "@/packages/types/src";
 
 /**
+ * Highlight segmentation lives in `@/lib/highlight-segments` (imported above).
+ * The remote branch had an equivalent linear helper inline here; the shared
+ * lib version is a strict superset — identical linear sweep but it also
+ * accepts `activeIssueId` and exposes `isActive` — so we keep that one and
+ * drop the local duplicate (same name would otherwise be a redeclaration).
+ *
  * The mirror layer behind the transparent textarea: everything visible in the
  * editor that is not the text itself.
  *

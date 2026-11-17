@@ -156,7 +156,10 @@ test.describe("axe-core audit", () => {
     await page.getByRole("button", { name: /Use dark theme/u }).click();
     await expect(page.locator(".app-shell")).toHaveAttribute("data-theme", "dark");
     await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
-    await expect(page.getByRole("dialog")).toHaveAttribute("data-theme", "dark");
+    // Portaled dialogs inherit the palette from the document root, which
+    // PageLayout mirrors from the resolved theme; the dialog itself carries no
+    // data-theme attribute.
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     expect(await runAxe(page, "shortcuts dialog / dark", "[role=\"dialog\"]")).toEqual([]);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toBeHidden();

@@ -12,21 +12,40 @@
  * The strategy is deliberately conservative, because a service worker that
  * serves the wrong thing is worse than no service worker at all:
  *
- *   navigations        network-first, cached copy only as the offline fallback
- *   hashed build files cache-first (their URL changes when their content does)
- *   other same-origin  stale-while-revalidate
- *   everything else    untouched
+ *   navigations          network-first, cached copy only as the offline fallback
+ *   hashed build files  cache-first (their URL changes when their content does)
+ *   declared assets      stale-while-revalidate (an explicit allowlist)
+ *   everything else      untouched
  *
  * "Everything else" is the important part. Provider calls, classifier calls
  * and any other cross-origin request are never intercepted, never cached and
  * never replayed. A stale AI answer would be worse than no AI answer, and a
  * cached provider response would put the writer's draft in the cache for no
- * reason. Only the app's own shell is stored.
+ * reason. The same-origin branch is an allowlist of files this app declares,
+ * not a catch-all: on a shared origin, caching arbitrary paths or query
+ * strings could store another app's responses and replay them stale. Only
+ * the app's own shell is stored.
  */
 
 /* The cache name carries a version. Bump it when the caching rules change;
-   the old cache is dropped on activation. */
+   old caches carrying this app's prefix are dropped on activation. */
 const CACHE_NAME = "draftwise-shell-v1";
+
+/* Only caches this app owns are ever deleted. Another app sharing the origin
+   may keep its own caches, and those must survive our activation. */
+const CACHE_PREFIX = "draftwise-";
+
+/* The complete set of same-origin, non-hashed files this worker may store in
+   the stale-while-revalidate branch: exactly the static assets the app
+   declares in its manifest and precache list. No arbitrary path, no query
+   string and no API response is eligible. */
+const ALLOWED_STATIC_ASSETS = new Set([
+  "/manifest.webmanifest",
+  "/favicon.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
+]);
 
 /**
  * The shell is the document plus the hashed build files it loads.
@@ -145,7 +164,18 @@ async function pruneStaleHashedAssets() {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
-    await Promise.all(names.map((name) => (name === CACHE_NAME ? null : caches.delete(name))));
+    // Delete only old caches belonging to this app. Deleting every cache we
+    // did not create would destroy another app's data on a shared origin.
+    await Promise.all(names.map((name) => (
+      name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME
+        ? caches.delete(name)
+        : null
+    )));
+    // Our bounded pass: drop historical generations of hashed chunks from the
+    // live cache. It uses insertion-ordered keys with a shell guard, touches
+    // only this app's cache, and keeps the newest window intact. The old
+    // "delete every cache that is not the live one" rule is deliberately gone
+    // because it would destroy another app's data on a shared origin.
     await pruneStaleHashedAssets();
   })());
 });
@@ -153,6 +183,11 @@ self.addEventListener("activate", (event) => {
 /** Hashed build files never change content at the same URL. */
 function isHashedAsset(url) {
   return url.pathname.startsWith("/_next/static/");
+}
+
+/** Only this app's own declared static files may enter the catch-all cache. */
+function isAppOwnedStaticAsset(url) {
+  return ALLOWED_STATIC_ASSETS.has(url.pathname);
 }
 
 self.addEventListener("fetch", (event) => {
@@ -205,8 +240,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Other same-origin files (icons, the manifest): serve the cached copy if
-  // there is one, and refresh it in the background.
+  // The remaining branch is an allowlist, not a catch-all. Caching every
+  // same-origin GET would let this worker store — and later replay stale —
+  // responses that belong to another app on a shared origin, including
+  // arbitrary paths and query strings. Only the static files this app
+  // declares are eligible.
+  if (!isAppOwnedStaticAsset(url)) return;
+
+  // Declared static files (the manifest, icons, the favicon): serve the
+  // cached copy if there is one, and refresh it in the background.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(request);

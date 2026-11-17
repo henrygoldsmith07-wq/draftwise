@@ -2,6 +2,7 @@ import { prioritiseSuggestions, ruleFamily } from "../packages/grammar/src/index
 import type { DismissedFinding, PrioritiseResult } from "../packages/grammar/src/index.ts";
 import type { ParsedDocument } from "../packages/grammar/src/parser.ts";
 import { issueAnchors } from "./issue-actions.ts";
+import { decodeDismissalKey } from "./dismissal-key.ts";
 import { profileAdjustments } from "./writing-profile.ts";
 import type { PrioritisedIssue, StylePreferences, SuggestionTier, WritingGoals, WritingIssue, IssueCategory } from "../packages/types/src/index.ts";
 
@@ -75,23 +76,25 @@ function sentenceEdgeForwards(text: string, offset: number, limit: number): Cont
 }
 
 function dismissalFromKey(key: string): DismissedFinding | null {
-  try {
-    const parsed: unknown = JSON.parse(key);
-    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
-    const [, ruleId, , start, end, original, , before, after] = parsed;
-    if (typeof ruleId !== "string" || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || typeof original !== "string") return null;
-    return {
-      ruleId,
-      start: start as number,
-      end: end as number,
-      original,
-      // Keys written before anchoring was added carry no anchors; those
-      // dismissals fall back to matching by position.
-      ...(typeof before === "string" && typeof after === "string" ? { before, after } : {}),
-    };
-  } catch {
-    return null;
-  }
+  const parsed = decodeDismissalKey(key);
+  if (!parsed) return null;
+  return {
+    ruleId: parsed.ruleId,
+    start: parsed.start,
+    end: parsed.end,
+    // New keys carry only fingerprints; legacy keys carry the raw word.
+    ...(parsed.originalFingerprint
+      ? {
+          originalFingerprint: parsed.originalFingerprint,
+          normalisedFingerprint: parsed.normalisedFingerprint,
+        }
+      : { original: parsed.original as string }),
+    // Keys written before anchoring was added carry no anchors; those
+    // dismissals fall back to matching by position.
+    ...(parsed.before !== undefined && parsed.after !== undefined
+      ? { before: parsed.before, after: parsed.after }
+      : {}),
+  };
 }
 
 /**

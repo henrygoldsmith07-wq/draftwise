@@ -217,6 +217,11 @@ function sanitiseGoals(value: unknown, fallback: WritingGoals): WritingGoals {
     audience: isOneOf(value.audience, ["general", "academic", "professional", "technical", "casual"]) ? value.audience : fallback.audience,
     intent: isOneOf(value.intent, ["inform", "explain", "persuade", "describe", "story"]) ? value.intent : fallback.intent,
     tone: isOneOf(value.tone, ["neutral", "confident", "friendly", "professional", "formal", "casual"]) ? value.tone : fallback.tone,
+    // Remote's optional-field spreads are handled once by the bounded
+    // assignments below (cleanTerminologyList plus a single cleaned
+    // preferredReplacements). That preserves the same fields remote spread here,
+    // with stricter sanitisation, and avoids reintroducing the duplicate,
+    // unbounded swap-map spread from the old shape.
   };
   // Optional keys stay absent when neither the stored value nor the fallback
   // has them, so a normal profile round-trips with exactly the same shape.

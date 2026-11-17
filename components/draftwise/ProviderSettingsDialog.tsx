@@ -341,11 +341,12 @@ export function ProviderSettingsDialog({
 
           <div className="settings-grid">
             <label className="field-label">
-              <span>Dialect</span>
+              <span>Default dialect · new documents</span>
               <select value={style.dialect} onChange={(event) => patchStyle({ dialect: event.target.value as StylePreferences["dialect"] })}>
                 <option value="en-GB">British English</option>
                 <option value="en-US">US English</option>
               </select>
+              <em>The current draft has its own English control in the editor.</em>
             </label>
             <label className="field-label">
               <span>Passive voice</span>

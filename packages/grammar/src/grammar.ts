@@ -24,6 +24,10 @@ import {
  * quadratic in the number of findings: 700 findings in a 20k-word draft meant
  * tens of megabytes of prefix copies per pass. A bounded window keeps the
  * same answers for these local patterns.
+ *
+ * Merge note: the remote side reverted these to whole-draft `text.slice(0, p)`
+ * calls at eight sites. The bounded helpers are kept here — same answers for
+ * the local patterns, without the per-finding O(N) prefix copies.
  */
 const CONTEXT_WINDOW_CHARS = 160;
 function contextBefore(text: string, position: number) {

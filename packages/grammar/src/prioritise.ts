@@ -13,6 +13,12 @@ import {
   type SentenceSpan,
   parseDocument,
 } from "./parser.ts";
+import {
+  type AnchorFingerprint,
+  anchorMatches,
+  fingerprintText,
+  normaliseDismissalText,
+} from "./dismissal-anchor.ts";
 
 /**
  * Context-aware suggestion intelligence.
@@ -31,18 +37,24 @@ export interface DismissedFinding {
   ruleId: string;
   start: number;
   end: number;
-  original: string;
+  /**
+   * Raw text for legacy keys and callers that build findings in memory. New
+   * persisted keys carry fingerprints instead; both forms are accepted here so
+   * existing dismissals survive an upgrade.
+   */
+  original?: string;
+  /** Fingerprint of the exact matched text, used instead of storing it. */
+  originalFingerprint?: string;
+  /** Fingerprint of the trimmed, lower-cased matched text, used for indexing. */
+  normalisedFingerprint?: string;
   /**
    * Draft text immediately before and after the finding when it was dismissed.
-   *
-   * Offsets move whenever the writer edits anything above the finding, which
-   * is most of the time. Anchoring on the surrounding text instead lets a
-   * dismissal survive that edit, and keeps it tied to this particular
-   * occurrence: the same word dismissed in one place does not follow the writer
-   * to every other place it appears.
+   * The string form is legacy; new keys store a fingerprint and its length.
+   * Anchoring lets a dismissal survive edits above the finding without tying
+   * it to every other occurrence of the same word.
    */
-  before?: string;
-  after?: string;
+  before?: string | AnchorFingerprint;
+  after?: string | AnchorFingerprint;
 }
 
 export interface PrioritiseOptions {
@@ -399,7 +411,8 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
     const byRule = dismissalByRule.get(entry.ruleId);
     if (byRule) byRule.push(entry);
     else dismissalByRule.set(entry.ruleId, [entry]);
-    const textKey = entry.original.trim().toLocaleLowerCase();
+    const textKey = entry.normalisedFingerprint
+      ?? fingerprintText(normaliseDismissalText(entry.original ?? ""));
     const byText = dismissalByText.get(textKey);
     if (byText) byText.push(entry);
     else dismissalByText.set(textKey, [entry]);
@@ -422,16 +435,19 @@ export function prioritiseSuggestions(issues: WritingIssue[], options: Prioritis
     const anchored = (entry: DismissedFinding) => entry.before !== undefined
       && entry.after !== undefined
       && live !== undefined
-      && live.before.endsWith(entry.before)
-      && live.after.startsWith(entry.after);
+      && anchorMatches(live.before, entry.before, "before")
+      && anchorMatches(live.after, entry.after, "after");
+    const sameText = (entry: DismissedFinding) => entry.originalFingerprint
+      ? entry.originalFingerprint === fingerprintText(issue.original)
+      : entry.original === issue.original;
     const exact = dismissalByRule.get(issue.ruleId);
     if (exact) {
       for (const entry of exact) {
-        if (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original) return true;
+        if (entry.start === issue.start && entry.end === issue.end && sameText(entry)) return true;
         if (anchored(entry)) return true;
       }
     }
-    const similar = dismissalByText.get(issue.original.trim().toLocaleLowerCase());
+    const similar = dismissalByText.get(fingerprintText(normaliseDismissalText(issue.original)));
     if (!similar) return false;
     for (const entry of similar) {
       if (anchored(entry)) return true;

@@ -157,7 +157,7 @@ export function VersionHistoryView({ document: document, onBack, onRestore, onDu
     </div>
 
     {preview ? (
-      <div ref={previewDialogRef} className="history-preview" role="dialog" aria-modal="true" tabIndex={-1} aria-label="Version preview">
+      <div ref={previewDialogRef} className="history-preview" role="dialog" tabIndex={-1} aria-label="Version preview">
         <div className="history-preview-header">
           <strong>{REASON_LABELS[preview.reason]} · {formatTimestamp(preview.createdAt)}</strong>
           <button type="button" aria-label="Close preview" onClick={() => setPreviewId(null)}><X size={15} /></button>

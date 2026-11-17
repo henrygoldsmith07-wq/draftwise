@@ -200,7 +200,7 @@ test("backup reminder appears for real work and respects snooze and export", asy
   await page.getByRole("button", { name: "Documents" }).click();
   const banner = page.locator(".backup-banner");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText(/words live only in this browser/u);
+  await expect(banner).toContainText(/Drafts live only in this browser/u);
 
   // "Later" snoozes: gone now, and still gone after a reload.
   await banner.getByRole("button", { name: "Later" }).click();

@@ -4,17 +4,19 @@ import { ReactNode, useEffect } from "react";
 
 interface PageLayoutProps {
   children: ReactNode;
-  focusMode: boolean;
-  onFocusModeChange: (enabled: boolean) => void;
   theme: "light" | "dark";
   setTheme: (theme: "light" | "dark") => void;
+  /** Drives the focus-mode CSS that hides the editor chrome. */
+  focusMode?: boolean;
 }
 
 export function PageLayout({ 
   children, 
-  focusMode, 
-  onFocusModeChange,
   theme,
+  // Remote hardening made focusMode optional with an explicit default; this
+  // matches the auto-merged interface/return below. Our dataset.theme effect
+  // (shared by both sides) is preserved unchanged.
+  focusMode = false,
 }: PageLayoutProps) {
   // Portaled dialogs render outside .app-shell. Mirroring the resolved theme
   // onto the document root lets their shared CSS pick up the dark palette
@@ -24,14 +26,7 @@ export function PageLayout({
   }, [theme]);
 
   return (
-    <div className={`app-shell ${focusMode ? "focus-mode" : ""}`} data-theme={theme}>
-      {/* Focus mode toggle would go here - can be implemented in a separate component */}
-      <button
-        onClick={() => onFocusModeChange(!focusMode)}
-        className="focus-mode-toggle hidden"
-        aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
-      />
-      
+    <div className={`app-shell${focusMode ? " focus-mode" : ""}`} data-theme={theme}>
       {children}
     </div>
   );

@@ -42,9 +42,15 @@ test("ctrl+arrow moves the review cursor through suggestions", async ({ page }) 
   await expect(cards.nth(0)).toHaveClass(/is-active/);
 
   // A live-region announcement is the only feedback a keyboard user gets.
-  // One owner for review announcements: page.tsx's LiveRegionAnnouncer.
+  // Both sides describe the same single owner — page.tsx's LiveRegionAnnouncer
+  // (the editor's duplicate was removed so screen readers do not hear every
+  // review move twice). Keep both selectors: the aria-atomic one is the stable
+  // semantic contract; the .sr-only one is pinned to aria-atomic too so it
+  // cannot also match the separate, empty view-status div on the page.
   await expect(page.locator("[role=\"status\"][aria-atomic=\"true\"]")).toContainText(/of \d+/u);
   await expect(page.locator("[role=\"status\"][aria-atomic=\"true\"]")).toContainText(/Enter to accept/u);
+  await expect(page.locator("div[role=\"status\"][aria-atomic=\"true\"].sr-only")).toContainText(/of \d+/u);
+  await expect(page.locator("div[role=\"status\"][aria-atomic=\"true\"].sr-only")).toContainText(/Enter to accept/u);
 
   await page.keyboard.press("Control+ArrowDown");
   await expect(cards.nth(1)).toHaveClass(/is-active/);

@@ -606,9 +606,10 @@ export class ResilientDocumentBackend implements DocumentStoreBackend {
           await localTier.remove(id);
           this.current = localTier;
           this.trackCurrent();
-          // Do NOT persist this tier switch: unlike demote(), it has not
-          // copied the existing library into localStorage. Remembering it
-          // would hide an intact IndexedDB library after a reload.
+          // Do NOT persist this tier switch (remote's rememberLocalStorageTier()
+          // call is deliberately omitted here): unlike demote(), this path has
+          // not copied the existing library into localStorage, so remembering
+          // the tier would hide an intact IndexedDB library after a reload.
           return;
         } catch {
           // fall through to memory attempt below

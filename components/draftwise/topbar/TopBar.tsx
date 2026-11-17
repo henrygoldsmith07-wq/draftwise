@@ -55,7 +55,7 @@ export function TopBar({
           aria-hidden="true"
           title={saveError || savedLabel} 
           style={{
-            backgroundColor: saveError ? 'var(--error)' : undefined
+            backgroundColor: saveError ? 'var(--destructive)' : undefined
           }}
         />
         {/* Announce failures only. Including savedLabel would speak

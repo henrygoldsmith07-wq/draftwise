@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyIssueReplacements, getIssueDismissalKey, getOpenIssues, issueAnchors } from "../lib/issue-actions.ts";
+import { decodeDismissalKey } from "../lib/dismissal-key.ts";
+import { anchorMatches, fingerprintText } from "../packages/grammar/src/index.ts";
 
 const issue = (patch = {}) => ({
   id: "issue",
@@ -201,42 +203,44 @@ test("dismissal keys written before anchoring still parse", () => {
   assert.doesNotThrow(() => getOpenIssues([found], [legacy], "bad whatever follows"));
 });
 
-// A faithful copy of the pre-indexing implementation. Kept in the test as an
+// A faithful copy of the pre-indexing linear scan, updated to understand the
+// fingerprinted d2 key format via the shared decoder. Kept in the test as an
 // oracle so the large-input test can prove the indexed version returns exactly
-// the same issues as the old linear scan (including all of its edge rules).
+// the same issues as the simple linear scan (including all of its edge rules).
+// The oracle deliberately stays O(n) per issue; only the search strategy
+// differs from getOpenIssues, so any result mismatch is a real indexing bug.
 function legacySemanticKey(candidate) {
-  return JSON.stringify([candidate.ruleId, candidate.start, candidate.end, candidate.original, candidate.replacement]);
+  return JSON.stringify([
+    candidate.ruleId, candidate.start, candidate.end,
+    fingerprintText(candidate.original), fingerprintText(candidate.replacement),
+  ]);
 }
 
 function legacySemanticKeyFromStored(key) {
-  try {
-    const parsed = JSON.parse(key);
-    if (!Array.isArray(parsed) || (parsed.length !== 7 && parsed.length !== 9)) return null;
-    const [, ruleId, , start, end, original, replacement] = parsed;
-    if (!Number.isSafeInteger(start)
-      || !Number.isSafeInteger(end)
-      || typeof original !== "string"
-      || typeof replacement !== "string") return null;
-    return JSON.stringify([ruleId, start, end, original, replacement]);
-  } catch {
-    return null;
-  }
+  const parsed = decodeDismissalKey(key);
+  if (!parsed) return null;
+  const originalFp = parsed.originalFingerprint
+    ?? (parsed.original === undefined ? null : fingerprintText(parsed.original));
+  const replacementFp = parsed.replacementFingerprint
+    ?? (parsed.replacement === undefined ? null : fingerprintText(parsed.replacement));
+  if (originalFp === null || replacementFp === null) return null;
+  return JSON.stringify([parsed.ruleId, parsed.start, parsed.end, originalFp, replacementFp]);
 }
 
 function legacyIsSameDismissal(key, candidate, text) {
   if (text === undefined) return false;
-  let parsed;
-  try {
-    parsed = JSON.parse(key);
-  } catch {
-    return false;
-  }
-  if (!Array.isArray(parsed) || parsed.length !== 9) return false;
-  const [, ruleId, , , , original, replacement, before, after] = parsed;
-  if (ruleId !== candidate.ruleId || original !== candidate.original || replacement !== candidate.replacement) return false;
-  if (typeof before !== "string" || typeof after !== "string") return false;
+  const parsed = decodeDismissalKey(key);
+  if (!parsed || parsed.ruleId !== candidate.ruleId || parsed.before === undefined || parsed.after === undefined) return false;
+  const sameText = parsed.originalFingerprint
+    ? parsed.originalFingerprint === fingerprintText(candidate.original)
+    : parsed.original === candidate.original;
+  const sameReplacement = parsed.replacementFingerprint
+    ? parsed.replacementFingerprint === fingerprintText(candidate.replacement)
+    : parsed.replacement === candidate.replacement;
+  if (!sameText || !sameReplacement) return false;
   const live = issueAnchors(text, candidate);
-  return live.before.endsWith(before) && live.after.startsWith(after);
+  return anchorMatches(live.before, parsed.before, "before")
+    && anchorMatches(live.after, parsed.after, "after");
 }
 
 function legacyGetOpenIssues(issues, dismissedIssueKeys, text) {
@@ -308,15 +312,18 @@ test("getOpenIssues parses dismissal keys only once, before the per-issue filter
   const beforeFilter = fnSource.slice(0, filterAt);
   const filterCallback = fnSource.slice(filterAt);
 
-  // The static guarantee: no JSON.parse inside the per-issue callback.
-  assert.ok(!filterCallback.includes("JSON.parse"),
-    "the per-issue filter callback must not call JSON.parse on stored keys");
-  // Parsing/indexing is delegated to a single helper that runs up front.
-  assert.ok(beforeFilter.includes("parseDismissalKey("),
-    "dismissal keys must be parsed before the filter runs");
+  // The static guarantee: stored keys are never decoded inside the per-issue
+  // callback. Decoding is delegated to decodeDismissalKey, which owns the
+  // module's single JSON.parse in lib/dismissal-key.ts, and runs once up front.
+  assert.ok(!filterCallback.includes("decodeDismissalKey"),
+    "the per-issue filter callback must not decode stored keys");
+  assert.ok(beforeFilter.includes("decodeDismissalKey("),
+    "dismissal keys must be decoded before the filter runs");
   assert.ok(beforeFilter.includes("new Map"),
     "anchored dismissals must be indexed before the filter runs");
-  // Stored keys are parsed in exactly one place in the module.
-  assert.equal((source.match(/JSON\.parse\(/g) ?? []).length, 1,
-    "stored keys should be parsed in a single helper, not per issue");
+  // Parsing lives in exactly one place: the shared decodeDismissalKey helper.
+  assert.ok(!source.includes("JSON.parse("),
+    "stored keys should be parsed only in the shared decodeDismissalKey helper");
+  assert.ok(source.includes('from "./dismissal-key.ts"'),
+    "getOpenIssues must use the shared dismissal-key decoder");
 });

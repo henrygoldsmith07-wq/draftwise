@@ -72,6 +72,11 @@ async function readModules(files) {
 // consts must be concatenated after it.
 const GRAMMAR_MODULES = [
   "packages/grammar/src/util.ts",
+  // Fingerprinting helpers for dismissal anchors. prioritise.ts imports these,
+  // and because the bundler strips imports and concatenates into one scope, the
+  // module must be present here or the browser bundle throws `anchorMatches is
+  // not defined` the first time prioritiseSuggestions evaluates a dismissal.
+  "packages/grammar/src/dismissal-anchor.ts",
   "packages/grammar/src/preferences.ts",
   "packages/grammar/src/diagnostics.ts",
   "packages/grammar/src/lexicon.ts",

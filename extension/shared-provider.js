@@ -339,6 +339,57 @@ function issueTextFingerprint(text) {
 function createIssueId(ruleId, start, end, original) {
     return `${ruleId}-${start}-${end}-${issueTextFingerprint(original)}`;
 }
+/**
+ * Fingerprints for persisted dismissal keys.
+ *
+ * Dismissals are written to localStorage and travel in backup files. Storing
+ * the raw matched word and its surrounding sentences there leaves fragments of
+ * the writer's draft in a place they never asked to be — the browser extension
+ * already fingerprints its dismissal keys for exactly this reason. A fingerprint
+ * keeps equality comparisons working without keeping the text.
+ *
+ * Anchors also need prefix/suffix comparisons so a dismissal survives edits
+ * above it. Those are preserved by fingerprinting the exact window the live
+ * text will be sliced to, together with its length: the stored fingerprint
+ * equals the live fingerprint precisely when the old endsWith/startsWith check
+ * would have been true.
+ */
+/** Normalised form used when recognising the same word regardless of case. */
+function normaliseDismissalText(text) {
+    return text.trim().toLocaleLowerCase();
+}
+/**
+ * Deterministic, non-secret 64-bit-ish fingerprint. Two independently seeded
+ * 32-bit hashes make an accidental collision vanishingly unlikely for the short
+ * strings these keys carry, without pulling in a crypto dependency.
+ */
+function fingerprintText(text) {
+    let first = 2_166_136_261;
+    let second = 374_761_393;
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        first = Math.imul(first ^ code, 16_777_619);
+        second = Math.imul(second + code, 2_246_822_519);
+    }
+    return `${(first >>> 0).toString(36)}:${(second >>> 0).toString(36)}`;
+}
+function fingerprintAnchor(text) {
+    return { fingerprint: fingerprintText(text), length: text.length };
+}
+/**
+ * Match a live anchor against a stored one. Legacy keys carry the raw string;
+ * new keys carry a fingerprint and the exact length of the text it covered.
+ */
+function anchorMatches(live, stored, side) {
+    if (typeof stored === "string") {
+        return side === "before" ? live.endsWith(stored) : live.startsWith(stored);
+    }
+    const { fingerprint, length } = stored;
+    if (!Number.isSafeInteger(length) || length < 0 || length > live.length)
+        return false;
+    const window = side === "before" ? live.slice(live.length - length) : live.slice(0, length);
+    return fingerprintText(window) === fingerprint;
+}
 const DEFAULT_STYLE_PREFERENCES = {
     dialect: "en-GB",
     personalDictionary: [],
@@ -1282,6 +1333,10 @@ function findSpelling(text, preferences, document = parseDocument(text)) {
  * quadratic in the number of findings: 700 findings in a 20k-word draft meant
  * tens of megabytes of prefix copies per pass. A bounded window keeps the
  * same answers for these local patterns.
+ *
+ * Merge note: the remote side reverted these to whole-draft `text.slice(0, p)`
+ * calls at eight sites. The bounded helpers are kept here — same answers for
+ * the local patterns, without the per-finding O(N) prefix copies.
  */
 const CONTEXT_WINDOW_CHARS = 160;
 function contextBefore(text, position) {
@@ -4348,7 +4403,8 @@ function prioritiseSuggestions(issues, options = {}) {
             byRule.push(entry);
         else
             dismissalByRule.set(entry.ruleId, [entry]);
-        const textKey = entry.original.trim().toLocaleLowerCase();
+        const textKey = entry.normalisedFingerprint
+            ?? fingerprintText(normaliseDismissalText(entry.original ?? ""));
         const byText = dismissalByText.get(textKey);
         if (byText)
             byText.push(entry);
@@ -4370,18 +4426,21 @@ function prioritiseSuggestions(issues, options = {}) {
         const anchored = (entry) => entry.before !== undefined
             && entry.after !== undefined
             && live !== undefined
-            && live.before.endsWith(entry.before)
-            && live.after.startsWith(entry.after);
+            && anchorMatches(live.before, entry.before, "before")
+            && anchorMatches(live.after, entry.after, "after");
+        const sameText = (entry) => entry.originalFingerprint
+            ? entry.originalFingerprint === fingerprintText(issue.original)
+            : entry.original === issue.original;
         const exact = dismissalByRule.get(issue.ruleId);
         if (exact) {
             for (const entry of exact) {
-                if (entry.start === issue.start && entry.end === issue.end && entry.original === issue.original)
+                if (entry.start === issue.start && entry.end === issue.end && sameText(entry))
                     return true;
                 if (anchored(entry))
                     return true;
             }
         }
-        const similar = dismissalByText.get(issue.original.trim().toLocaleLowerCase());
+        const similar = dismissalByText.get(fingerprintText(normaliseDismissalText(issue.original)));
         if (!similar)
             return false;
         for (const entry of similar) {
@@ -5213,6 +5272,27 @@ const CATEGORY_ALIASES = {
     fluency: "fluency",
     consistency: "consistency",
 };
+// Explicit allowlist of the IssueCategory values we accept from a provider.
+// CATEGORY_ALIASES is a plain object, so a bare lookup would fall through to
+// Object.prototype for keys such as "__proto__", "constructor" or "toString"
+// and return a non-string value that later breaks React rendering.
+const VALID_CATEGORIES = new Set([
+    "spelling",
+    "grammar",
+    "punctuation",
+    "clarity",
+    "conciseness",
+    "word choice",
+    "repetition",
+    "tone",
+    "formality",
+    "readability",
+    "fluency",
+    "passive voice",
+    "sentence structure",
+    "consistency",
+    "capitalization",
+]);
 const VALID_SEVERITIES = new Set(["low", "medium", "high"]);
 const MAX_PROVIDER_RESPONSE_CHARS = 2_000_000;
 const MAX_PROVIDER_ISSUES_PER_RESPONSE = 250;
@@ -5731,7 +5811,13 @@ ${chunk.text.slice(chunk.text.length - trailingLength)}
 --- CONTEXT END ---`;
 }
 function normaliseCategory(value) {
-    return CATEGORY_ALIASES[value.toLocaleLowerCase().trim()] ?? null;
+    if (typeof value !== "string")
+        return null;
+    const key = value.toLocaleLowerCase().trim();
+    if (!Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key))
+        return null;
+    const category = CATEGORY_ALIASES[key];
+    return VALID_CATEGORIES.has(category) ? category : null;
 }
 function aiIssueFingerprint(ruleId, original, replacement) {
     const value = `${ruleId}\u001f${original}\u001f${replacement}`;

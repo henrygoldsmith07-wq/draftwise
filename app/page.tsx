@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { BarChart3, CircleHelp, FileText, Flag, Settings2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditorWorkspace } from "@/components/draftwise/EditorWorkspace";
 import { DocumentDashboard } from "@/components/draftwise/DocumentDashboard";
@@ -30,7 +29,8 @@ import { clearAllLocalData } from "@/lib/clear-local-data";
 import { recordAcceptance, recordDismissal, recordRuleControl } from "@/lib/writing-profile";
 import { rewriteActionsFor, significantRewriteInstruction } from "@/lib/rewrite-actions";
 import { captureBaseline, scoreProgress, type InsightBaseline } from "@/lib/insight-progress";
-import { ACTIVITY_STORAGE_KEY, countWords, creditSince } from "@/lib/writing-activity";
+import { ACTIVITY_STORAGE_KEY } from "@/lib/writing-activity";
+import { ActivityFoldTracker } from "@/lib/activity-fold";
 import { buildBackup, readRawActivityLog, serializeBackup, type RestorableBackup } from "@/lib/backup";
 import { shouldShowBackupReminder } from "@/lib/backup-reminder";
 import { resolveDocumentStyle } from "@/lib/documents";
@@ -283,7 +283,10 @@ export default function Home() {
   // bulk restores cannot mint a week's worth of words in one go.
   const [activityStore] = useState(() => new WritingActivityStore());
   const activitySummary = useSyncExternalStore(activityStore.subscribe, activityStore.getSnapshot, activityStore.getServerSnapshot);
-  const activityRef = useRef({ baselines: new Map<string, number>(), draft: "", keystrokeSinceTick: false });
+  const activityRef = useRef(new ActivityFoldTracker());
+  // Which document has had its activity baseline seeded. Guarding on it keeps
+  // activation a one-time event even though the effect reads the live draft.
+  const activatedIdRef = useRef<string | null>(null);
   const docsReady = documents.hydrated;
 
   // Register the service worker so the deployed app is a real PWA: Chrome
@@ -323,15 +326,9 @@ export default function Home() {
     let lastTick = Date.now();
     const fold = (activeMs: number) => {
       lastTick = Date.now();
-      const tracker = activityRef.current;
-      if (!tracker.keystrokeSinceTick) return;
-      tracker.keystrokeSinceTick = false;
-      const words = countWords(tracker.draft);
-      const baseline = tracker.baselines.get(activeId) ?? words;
-      tracker.baselines.set(activeId, words);
-      const credited = creditSince(baseline, words);
-      if (credited === 0) return;
-      activityStore.record(window.localStorage, credited, activeMs);
+      const result = activityRef.current.fold();
+      if (!result || result.credited === 0) return;
+      activityStore.record(window.localStorage, result.credited, activeMs);
     };
     const timer = window.setInterval(() => fold(30_000), 30_000);
     // Attribute only time actually spent: the exit fold credits the slice
@@ -340,6 +337,20 @@ export default function Home() {
     window.addEventListener("pagehide", onActivityHide);
     return () => { window.clearInterval(timer); window.removeEventListener("pagehide", onActivityHide); };
   }, [hydrated, docsReady, activeId, activityStore]);
+
+  // Activating a document closes the previous document's fold window and seeds
+  // the new baseline from its existing text. Without this, pending keystrokes
+  // were folded against the next document's word count and lost.
+  useEffect(() => {
+    if (!hydrated || !docsReady || !activeId) return;
+    if (activatedIdRef.current === activeId) return;
+    activatedIdRef.current = activeId;
+    const pending = activityRef.current.fold();
+    if (pending && pending.credited > 0) {
+      activityStore.record(window.localStorage, pending.credited, 0);
+    }
+    activityRef.current.activate(activeId, draftText);
+  }, [hydrated, docsReady, activeId, draftText, activityStore]);
 
   const updateDraft = useCallback((next: string, recordHistory = true) => {
     // Until both stores have hydrated there is no active document to write to,
@@ -351,8 +362,8 @@ export default function Home() {
       return;
     }
     documents.updateActive({ draft: next });
-    activityRef.current.keystrokeSinceTick = true;
-    activityRef.current.draft = next;
+    activityRef.current.ensureBaseline(activeId, documents.active?.draft ?? "");
+    activityRef.current.noteEdit(activeId, next);
     if (recordHistory) {
       historyStore.commit(activeId, next);
     }
@@ -431,11 +442,14 @@ export default function Home() {
   useEffect(() => {
     const fixFirst = suggestions.report.byTier["fix-first"];
     const worthMaking = suggestions.changesWorthMaking;
-    const key = `${activeId}:${draftText.length}:${worthMaking}:${fixFirst}`;
+    // Key on the analysis result, not the live draft length: the latter changed
+    // on every keystroke and queued a storage write and a second render per
+    // character. Analysis is debounced, so this now fires once per finished pass.
+    const key = `${activeId}:${analysis.analysedText}:${worthMaking}:${fixFirst}`;
     if (recordedReviewRef.current === key) return;
     recordedReviewRef.current = key;
     documents.recordReview({ worthMaking, fixFirst, analysedAt: Date.now() });
-  }, [activeId, documents, draftText, suggestions.changesWorthMaking, suggestions.report.byTier]);
+  }, [activeId, documents, analysis.analysedText, suggestions.changesWorthMaking, suggestions.report.byTier]);
 
   // Insights progress: the baseline is captured when the document becomes
   // active, so the writer sees what their editing actually changed.
@@ -690,10 +704,13 @@ export default function Home() {
       setImportError(null);
       const document = documents.createNew(result.title, result.text, defaultGoals, defaultDialect);
       historyStore.open(document.id, document.draft);
+      activityRef.current.replace(document.id, result.text);
       setDismissedIssueKeys([]);
       setActiveIssueId(null);
       setView("write");
       resetUnhidden(result.text);
+    }).catch(() => {
+      setImportError("That file could not be read. Try selecting it again.");
     });
   }, [defaultDialect, defaultGoals, documents, resetUnhidden, historyStore]);
 
@@ -901,6 +918,8 @@ export default function Home() {
     // leaving a document behind after "cleared everything".
     await documents.clearAll({ title: "Untitled draft", draft: "" });
     clearPersistedData();
+    // Kept HEAD's error handling: origin/main's bare await silently reported
+    // success even when a store (e.g. IndexedDB in another tab) failed to clear.
     const cleared = await clearAllLocalData({ documentBackend: documents.backend });
     if (!cleared.ok) {
       // A blocked IndexedDB deletion (another tab still open) is returned, not
@@ -1043,8 +1062,7 @@ export default function Home() {
 
   return (
     <PageLayout 
-      focusMode={focusMode} 
-      onFocusModeChange={setFocusMode}
+      focusMode={focusMode}
       theme={darkMode ? "dark" : "light"}
       setTheme={(theme) => updateWorkspace({ theme })}
     >
@@ -1070,7 +1088,8 @@ export default function Home() {
           onThemeChange={(dark) => updateWorkspace({ theme: dark ? "dark" : "light" })}
         />
         <OfflineNotice online={online} />
-        
+
+
         <div className="app-body">
           <RailNavigation 
             currentView={view}
@@ -1087,11 +1106,20 @@ export default function Home() {
           />
   
           <main id="main-content" tabIndex={-1}>
+            {/* Kept origin/main's richer backup reminder (Download icon and
+                clearer copy/buttons); it still renders the showBackupReminder
+                banner with both Export and Snooze actions. */}
             {showBackupReminder ? (
-              <div className="backup-banner">
-                <span role="status">Your words live only in this browser. Export a backup so you can keep them.</span>
-                <button type="button" onClick={exportBackupFromReminder}>Export backup</button>
-                <button type="button" onClick={snoozeBackupReminder}>Later</button>
+              <div className="backup-banner" role="status">
+                <Download size={16} aria-hidden="true" />
+                <div>
+                  <strong>Keep a copy of your work</strong>
+                  <span>Drafts live only in this browser. Export a backup file you own, then store it somewhere private.</span>
+                </div>
+                <div className="backup-banner-actions">
+                  <Button size="sm" onClick={exportBackupFromReminder}>Export backup</Button>
+                  <Button size="sm" variant="ghost" onClick={snoozeBackupReminder}>Later</Button>
+                </div>
               </div>
             ) : null}
             {shouldShowDashboardSkeleton ? (
@@ -1106,6 +1134,9 @@ export default function Home() {
               view === "write" ? <EditorWorkspace draft={draftText} loading={loading} goals={activeGoals} style={activeStyle} dialect={activeStyle.dialect} onDialectChange={updateDialect} analysis={analysis} openIssues={openIssues} visibleIssues={visibleIssues} suggestions={suggestions} activeIssueId={currentActiveIssueId} filter={filter} categoryFilter={categoryFilter} categoryOptions={filterableCategories(suggestions.report)} onCategoryFilterChange={setCategoryFilter} analyzing={analysisState.isAnalysing} analysisStatusLabel={analysisStatusLabel} analysisError={analysisState.error} savedLabel={savedLabel} saveError={saveError} selection={selection} selectedText={selectedText} customInstruction={customInstruction} rewritePreview={rewritePreview} suggestionsOpen={suggestionsOpen} focusMode={focusMode} canUndo={historySnapshot.canUndo} canRedo={historySnapshot.canRedo} registerTextarea={registerTextarea} registerHighlight={registerHighlight} onDraftChange={(event) => updateDraft(event.target.value)} onGoalChange={updateGoals} onFilterChange={setFilter} onSelectionChange={() => updateFromElement(textareaRef.current)} onScroll={scrollEditor} onSelectIssue={onSelectIssue} onAcceptIssue={acceptIssue} onDismissIssue={dismissIssue} onAddToDictionary={onAddToDictionary} onRuleControl={ruleControl} onApplyGroup={applyGroup} onDismissGroup={dismissGroup} reviewedCount={reviewedCount} onAcceptAll={acceptAll} onUndo={undo} onRedo={redo} onRunRewrite={runRewrite} onCustomInstructionChange={setCustomInstruction} onReplaceRewrite={applyRewrite} onCopyRewrite={copyRewrite} onRetryRewrite={retryRewrite} onCancelRewrite={cancelRewrite} onSelectRewriteAlternative={selectAlternative} onEditRewriteReplacement={editReplacement} onResetRewriteReplacement={resetReplacement} onToggleSuggestions={() => setSuggestionsOpen((value) => !value)} onToggleFocusMode={() => setFocusMode((value) => !value)} onNewDocument={newDocument} onClearDocument={clearDocument} onRestoreSample={restoreSample} onOpenShortcuts={() => setShortcutsOpen(true)} onOpenSettings={openSettings} onSelectRange={onSelectRange} /> : null
             )}
             
+            {/* openSettings (HEAD) is kept everywhere so the dialog-mount gate
+                stays consistent; the history restore uses both sides' identical
+                historyStore.reset(...) call. */}
             {view === "insights" ? <InsightsView analysis={analysis} goals={activeGoals} style={activeStyle} openIssues={openIssues} tierCounts={suggestions.report.byTier} progress={progress} activity={activitySummary} displayed={suggestions.displayed} report={suggestions.report} onBack={() => setView("write")} onOpenSettings={openSettings} onJumpToIssue={(issue) => { setView("write"); onSelectIssue(issue); }} /> : null}
             {view === "history" && documents.active ? <VersionHistoryView document={documents.active} onBack={() => setView("write")} onRestore={(snapshot) => { const before = documents.active?.draft ?? ""; documents.restoreSnapshot(documents.activeId, snapshot.id); historyStore.reset(documents.activeId, [before, snapshot.text]); setView("write"); resetUnhidden(snapshot.text); }} onDuplicateSnapshot={(snapshot) => { documents.duplicateSnapshot(documents.activeId, snapshot.id); setView("write"); }} /> : null}
             {view === "extension" ? <ExtensionGuide onOpenSettings={openSettings} /> : null}
@@ -1116,7 +1147,9 @@ export default function Home() {
       
       {/* Dialogs are mounted only once opened. They render nothing while closed,
           but mounting them still cost hydration work on every page load — work
-          that delayed first paint of the dashboard. */}
+          that delayed first paint of the dashboard. HEAD's gating is kept over
+          origin/main's eager mounting, and every dialog receives themeName so
+          portals stay dark themed (origin/main only passed it to settings). */}
       {settingsOpen || settingsDialogMounted ? <ProviderSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} settings={workspace.provider} style={workspace.style} theme={themeName} aiEnabled={workspace.aiEnabled} classifier={workspace.classifier ?? null} onSettingsChange={updateProvider} onClassifierChange={(classifier) => updateWorkspace({ classifier })} onStyleChange={updateStyle} onAiEnabledChange={updateAiEnabled} onForgetKeys={cancelRewrite} onSave={saveNow} onClearData={() => { setSettingsOpen(false); setClearDataOpen(true); }} backupDocuments={documents.documents} backupWorkspace={workspace} readBackupActivityRaw={readBackupActivityRaw} onBackupExported={markBackupExported} onRestoreBackup={restoreBackup} /> : null}
       {shortcutsOpen ? <KeyboardShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} theme={themeName} /> : null}
       {newDraftOpen ? <NewDraftDialogComponent open={newDraftOpen} onOpenChange={setNewDraftOpen} onConfirm={startNewDocument} theme={themeName} /> : null}
